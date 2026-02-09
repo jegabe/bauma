@@ -104,6 +104,13 @@ containg the function definitions, which can be linked afterwards.
 	#else
 		#error "Can't detect printf prefix for bauma_(u)intmax_t"
 	#endif
+	#if UINTMAX_MAX > 0xFFFFFFFFFFFFFFFF
+		#error "Can't handle UINTMAX_MAX greater than 64 bits, please fix"
+	#elif UINTMAX_MAX >= 0xFFFFFFFFFFFFFFFF
+		#define BAUMA_UINTMAX_MAX_DECIMAL_LENGTH 20u
+	#elif UINTMAX_MAX >= 0xFFFFFFFF
+		#define BAUMA_UINTMAX_MAX_DECIMAL_LENGTH 11u
+	#endif
 #else /* older compiler */
 	/* This is a guess but usually those types reflect
 		the maximum */
@@ -118,8 +125,23 @@ containg the function definitions, which can be linked afterwards.
 	#else
 		#error "Can't detect printf prefix for bauma_(u)intmax_t"
 	#endif
+	#if SIZE_MAX > 0xFFFFFFFFFFFFFFFF
+		#error "Can't handle UINTMAX_MAX greater than 64 bits, please fix"
+	#elif SIZE_MAX >= 0xFFFFFFFFFFFFFFFF
+		#define BAUMA_UINTMAX_MAX_DECIMAL_LENGTH 20u
+	#elif SIZE_MAX >= 0xFFFFFFFF
+		#define BAUMA_UINTMAX_MAX_DECIMAL_LENGTH 11u
+	#endif
 #endif
 
+/*
+	When printf'ing a double with %f, this is the max. num of characters put out:
+	- up to 309 digits before the decimal for representing x*10^308 in decimal
+	- The decimal separator itself
+	- 6 decimal digits after the dot
+	- maybe a minus sign taking an additional byte
+*/
+#define BAUMA_DOUBLE_MAX_DECIMAL_LEN 317u
 
 /*
 	Define this before including when something else is needed,
@@ -192,6 +214,8 @@ BAUMA_DEF void *bauma_default_dynmem_handler(void *pOld, size_t newSsize, size_t
 
 /*! Short-hand for just reallicating freeing memoy, ignoring the real block size */
 #define bauma_default_realloc(p, n) bauma_default_dynmem_handler(p, n, NULL)
+
+
 
 /*! Can be used as element destructor (e.g. for vectors) when the element
     type is just a pointer to a memory block allocated with bauma_default_dynmem_handler.
@@ -361,22 +385,39 @@ BAUMA_DEF void BAUMA_DEBUG_SUFFIX(bauma_Vector_append_impl)(
 	    pElement < ((dataType*)(((char*)(pSelf)->d.pData) + ((pSelf)->size) * (pSelf)->elementSize)); \
 		pElement = ((dataType*)(((char*)(pElement)) + (pSelf)->elementSize)))
 
+BAUMA_DEF void bauma_Vector_callForEach(bauma_Vector *pSelf, bauma_pForEachHandler pFunc, void *pOptUserData);
+
 typedef struct bauma_StringBuilder {
 	char* pStr;
 	size_t size; /* not counting the null terminator */
 	size_t capacity;
-	bauma_pDynmem_handler pMemHandler
+	bauma_pDynmem_handler pMemHandler;
 } bauma_StringBuilder;
+
+BAUMA_DEF void bauma_StringBuilder_construct_ext(bauma_StringBuilder *pSelf, size_t capacity, bauma_pDynmem_handler pMemHandler);
+#define bauma_StringBuilder_construct(pSelf) bauma_StringBuilder_construct_ext((pSelf), BAUMA_INITIAL_CAPACITY, &bauma_default_dynmem_handler)
+BAUMA_DEF void bauma_StringBuilder_destruct(bauma_StringBuilder *pSelf);
+#define baume_StringBuilder_getStr(pSelf) ((pSelf)->pStr)
+#define baume_StringBuilder_getSize(pSelf) ((pSelf)->size)
+BAUMA_DEF char *bauma_StringBuilder_destructAndRelease(bauma_StringBuilder *pSelf);
+BAUMA_DEF void bauma_StringBuilder_reserve(bauma_StringBuilder *pSelf, size_t num);
+BAUMA_DEF void bauma_StringBuilder_appendGeneric(bauma_StringBuilder *pSelf, size_t capacityIncrease, const char *pFmt, ...);
+BAUMA_DEF void bauma_StringBuilder_appendStr(bauma_StringBuilder *pSelf, const char *p);
+BAUMA_DEF void bauma_StringBuilder_appendStrWithLen(bauma_StringBuilder *pSelf, const char *p, size_t len);
+BAUMA_DEF void bauma_StringBuilder_appendChar(bauma_StringBuilder *pSelf, int c, size_t count);
+BAUMA_DEF void bauma_StringBuilder_appendSigned(bauma_StringBuilder *pSelf, bauma_intmax_t i);
+BAUMA_DEF void bauma_StringBuilder_appendUnsigned(bauma_StringBuilder *pSelf, bauma_uintmax_t i);
+BAUMA_DEF void bauma_StringBuilder_appendDouble(bauma_StringBuilder *pSelf, double d);
+BAUMA_DEF void bauma_StringBuilder_appendBool(bauma_StringBuilder *pSelf, bauma_bool_t b);
 
 #ifdef __cplusplus
 	} /* extern "C" */
 #endif
 
-BAUMA_DEF void bauma_Vector_callForEach(bauma_Vector *pSelf, bauma_pForEachHandler pFunc, void *pOptUserData);
-
 #ifdef BAUMA_CCAL_IMPLEMENTATION
 
 #include <string.h> /* for all kind of memory and string things */
+#include <stdarg.h> /* for variadic functions */
 #ifdef bauma_custom_assert
 	#define bauma_assert(x) bauma_custom_assert(x)
 #else
@@ -401,7 +442,7 @@ BAUMA_DEF void bauma_exit_err(const char *msg) {
 #else
 	fprintf(stderr, "Error: %s. Terminating.\n", msg);
 	fflush(stderr);
-	exit(1);
+	abort();
 #endif
 }
 
@@ -446,7 +487,6 @@ BAUMA_DEF void bauma_memblock_destructor(void* ppMemBlock) {
 	bauma_default_dynmem_handler(pMemBlock, 0, NULL);
 }
 
-
 BAUMA_DEF char* bauma_strdup_ext(const char* p, bauma_pDynmem_handler alloc) {
 	size_t l;
 	char *c;
@@ -490,6 +530,9 @@ BAUMA_DEF void bauma_Vector_destruct(bauma_Vector *pSelf) {
 		}
 	}
 	(*pSelf->pMemHandler)(pSelf->d.pData, 0, NULL);
+#if BAUMA_DEBUG
+	memset(pSelf, 0xFF, sizeof(*pSelf));
+#endif
 }
 
 BAUMA_DEF void bauma_Vector_reserve(bauma_Vector *pSelf, size_t num) {
@@ -550,6 +593,133 @@ BAUMA_DEF void bauma_Vector_callForEach(bauma_Vector *pSelf, bauma_pForEachHandl
 	for (i=0; i<pSelf->size; ++i) {
 		(*pFunc)(p, pOptUserData);
 		p += pSelf->elementSize;
+	}
+}
+
+BAUMA_DEF void bauma_StringBuilder_construct_ext(bauma_StringBuilder *pSelf, size_t capacity, bauma_pDynmem_handler pMemHandler) {
+	size_t realCapacity;
+	bauma_assert(pSelf != NULL);
+	bauma_assert(capacity > 0);
+	bauma_assert(pMemHandler != NULL);
+	pSelf->pStr = (*pMemHandler)(NULL, capacity + 1u, &realCapacity);
+	pSelf->pStr[0] = '\0';
+	pSelf->size = 0;
+	pSelf->capacity = realCapacity - 1u;
+	pSelf->pMemHandler = pMemHandler;
+}
+
+BAUMA_DEF void bauma_StringBuilder_destruct(bauma_StringBuilder *pSelf) {
+	bauma_assert(pSelf != NULL);
+	bauma_assert(pSelf->pMemHandler != NULL);
+	(*pSelf->pMemHandler)(pSelf->pStr, 0, NULL);
+#if BAUMA_DEBUG
+	memset(pSelf, 0xFF, sizeof(*pSelf));
+#endif
+}
+
+BAUMA_DEF char *bauma_StringBuilder_destructAndRelease(bauma_StringBuilder *pSelf) {
+	char *p;
+	bauma_assert(pSelf != NULL);
+	bauma_assert(pSelf->pStr != NULL);
+	bauma_assert(pSelf->pStr[pSelf->size] == '\0');
+	p = pSelf->pStr;
+#if BAUMA_DEBUG
+	memset(pSelf, 0xFF, sizeof(*pSelf));
+#endif
+	return p;
+}
+
+BAUMA_DEF void bauma_StringBuilder_reserve(bauma_StringBuilder *pSelf, size_t num) {
+	size_t newCap;
+	size_t realNewCap;
+	bauma_assert(pSelf != NULL);
+	bauma_assert(pSelf->pMemHandler != NULL);
+	if ((pSelf->size + num) <= (pSelf->capacity)) {
+		return;
+	}
+	newCap = pSelf->capacity;
+	while((pSelf->size + num) > newCap) {
+		newCap *= BAUMA_CAPACITY_GROWTH;
+	}
+	bauma_assert(pSelf->pMemHandler != NULL);
+	pSelf->pStr = (*pSelf->pMemHandler)(pSelf->pStr, newCap + 1u, &realNewCap);
+	pSelf->capacity = realNewCap - 1u;
+}
+
+BAUMA_DEF void bauma_StringBuilder_appendGeneric(bauma_StringBuilder *pSelf, size_t capacityIncrease, const char *pFmt, ...) {
+	va_list ap;
+	int numPrinted;
+	bauma_assert(pSelf != NULL);
+	bauma_assert(capacityIncrease > 0);
+	bauma_StringBuilder_reserve(pSelf, capacityIncrease);
+	va_start(ap, pFmt);
+#if BAUMA_MODERN_C
+	numPrinted = vsnprintf(pSelf->pStr + pSelf->size, capacityIncrease, pFmt, ap);
+#else
+	numPrinted = vsprintf(pSelf->pStr + pSelf->size, pFmt, ap);
+#endif
+	va_end(ap);
+	if (numPrinted < 0) {
+		bauma_exit_err("vs(n)printf returned negative value in bauma_StringBuilder_appendGeneric");
+	}
+	bauma_assert(numPrinted < capacityIncrease);
+	if ((size_t)numPrinted >= capacityIncrease) {
+		bauma_exit_err("Too small capacityIncrease in bauma_StringBuilder_appendGeneric, memory may be corrupted");
+	}
+	pSelf->size += (size_t)numPrinted;
+}
+
+BAUMA_DEF void bauma_StringBuilder_appendStr(bauma_StringBuilder *pSelf, const char *p) {
+	size_t l;
+	bauma_assert(pSelf != NULL);
+	bauma_assert(p != NULL);
+	l = strlen(p);
+	bauma_StringBuilder_reserve(pSelf, l);
+	memcpy(pSelf->pStr + pSelf->size, p, l + 1u);
+	pSelf->size += l;
+}
+
+BAUMA_DEF void bauma_StringBuilder_appendStrWithLen(bauma_StringBuilder *pSelf, const char *p, size_t len) {
+	bauma_assert(pSelf != NULL);
+	bauma_assert(p != NULL);
+	bauma_StringBuilder_reserve(pSelf, len);
+	memcpy(pSelf->pStr + pSelf->size, p, len);
+	pSelf->size += len;
+	pSelf->pStr[pSelf->size] = '\0';
+
+}
+
+BAUMA_DEF void bauma_StringBuilder_appendChar(bauma_StringBuilder *pSelf, int c, size_t count) {
+	size_t i;
+	char* p;
+	bauma_assert(pSelf != NULL);
+	bauma_StringBuilder_reserve(pSelf, count);
+	p = pSelf->pStr + pSelf->size;
+	for (i=0; i<count; ++i) {
+		*p++ = (char)((unsigned char)c);
+	}
+	pSelf->size += count;
+	pSelf->pStr[pSelf->size] = '\0';
+}
+
+BAUMA_DEF void bauma_StringBuilder_appendSigned(bauma_StringBuilder *pSelf, bauma_intmax_t i) {
+	bauma_StringBuilder_appendGeneric(pSelf, BAUMA_UINTMAX_MAX_DECIMAL_LENGTH, "%" BAUMA_INTMAX_PREFIX "d", i);
+}
+
+BAUMA_DEF void bauma_StringBuilder_appendUnsigned(bauma_StringBuilder *pSelf, bauma_uintmax_t i) {
+	bauma_StringBuilder_appendGeneric(pSelf, BAUMA_UINTMAX_MAX_DECIMAL_LENGTH, "%" BAUMA_INTMAX_PREFIX "u", i);
+}
+
+BAUMA_DEF void bauma_StringBuilder_appendDouble(bauma_StringBuilder *pSelf, double d) {
+	bauma_StringBuilder_appendGeneric(pSelf, BAUMA_DOUBLE_MAX_DECIMAL_LEN, "%f", d);
+}
+
+BAUMA_DEF void bauma_StringBuilder_appendBool(bauma_StringBuilder *pSelf, bauma_bool_t b) {
+	if (b) {
+		bauma_StringBuilder_appendStrWithLen(pSelf, "true", 4u);
+	}
+	else {
+		bauma_StringBuilder_appendStrWithLen(pSelf, "false", 5u);
 	}
 }
 

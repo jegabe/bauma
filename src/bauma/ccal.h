@@ -134,18 +134,18 @@ containg the function definitions, which can be linked afterwards.
 	#endif
 #endif
 
-/*
-	When printf'ing a double with %f, this is the max. num of characters put out:
-	- up to 309 digits before the decimal for representing x*10^308 in decimal
-	- The decimal separator itself
-	- 6 decimal digits after the dot
-	- maybe a minus sign taking an additional byte
+/*!
+When printf'ing a double with %f, this is the max. num of characters put out:
+- up to 309 digits before the decimal for representing x*10^308 in decimal
+- The decimal separator itself
+- 6 decimal digits after the dot
+- maybe a minus sign taking an additional byte
 */
 #define BAUMA_DOUBLE_MAX_DECIMAL_LEN 317u
 
 /*
-	Define this before including when something else is needed,
-	such as "static inline" or "declspec(dllimport)"
+Define this before including when something else is needed,
+such as "static inline" or "declspec(dllimport)"
 */
 #ifndef BAUMA_DEF
 	#ifdef BAUMA_DYNAMIC_LINKAGE
@@ -185,24 +185,22 @@ typedef void (*bauma_pDestructor)(void* pCurrentElement);
 
 typedef void (*bauma_pForEachHandler)(void *pCurrentElement, void *pOptUserData);
 
-/*!
-	\brief Prints error message to stderr and calls exit(1) to terminate the application
-*/
+/*! \brief Prints error message to stderr and calls exit(1) to terminate the application */
 BAUMA_DEF void bauma_exit_err(const char *msg);
 
 /*!
-  \brief To allocate, re-allocate and free memory according to bauma_memalloc_function.
+\brief To allocate, re-allocate and free memory according to bauma_memalloc_function.
 
-  This is designed to behave more well-defined than plain realloc(): When going out of memory,
-  the application is terminated instead of returning NULL pointer; when size is zero, NULL
-  is guaranteed to be returned since that is a legitimate pointer to a memory block of size zero.
-  The realsize parameter is optional and can be used when the memory allocator is smart enough to
-  know the real memory block sizes which might be greater than size. This info can be used
-  to make smarter reallocations, but the default implementation based on malloc/realloc/free can
-  of course not know that.
-  \param pOld Old memory block or NULL to allocate a new memory block
-  \param newSize Wanted memory block size or 0 to deallocate
-  \param pOptRealSize Output parameter receiving the number of allocated bytes
+This is designed to behave more well-defined than plain realloc(): When going out of memory,
+the application is terminated instead of returning NULL pointer; when size is zero, NULL
+is guaranteed to be returned since that is a legitimate pointer to a memory block of size zero.
+The realsize parameter is optional and can be used when the memory allocator is smart enough to
+know the real memory block sizes which might be greater than size. This info can be used
+to make smarter reallocations, but the default implementation based on malloc/realloc/free can
+of course not know that.
+\param pOld Old memory block or NULL to allocate a new memory block
+\param newSize Wanted memory block size or 0 to deallocate
+\param pOptRealSize Output parameter receiving the number of allocated bytes
 */
 BAUMA_DEF void *bauma_default_dynmem_handler(void *pOld, size_t newSsize, size_t *pOptRealSize);
 
@@ -216,61 +214,61 @@ BAUMA_DEF void *bauma_default_dynmem_handler(void *pOld, size_t newSsize, size_t
 #define bauma_default_realloc(p, n) bauma_default_dynmem_handler(p, n, NULL)
 
 
-
-/*! Can be used as element destructor (e.g. for vectors) when the element
-    type is just a pointer to a memory block allocated with bauma_default_dynmem_handler.
-    De-references the pointer (after casting it to void**) an calls
-    bauma_default_dynmem_handler on the de-referenced pointer to free the memory
-    block. Usage example: bauma_Vector constructed with "char*" as data type where
-    each element is a heap-allocated string (e.g. created by bauma_strdup).
-	ATTENTION: This is a very simple implementation; For more complex elements that
-    also need destruction besides freeing of memory, this function might not do enough.
-    So this is just for memory blocks containing plain old data.
+/*!
+Can be used as element destructor (e.g. for vectors) when the element
+type is just a pointer to a memory block allocated with bauma_default_dynmem_handler.
+De-references the pointer (after casting it to void**) an calls
+bauma_default_dynmem_handler on the de-referenced pointer to free the memory
+block. Usage example: bauma_Vector constructed with "char*" as data type where
+each element is a heap-allocated string (e.g. created by bauma_strdup).
+ATTENTION: This is a very simple implementation; For more complex elements that
+also need destruction besides freeing of memory, this function might not do enough.
+So this is just for memory blocks containing plain old data.
  */
 BAUMA_DEF void bauma_memblock_destructor(void* ppMemBlock);
 
 /*
-	\brief Allocates a copy of the passed null-terminated string and returns it
-	\param p A null-terminated string
-	\param alloc Memory allocator to be used
+\brief Allocates a copy of the passed null-terminated string and returns it
+\param p A null-terminated string
+\param alloc Memory allocator to be used
 */
 BAUMA_DEF char* bauma_strdup_ext(const char* p, bauma_pDynmem_handler alloc);
 
 /*!
-	\brief Short-hand of bauma_strdup_ext() using the default allocator
-	\param p A null-terminated string
+\brief Short-hand of bauma_strdup_ext() using the default allocator
+\param p A null-terminated string
 */
 #define bauma_strdup(p) bauma_strdup_ext(p, &bauma_default_dynmem_handler)
 
 /*!
-	\brief Minimalistic approach for dynamically growing array.
+\brief Minimalistic approach for dynamically growing array.
 
-	To use it, define a struct having 3 elements: items, size and capacity,
-	just like this:
-	\code
-	typedef struct Ints
-	{
-		int *items;
-		size_t size;
-		size_t capacity;
-	} Ints;
-	\endcode
-	and intialize that with "{0}". After that, bauma_dynarray_append can be used to dynamically
-	append items, doing reallocations where needed. Full example:
-	\code
-	typedef struct Ints
-	{
-		int *items;
-		size_t size;
-		size_t capacity;
-	} Ints;
+To use it, define a struct having 3 elements: items, size and capacity,
+just like this:
+\code
+typedef struct Ints
+{
+	int *items;
+	size_t size;
+	size_t capacity;
+} Ints;
+\endcode
+and intialize that with "{0}". After that, bauma_dynarray_append can be used to dynamically
+append items, doing reallocations where needed. Full example:
+\code
+typedef struct Ints
+{
+	int *items;
+	size_t size;
+	size_t capacity;
+} Ints;
 
-	Ints ints = {0};
-	bauma_dynarray_append(&ints, int, 0);
-	bauma_dynarray_append(&ints, int, 0);
-	bauma_dynarray_append(&ints, int, 0);
-	bauma_default_free(ints.items);
-	\endcode
+Ints ints = {0};
+bauma_dynarray_append(&ints, int, 0);
+bauma_dynarray_append(&ints, int, 0);
+bauma_dynarray_append(&ints, int, 0);
+bauma_default_free(ints.items);
+\endcode
 */
 #define bauma_dynarray_append(d, t, e) \
 	do { \
@@ -792,7 +790,8 @@ void test_dynarray_append(void) {
 	bauma_default_free(ints.items);
 }
 
-void test_dummy_int_destruct(int*) {
+void test_dummy_int_destruct(int* p) {
+	(void)p;
 }
 
 void test_vector_construct(void) {

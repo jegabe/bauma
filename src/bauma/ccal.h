@@ -205,13 +205,13 @@ of course not know that.
 BAUMA_DEF void *bauma_default_dynmem_handler(void *pOld, size_t newSsize, size_t *pOptRealSize);
 
 /*! Short-hand for just allocating memory */
-#define bauma_default_malloc(s) bauma_default_dynmem_handler(NULL, s, NULL)
+#define bauma_malloc(s) bauma_default_dynmem_handler(NULL, s, NULL)
 
 /*! Short-hand for just freeing memoy*/
-#define bauma_default_free(p) (void)bauma_default_dynmem_handler(p, 0, NULL)
+#define bauma_free(p) (void)bauma_default_dynmem_handler(p, 0, NULL)
 
 /*! Short-hand for just reallicating freeing memoy, ignoring the real block size */
-#define bauma_default_realloc(p, n) bauma_default_dynmem_handler(p, n, NULL)
+#define bauma_realloc(p, n) bauma_default_dynmem_handler(p, n, NULL)
 
 
 /*!
@@ -267,7 +267,7 @@ Ints ints = {0};
 bauma_dynarray_append(&ints, int, 0);
 bauma_dynarray_append(&ints, int, 0);
 bauma_dynarray_append(&ints, int, 0);
-bauma_default_free(ints.items);
+bauma_free(ints.items);
 \endcode
 */
 #define bauma_dynarray_append(d, t, e) \
@@ -649,7 +649,6 @@ BAUMA_DEF char *bauma_StringBuilder_release(bauma_StringBuilder *pSelf) {
 BAUMA_DEF void bauma_StringBuilder_reserve(bauma_StringBuilder *pSelf, size_t num) {
 	size_t newCap;
 	size_t realNewCap;
-	char* pOldStr;
 	bauma_assert(pSelf != NULL);
 	bauma_assert(pSelf->pMemHandler != NULL);
 	if ((pSelf->size + num) <= (pSelf->capacity)) {
@@ -666,12 +665,12 @@ BAUMA_DEF void bauma_StringBuilder_reserve(bauma_StringBuilder *pSelf, size_t nu
 	}
 	bauma_assert(pSelf->pMemHandler != NULL);
 	if (pSelf->pStr == BAUMA_NULLSTR) {
-		pOldStr = NULL;
+		pSelf->pStr = (*pSelf->pMemHandler)(NULL, newCap + 1u, &realNewCap);
+		pSelf->pStr[0] = '\0';
 	}
 	else {
-		pOldStr = pSelf->pStr;
+		pSelf->pStr = (*pSelf->pMemHandler)(pSelf->pStr, newCap + 1u, &realNewCap);
 	}
-	pSelf->pStr = (*pSelf->pMemHandler)(pOldStr, newCap + 1u, &realNewCap);
 	pSelf->capacity = realNewCap - 1u;
 }
 
@@ -681,6 +680,7 @@ BAUMA_DEF void bauma_StringBuilder_appendGeneric(bauma_StringBuilder *pSelf, siz
 	bauma_assert(pSelf != NULL);
 	bauma_assert(capacityIncrease > 0);
 	bauma_StringBuilder_reserve(pSelf, capacityIncrease);
+	++capacityIncrease; /* reserve aways allocates one byte more */
 	va_start(ap, pFmt);
 #if BAUMA_MODERN_C
 	numPrinted = vsnprintf(pSelf->pStr + pSelf->size, capacityIncrease, pFmt, ap);
@@ -792,7 +792,7 @@ void test_strdup(void) {
 	p = bauma_strdup("Hello");
 	BAUMA_EXPECT(p != NULL);
 	BAUMA_EXPECT(strcmp(p, "Hello") == 0);
-	bauma_default_free(p);
+	bauma_free(p);
 }
 
 typedef struct Ints {
@@ -818,7 +818,7 @@ void test_dynarray_append(void) {
 	bauma_dynarray_append(&ints, int, BAUMA_INITIAL_CAPACITY);
 	BAUMA_EXPECT(ints.capacity == (BAUMA_INITIAL_CAPACITY * BAUMA_CAPACITY_GROWTH));
 
-	bauma_default_free(ints.items);
+	bauma_free(ints.items);
 }
 
 void test_dummy_int_destruct(int* p) {
@@ -929,6 +929,68 @@ void test_vector_callForEach(void) {
 	bauma_Vector_destruct(&v);
 }
 
+test_stringBuilder_construct(void) {
+	bauma_StringBuilder sb;
+	bauma_StringBuilder_construct(&sb);
+	BAUMA_EXPECT(sb.pStr = BAUMA_NULLSTR);
+	BAUMA_EXPECT(sb.size == 0);
+	BAUMA_EXPECT(sb.capacity == 0);
+	BAUMA_EXPECT(sb.pMemHandler = &bauma_default_dynmem_handler);
+	bauma_StringBuilder_destruct(&sb);
+}
+
+test_stringBuilder_release(void) {
+	bauma_StringBuilder sb;
+	char *p;
+	bauma_StringBuilder_construct(&sb);
+	bauma_StringBuilder_appendStr(&sb, "Hello");
+	p = bauma_StringBuilder_release(&sb);
+	BAUMA_EXPECT(strcmp(p, "Hello") == 0);
+	bauma_free(p);
+	/* State after release() should be same as after construction */
+	BAUMA_EXPECT(sb.pStr = BAUMA_NULLSTR);
+	BAUMA_EXPECT(sb.size == 0);
+	BAUMA_EXPECT(sb.capacity == 0);
+	BAUMA_EXPECT(sb.pMemHandler = &bauma_default_dynmem_handler);
+	bauma_StringBuilder_destruct(&sb);
+	/* Release of empty string should heap-allocate: */
+	bauma_StringBuilder_construct(&sb);
+	p = bauma_StringBuilder_release(&sb);
+	bauma_StringBuilder_destruct(&sb);
+	BAUMA_EXPECT(strcmp(p, "") == 0);
+	bauma_free(p);
+}
+
+test_stringBuilder_reserve(void) {
+	bauma_StringBuilder sb;
+	bauma_StringBuilder_construct(&sb);
+	BAUMA_EXPECT(sb.pStr == BAUMA_NULLSTR);
+	BAUMA_EXPECT(sb.size == 0);
+	BAUMA_EXPECT(sb.capacity == 0);
+	bauma_StringBuilder_reserve(&sb, 1u);
+	BAUMA_EXPECT(sb.pStr != BAUMA_NULLSTR);
+	BAUMA_EXPECT(sb.pStr[0] == '\0');
+	BAUMA_EXPECT(sb.size == 0);
+	BAUMA_EXPECT(sb.capacity == BAUMA_INITIAL_CAPACITY);
+	bauma_StringBuilder_destruct(&sb);
+}
+
+test_stringBuilder_appendGeneric(void) {
+	bauma_StringBuilder sb;
+	bauma_StringBuilder_construct(&sb);
+	bauma_StringBuilder_appendGeneric(&sb, 3u, "%d", 123);
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&sb), "123") == 0);
+	bauma_StringBuilder_destruct(&sb);
+}
+
+test_stringBuilder_appendStr(void) {}
+test_stringBuilder_appendStrWithLen(void) {}
+test_stringBuilder_appendChar(void) {}
+test_stringBuilder_appendSigned(void) {}
+test_stringBuilder_appendUnsigned(void) {}
+test_stringBuilder_appendDouble(void) {}
+test_stringBuilder_appendBool(void) {}
+
 #ifdef __cplusplus
 	} /* extern "C" */
 #endif
@@ -944,6 +1006,18 @@ int main(int argc, char *argv[]) {
 	BAUMA_TEST(test_vector_forEach);
 	BAUMA_TEST(test_vector_of_strings);
 	BAUMA_TEST(test_vector_callForEach);
+	BAUMA_TEST(test_stringBuilder_construct);
+	BAUMA_TEST(test_stringBuilder_release);
+	BAUMA_TEST(test_stringBuilder_reserve);
+	BAUMA_TEST(test_stringBuilder_appendGeneric);
+	BAUMA_TEST(test_stringBuilder_appendStr);
+	BAUMA_TEST(test_stringBuilder_appendStrWithLen);
+	BAUMA_TEST(test_stringBuilder_appendChar);
+	BAUMA_TEST(test_stringBuilder_appendSigned);
+	BAUMA_TEST(test_stringBuilder_appendUnsigned);
+	BAUMA_TEST(test_stringBuilder_appendDouble);
+	BAUMA_TEST(test_stringBuilder_appendBool);
+
 	printf("All tests passed.\n");
 	fflush(stdout);
 	return 0;

@@ -395,9 +395,9 @@ typedef struct bauma_StringBuilder {
 BAUMA_DEF void bauma_StringBuilder_construct_ext(bauma_StringBuilder *pSelf, size_t capacity, bauma_pDynmem_handler pMemHandler);
 #define bauma_StringBuilder_construct(pSelf) bauma_StringBuilder_construct_ext((pSelf), BAUMA_INITIAL_CAPACITY, &bauma_default_dynmem_handler)
 BAUMA_DEF void bauma_StringBuilder_destruct(bauma_StringBuilder *pSelf);
-#define baume_StringBuilder_getStr(pSelf) ((pSelf)->pStr)
-#define baume_StringBuilder_getSize(pSelf) ((pSelf)->size)
-BAUMA_DEF char *bauma_StringBuilder_destructAndRelease(bauma_StringBuilder *pSelf);
+#define bauma_StringBuilder_getStr(pSelf) ((pSelf)->pStr)
+#define bauma_StringBuilder_getSize(pSelf) ((pSelf)->size)
+BAUMA_DEF char *bauma_StringBuilder_release(bauma_StringBuilder *pSelf);
 BAUMA_DEF void bauma_StringBuilder_reserve(bauma_StringBuilder *pSelf, size_t num);
 BAUMA_DEF void bauma_StringBuilder_appendGeneric(bauma_StringBuilder *pSelf, size_t capacityIncrease, const char *pFmt, ...);
 BAUMA_DEF void bauma_StringBuilder_appendStr(bauma_StringBuilder *pSelf, const char *p);
@@ -594,53 +594,84 @@ BAUMA_DEF void bauma_Vector_callForEach(bauma_Vector *pSelf, bauma_pForEachHandl
 	}
 }
 
+/*
+  An empty StringBuilder shouldn't need to allocate memory; on the other hand,
+  the contained string always should point to something valid and
+  null-terminated.
+  BAUMA_NULLSTR is used for the case that nothing has been appended yet,
+  so that bauma_StringBuilder_getStr() always returns a valid string.
+*/
+static const char BAUMA_NULLSTR_[1] = {'\0'};
+#define BAUMA_NULLSTR ((char*)BAUMA_NULLSTR_)
+
 BAUMA_DEF void bauma_StringBuilder_construct_ext(bauma_StringBuilder *pSelf, size_t capacity, bauma_pDynmem_handler pMemHandler) {
 	size_t realCapacity;
 	bauma_assert(pSelf != NULL);
 	bauma_assert(capacity > 0);
 	bauma_assert(pMemHandler != NULL);
-	pSelf->pStr = (*pMemHandler)(NULL, capacity + 1u, &realCapacity);
-	pSelf->pStr[0] = '\0';
+	pSelf->pStr = BAUMA_NULLSTR;
 	pSelf->size = 0;
-	pSelf->capacity = realCapacity - 1u;
+	pSelf->capacity = 0;
 	pSelf->pMemHandler = pMemHandler;
 }
 
 BAUMA_DEF void bauma_StringBuilder_destruct(bauma_StringBuilder *pSelf) {
 	bauma_assert(pSelf != NULL);
 	bauma_assert(pSelf->pMemHandler != NULL);
-	(*pSelf->pMemHandler)(pSelf->pStr, 0, NULL);
+	if (pSelf->pStr != BAUMA_NULLSTR) {
+		(*pSelf->pMemHandler)(pSelf->pStr, 0, NULL);
+	}
 #if BAUMA_DEBUG
 	memset(pSelf, 0xFF, sizeof(*pSelf));
 #endif
 }
 
-BAUMA_DEF char *bauma_StringBuilder_destructAndRelease(bauma_StringBuilder *pSelf) {
+BAUMA_DEF char *bauma_StringBuilder_release(bauma_StringBuilder *pSelf) {
 	char *p;
 	bauma_assert(pSelf != NULL);
 	bauma_assert(pSelf->pStr != NULL);
 	bauma_assert(pSelf->pStr[pSelf->size] == '\0');
-	p = pSelf->pStr;
-#if BAUMA_DEBUG
-	memset(pSelf, 0xFF, sizeof(*pSelf));
-#endif
+	bauma_assert(pSelf->pMemHandler != NULL);
+	if (pSelf->pStr == BAUMA_NULLSTR) {
+		/* Give client always something on the heap */
+		p = (*pSelf->pMemHandler)(NULL, 1u, NULL);
+		p[0] = '\0';
+	}
+	else {
+		p = pSelf->pStr;
+		pSelf->pStr = BAUMA_NULLSTR;
+	}
+	pSelf->size = 0;
+	pSelf->capacity = 0;
 	return p;
 }
 
 BAUMA_DEF void bauma_StringBuilder_reserve(bauma_StringBuilder *pSelf, size_t num) {
 	size_t newCap;
 	size_t realNewCap;
+	char* pOldStr;
 	bauma_assert(pSelf != NULL);
 	bauma_assert(pSelf->pMemHandler != NULL);
 	if ((pSelf->size + num) <= (pSelf->capacity)) {
 		return;
 	}
-	newCap = pSelf->capacity;
+	if (pSelf->capacity == 0) {
+		newCap = BAUMA_INITIAL_CAPACITY;
+	}
+	else {
+		newCap = pSelf->capacity;
+	}
 	while((pSelf->size + num) > newCap) {
 		newCap *= BAUMA_CAPACITY_GROWTH;
 	}
 	bauma_assert(pSelf->pMemHandler != NULL);
-	pSelf->pStr = (*pSelf->pMemHandler)(pSelf->pStr, newCap + 1u, &realNewCap);
+	if (pSelf->pStr == BAUMA_NULLSTR) {
+		pOldStr = NULL;
+	}
+	else {
+		pOldStr = pSelf->pStr;
+	}
+	pSelf->pStr = (*pSelf->pMemHandler)(pOldStr, newCap + 1u, &realNewCap);
 	pSelf->capacity = realNewCap - 1u;
 }
 

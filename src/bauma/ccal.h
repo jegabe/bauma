@@ -97,10 +97,19 @@ containg the function definitions, which can be linked afterwards.
 	typedef uintmax_t bauma_uintmax_t;
 	#if UINTMAX_MAX == UINT_MAX
 		#define BAUMA_INTMAX_PREFIX ""
+		#define BAUMA_INTMAX_MIN INT_MIN
+		#define BAUMA_INTMAX_MAX INT_MAX
+		#define BAUMA_UINTMAX_MAX UINT_MAX
 	#elif UINTMAX_MAX == ULONG_MAX
 		#define BAUMA_INTMAX_PREFIX "l"
+		#define BAUMA_INTMAX_MIN LONG_MIN
+		#define BAUMA_INTMAX_MAX LONG_MAX
+		#define BAUMA_UINTMAX_MAX ULONG_MAX
 	#elif UINTMAX_MAX == ULLONG_MAX
 		#define BAUMA_INTMAX_PREFIX "ll"
+		#define BAUMA_INTMAX_MIN LLONG_MIN
+		#define BAUMA_INTMAX_MAX LLONG_MAX
+		#define BAUMA_UINTMAX_MAX ULLONG_MAX
 	#else
 		#error "Can't detect printf prefix for bauma_(u)intmax_t"
 	#endif
@@ -118,10 +127,19 @@ containg the function definitions, which can be linked afterwards.
 	typedef size_t bauma_uintmax_t;
 	#if SIZE_MAX == UINT_MAX
 		#define BAUMA_INTMAX_PREFIX ""
+		#define BAUMA_INTMAX_MIN INT_MIN
+		#define BAUMA_INTMAX_MAX INT_MAX
+		#define BAUMA_UINTMAX_MAX UINT_MAX
 	#elif SIZE_MAX == ULONG_MAX
 		#define BAUMA_INTMAX_PREFIX "l"
+		#define BAUMA_INTMAX_MIN LONG_MIN
+		#define BAUMA_INTMAX_MAX LONG_MAX
+		#define BAUMA_UINTMAX_MAX ULONG_MAX
 	#elif defined(ULLONG_MAX) && (SIZE_MAX == ULLONG_MAX)
 		#define BAUMA_INTMAX_PREFIX "ll"
+		#define BAUMA_INTMAX_MIN LLONG_MIN
+		#define BAUMA_INTMAX_MAX LLONG_MAX
+		#define BAUMA_UINTMAX_MAX ULLONG_MAX
 	#else
 		#error "Can't detect printf prefix for bauma_(u)intmax_t"
 	#endif
@@ -605,7 +623,6 @@ static const char BAUMA_NULLSTR_[1] = {'\0'};
 #define BAUMA_NULLSTR ((char*)BAUMA_NULLSTR_)
 
 BAUMA_DEF void bauma_StringBuilder_construct_ext(bauma_StringBuilder *pSelf, size_t capacity, bauma_pDynmem_handler pMemHandler) {
-	size_t realCapacity;
 	bauma_assert(pSelf != NULL);
 	bauma_assert(capacity > 0);
 	bauma_assert(pMemHandler != NULL);
@@ -763,6 +780,7 @@ BAUMA_DEF void bauma_StringBuilder_appendBool(bauma_StringBuilder *pSelf, bauma_
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <float.h>
 
 #ifdef __cplusplus
 	extern "C" {
@@ -929,7 +947,7 @@ void test_vector_callForEach(void) {
 	bauma_Vector_destruct(&v);
 }
 
-test_stringBuilder_construct(void) {
+void test_stringBuilder_construct(void) {
 	bauma_StringBuilder sb;
 	bauma_StringBuilder_construct(&sb);
 	BAUMA_EXPECT(sb.pStr = BAUMA_NULLSTR);
@@ -939,7 +957,7 @@ test_stringBuilder_construct(void) {
 	bauma_StringBuilder_destruct(&sb);
 }
 
-test_stringBuilder_release(void) {
+void test_stringBuilder_release(void) {
 	bauma_StringBuilder sb;
 	char *p;
 	bauma_StringBuilder_construct(&sb);
@@ -961,7 +979,7 @@ test_stringBuilder_release(void) {
 	bauma_free(p);
 }
 
-test_stringBuilder_reserve(void) {
+void test_stringBuilder_reserve(void) {
 	bauma_StringBuilder sb;
 	bauma_StringBuilder_construct(&sb);
 	BAUMA_EXPECT(sb.pStr == BAUMA_NULLSTR);
@@ -975,7 +993,7 @@ test_stringBuilder_reserve(void) {
 	bauma_StringBuilder_destruct(&sb);
 }
 
-test_stringBuilder_appendGeneric(void) {
+void test_stringBuilder_appendGeneric(void) {
 	bauma_StringBuilder sb;
 	bauma_StringBuilder_construct(&sb);
 	bauma_StringBuilder_appendGeneric(&sb, 3u, "%d", 123);
@@ -983,13 +1001,91 @@ test_stringBuilder_appendGeneric(void) {
 	bauma_StringBuilder_destruct(&sb);
 }
 
-test_stringBuilder_appendStr(void) {}
-test_stringBuilder_appendStrWithLen(void) {}
-test_stringBuilder_appendChar(void) {}
-test_stringBuilder_appendSigned(void) {}
-test_stringBuilder_appendUnsigned(void) {}
-test_stringBuilder_appendDouble(void) {}
-test_stringBuilder_appendBool(void) {}
+void test_stringBuilder_appendStr(void) {
+	bauma_StringBuilder sb;
+	bauma_StringBuilder_construct(&sb);
+	bauma_StringBuilder_appendStr(&sb, "Hello");
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&sb), "Hello") == 0);
+	bauma_StringBuilder_destruct(&sb);
+}
+
+void test_stringBuilder_appendStrWithLen(void) {
+	bauma_StringBuilder sb;
+	bauma_StringBuilder_construct(&sb);
+	bauma_StringBuilder_appendStrWithLen(&sb, "Hello", 3u);
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&sb), "Hel") == 0);
+	bauma_StringBuilder_destruct(&sb);
+}
+
+void test_stringBuilder_appendChar(void) {
+	bauma_StringBuilder sb;
+	bauma_StringBuilder_construct(&sb);
+	bauma_StringBuilder_appendChar(&sb, 'A', 3u);
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&sb), "AAA") == 0);
+	bauma_StringBuilder_destruct(&sb);
+}
+
+void test_stringBuilder_appendSigned(void) {
+	bauma_StringBuilder sb;
+	char cmp[BAUMA_UINTMAX_MAX_DECIMAL_LENGTH + 1u] = {0};
+	/* min */
+	sprintf(cmp, "%" BAUMA_INTMAX_PREFIX "d", BAUMA_INTMAX_MIN);
+	bauma_StringBuilder_construct(&sb);
+	bauma_StringBuilder_appendSigned(&sb, BAUMA_INTMAX_MIN);
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&sb), cmp) == 0);
+	bauma_StringBuilder_destruct(&sb);
+	/* 0 */
+	bauma_StringBuilder_construct(&sb);
+	bauma_StringBuilder_appendSigned(&sb, 0);
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&sb), "0") == 0);
+	bauma_StringBuilder_destruct(&sb);
+	/* max */
+	memset(cmp, 0, sizeof(cmp));
+	sprintf(cmp, "%" BAUMA_INTMAX_PREFIX "d", BAUMA_INTMAX_MAX);
+	bauma_StringBuilder_construct(&sb);
+	bauma_StringBuilder_appendSigned(&sb, BAUMA_INTMAX_MAX);
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&sb), cmp) == 0);
+	bauma_StringBuilder_destruct(&sb);
+}
+
+void test_stringBuilder_appendUnsigned(void) {
+	bauma_StringBuilder sb;
+	char cmp[BAUMA_UINTMAX_MAX_DECIMAL_LENGTH + 1u] = {0};
+	/* 0 */
+	bauma_StringBuilder_construct(&sb);
+	bauma_StringBuilder_appendUnsigned(&sb, 0);
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&sb), "0") == 0);
+	bauma_StringBuilder_destruct(&sb);
+	/* max */
+	sprintf(cmp, "%" BAUMA_INTMAX_PREFIX "u", BAUMA_UINTMAX_MAX);
+	bauma_StringBuilder_construct(&sb);
+	bauma_StringBuilder_appendUnsigned(&sb, BAUMA_UINTMAX_MAX);
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&sb), cmp) == 0);
+	bauma_StringBuilder_destruct(&sb);
+}
+
+void test_stringBuilder_appendDouble(void) {
+	bauma_StringBuilder sb;
+	bauma_StringBuilder_construct(&sb);
+	bauma_StringBuilder_appendDouble(&sb, -DBL_MAX);
+	bauma_StringBuilder_appendDouble(&sb, 0.0);
+	bauma_StringBuilder_appendDouble(&sb, DBL_MAX);
+	bauma_StringBuilder_appendDouble(&sb, -DBL_MIN);
+	bauma_StringBuilder_appendDouble(&sb, DBL_MIN);
+	bauma_StringBuilder_destruct(&sb);
+}
+
+void test_stringBuilder_appendBool(void) {
+	bauma_StringBuilder sb;
+	bauma_StringBuilder_construct(&sb);
+	bauma_StringBuilder_appendBool(&sb, BAUMA_TRUE);
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&sb), "true") == 0);
+	bauma_StringBuilder_destruct(&sb);
+	bauma_StringBuilder_construct(&sb);
+	bauma_StringBuilder_appendBool(&sb, BAUMA_FALSE);
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&sb), "false") == 0);
+	bauma_StringBuilder_destruct(&sb);
+}
 
 #ifdef __cplusplus
 	} /* extern "C" */

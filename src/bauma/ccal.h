@@ -85,7 +85,7 @@ containg the function definitions, which can be linked afterwards.
 	#endif
 #endif
 
-#define BAUMA_TRUE 	((bauma_bool_t)1)
+#define BAUMA_TRUE  ((bauma_bool_t)1)
 #define BAUMA_FALSE ((bauma_bool_t)0)
 
 #define bauma_bool2str(x) ((x) ? "true" : "false")
@@ -258,6 +258,19 @@ BAUMA_DEF char* bauma_strdup_ext(const char* p, bauma_pDynmem_handler alloc);
 */
 #define bauma_strdup(p) bauma_strdup_ext(p, &bauma_default_dynmem_handler)
 
+/*
+\brief Allocates a copy of the passed null-terminated string and returns it
+\param p A null-terminated string
+\param alloc Memory allocator to be used
+*/
+BAUMA_DEF char* bauma_strdupn_ext(const char* p, size_t n, bauma_pDynmem_handler alloc);
+
+/*!
+\brief Short-hand of bauma_strdup_ext() using the default allocator
+\param p A null-terminated string
+*/
+#define bauma_strdupn(p, l) bauma_strdupn_ext(p, l, &bauma_default_dynmem_handler)
+
 /*!
 \brief Minimalistic approach for dynamically growing array.
 
@@ -361,6 +374,15 @@ BAUMA_DEF void BAUMA_DEBUG_SUFFIX(bauma_Vector_construct_impl)(
 	BAUMA_DEBUG_OPT_PARAM(const char* pDataType)
 );
 
+#define bauma_Vector_construct_ext(pSelf, dataType, pElementDestructor, pMemHandler) \
+	BAUMA_DEBUG_SUFFIX(bauma_Vector_construct_impl)( \
+		pSelf, \
+		sizeof(dataType), \
+		pElementDestructor, \
+		pMemHandler \
+		BAUMA_DEBUG_OPT_PARAM(#dataType) \
+	)
+
 #define bauma_Vector_construct(pSelf, dataType, pElementDestructor) \
 	BAUMA_DEBUG_SUFFIX(bauma_Vector_construct_impl)( \
 		pSelf, \
@@ -425,6 +447,20 @@ BAUMA_DEF void bauma_StringBuilder_appendSigned(bauma_StringBuilder *pSelf, baum
 BAUMA_DEF void bauma_StringBuilder_appendUnsigned(bauma_StringBuilder *pSelf, bauma_uintmax_t i);
 BAUMA_DEF void bauma_StringBuilder_appendDouble(bauma_StringBuilder *pSelf, double d);
 BAUMA_DEF void bauma_StringBuilder_appendBool(bauma_StringBuilder *pSelf, bauma_bool_t b);
+
+typedef struct bauma_IInputStream {
+	int (*pGetChar)(struct bauma_IInputStream *pSelf);
+	size_t (*pGet)(struct bauma_IInputStream *pSelf, char* pBuf, size_t bufSize);
+	void (*pUnget)(struct bauma_IInputStream *pSelf);
+} bauma_IInputStream;
+
+typedef struct bauma_InputStreamFromMemory {
+	bauma_IInputStream base;
+	const unsigned char *pMem;
+	size_t size;
+} bauma_InputStreamFromMemory;
+
+BAUMA_DEF void bauma_InputStreamFromMemory_construct(bauma_InputStreamFromMemory *pSelf, const void *pData, size_t size);
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -506,10 +542,21 @@ BAUMA_DEF void bauma_memblock_destructor(void* ppMemBlock) {
 BAUMA_DEF char* bauma_strdup_ext(const char* p, bauma_pDynmem_handler alloc) {
 	size_t l;
 	char *c;
+	bauma_assert((p != NULL) && "String must not be NULL");
 	bauma_assert((alloc != NULL) && "Allocator must not be NULL");
 	l = strlen(p) + 1u; /* +1 to include the null terminator */
 	c = (char*)((*alloc)(NULL, l, NULL));
 	memcpy(c, p, l);
+	return c;
+}
+
+BAUMA_DEF char* bauma_strdupn_ext(const char* p, size_t n, bauma_pDynmem_handler alloc) {
+	char *c;
+	bauma_assert((p != NULL) && "String must not be NULL");
+	bauma_assert((alloc != NULL) && "Allocator must not be NULL");
+	c = (char*)((*alloc)(NULL, n + 1u, NULL));
+	memcpy(c, p, n);
+	c[n] = '\0';
 	return c;
 }
 
@@ -768,6 +815,48 @@ BAUMA_DEF void bauma_StringBuilder_appendBool(bauma_StringBuilder *pSelf, bauma_
 		bauma_StringBuilder_appendStrWithLen(pSelf, "false", 5u);
 	}
 }
+
+static int bauma_InputStreamFromMemory_getChar(bauma_IInputStream *pSelf_) {
+	bauma_InputStreamFromMemory *pSelf;
+	bauma_assert(pSelf != NULL);
+	pSelf = (bauma_InputStreamFromMemory*)pSelf_;
+	if (pSelf->size > 0) {
+		int result = *pSelf->pMem;
+		++pSelf->pMem;
+		--pSelf->size;
+		return result;
+	}
+	return -1;
+}
+
+static size_t bauma_InputStreamFromMemory_get(bauma_IInputStream *pSelf_, char* pBuf, size_t bufSize) {
+	size_t num;
+	bauma_InputStreamFromMemory *pSelf;
+	bauma_assert(pSelf != NULL);
+	pSelf = (bauma_InputStreamFromMemory*)pSelf_;
+	num = bauma_min(pSelf->size, bufSize);
+	memcpy(pBuf, pSelf->pMem, num);
+	pSelf->pMem += num;
+	pSelf->size -= num;
+	return num;
+}
+
+static void bauma_InputStreamFromMemory_unget(bauma_IInputStream *pSelf_) {
+	bauma_InputStreamFromMemory *pSelf;
+	bauma_assert(pSelf != NULL);
+	pSelf = (bauma_InputStreamFromMemory*)pSelf_;
+	--pSelf->pMem;
+	++pSelf->size;
+
+}
+
+BAUMA_DEF void bauma_InputStreamFromMemory_construct(bauma_InputStreamFromMemory *pSelf, const void *pData, size_t size) {
+	bauma_assert(pSelf != NULL);
+	pSelf->base.pGetChar = &bauma_InputStreamFromMemory_getChar;
+	pSelf->base.pGet = &bauma_InputStreamFromMemory_get;
+	pSelf->base.pUnget = &bauma_InputStreamFromMemory_unget;
+}
+
 
 #ifdef __cplusplus
 	} /* extern "C" */

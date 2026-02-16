@@ -260,7 +260,7 @@ BAUMA_DEF void bauma_json_delete(bauma_JsonNode *pNode) {
 	(*pNode->pMemHandler)(pNode, 0, NULL);
 }
 
-static int bauma_json_skipWhiteSpace(bauma_IInputStream *pStream) {
+static int bauma_json_nextChar(bauma_IInputStream *pStream) {
 	int c;
 	bauma_json_assert(pStream != NULL);
 	do {
@@ -276,7 +276,7 @@ static bauma_JsonNode *bauma_json_parse_array(bauma_IInputStream *pStream,
 	bauma_JsonNode *pArray = bauma_json_newArray_ext(pMemHandler);
 	for(;;) {
 		bauma_JsonNode *pArrayElement;
-		int c = bauma_json_skipWhiteSpace(pStream);
+		int c = bauma_json_nextChar(pStream);
 		if (c < 0) {
 			bauma_json_delete(pArray);
 			return NULL;
@@ -302,7 +302,7 @@ BAUMA_DEF bauma_JsonNode *bauma_json_parse_ext(bauma_IInputStream *pStream,
 	int c;
 	bauma_json_assert(pStream != NULL);
 	bauma_json_assert(pMemHandler != NULL);
-	c = bauma_json_skipWhiteSpace(pStream);
+	c = bauma_json_nextChar(pStream);
 	switch(c) {
 		case '[': return bauma_json_parse_array(pStream, pErrFormatter, pMemHandler);
 		default: return NULL;

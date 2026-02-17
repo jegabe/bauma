@@ -81,61 +81,62 @@ typedef union bauma_JsonNodeUnion {
 	bauma_uintmax_t ui;
 	double          d;
 	char            *p;
-	bauma_Vector    v; /* for map, this points to all keys; for array, this points to all values */
+	bauma_Vector    v; /* for maps and arrays, this points to all values */
 } bauma_JsonNodeUnion;
 
 typedef struct bauma_JsonNode {
 	bauma_JsonNodeType    type;
 	bauma_JsonNodeUnion   value;
 	char                  *pKey; /* Key string for map items, else NULL */
-	bauma_pDynmem_handler pMemHandler;
+	bauma_IMemAllocator*  pAlloc;
 } bauma_JsonNode;
 
-BAUMA_DEF bauma_JsonNode *bauma_json_new_ext(bauma_pDynmem_handler pMemHandler);
-#define bauma_json_new() bauma_json_new_ext(&bauma_default_dynmem_handler)
+BAUMA_DEF bauma_JsonNode *bauma_json_new_ext(bauma_IMemAllocator* pAlloc);
+#define bauma_json_new() bauma_json_new_ext(bauma_getDefaultMemAllocator())
 
-BAUMA_DEF bauma_JsonNode *bauma_json_newNull_ext(bauma_pDynmem_handler pMemHandler);
-#define bauma_json_newNull() bauma_json_newNull_ext(&bauma_default_dynmem_handler)
+BAUMA_DEF bauma_JsonNode *bauma_json_newNull_ext(bauma_IMemAllocator* pAlloc);
+#define bauma_json_newNull() bauma_json_newNull_ext(bauma_getDefaultMemAllocator())
 
-BAUMA_DEF bauma_JsonNode *bauma_json_newBool_ext(bauma_bool_t value, bauma_pDynmem_handler pMemHandler);
-#define bauma_json_newBool(value) bauma_json_newBool_ext((value), &bauma_default_dynmem_handler)
+BAUMA_DEF bauma_JsonNode *bauma_json_newBool_ext(bauma_bool_t value, bauma_IMemAllocator* pAlloc);
+#define bauma_json_newBool(value) bauma_json_newBool_ext((value), bauma_getDefaultMemAllocator())
 
-BAUMA_DEF bauma_JsonNode *bauma_json_newSigned_ext(bauma_intmax_t value, bauma_pDynmem_handler pMemHandler);
-#define bauma_json_newSigned(value) bauma_json_newSigned_ext((value), &bauma_default_dynmem_handler)
+BAUMA_DEF bauma_JsonNode *bauma_json_newSigned_ext(bauma_intmax_t value, bauma_IMemAllocator* pAlloc);
+#define bauma_json_newSigned(value) bauma_json_newSigned_ext((value), bauma_getDefaultMemAllocator())
 
-BAUMA_DEF bauma_JsonNode *bauma_json_newUnsigned_ext(bauma_uintmax_t value, bauma_pDynmem_handler pMemHandler);
-#define bauma_json_newUnsigned(value) bauma_json_newUnsigned_ext((value), &bauma_default_dynmem_handler)
+BAUMA_DEF bauma_JsonNode *bauma_json_newUnsigned_ext(bauma_uintmax_t value, bauma_IMemAllocator* pAlloc);
+#define bauma_json_newUnsigned(value) bauma_json_newUnsigned_ext((value), bauma_getDefaultMemAllocator())
 
-BAUMA_DEF bauma_JsonNode *bauma_json_newDouble_ext(double value, bauma_pDynmem_handler pMemHandler);
-#define bauma_json_newDouble(value) bauma_json_newDouble_ext((value), &bauma_default_dynmem_handler)
+BAUMA_DEF bauma_JsonNode *bauma_json_newDouble_ext(double value, bauma_IMemAllocator* pAlloc);
+#define bauma_json_newDouble(value) bauma_json_newDouble_ext((value), bauma_getDefaultMemAllocator())
 
-BAUMA_DEF bauma_JsonNode *bauma_json_newStr_ext(const char *pValue, bauma_pDynmem_handler pMemHandler);
-#define bauma_json_newStr(value) bauma_json_newStr_ext((value), &bauma_default_dynmem_handler)
+BAUMA_DEF bauma_JsonNode *bauma_json_newStr_ext(const char *pValue, bauma_IMemAllocator* pAlloc);
+#define bauma_json_newStr(value) bauma_json_newStr_ext((value), bauma_getDefaultMemAllocator())
 
-BAUMA_DEF bauma_JsonNode *bauma_json_newStrWithLen_ext(const char *pValue, size_t valueLen, bauma_pDynmem_handler pMemHandler);
-#define bauma_json_newStrWithLen(value, len) bauma_json_newStrWithLen_ext((value), (len), &bauma_default_dynmem_handler)
+BAUMA_DEF bauma_JsonNode *bauma_json_newStrWithLen_ext(const char *pValue, size_t valueLen, bauma_IMemAllocator* pAlloc);
+#define bauma_json_newStrWithLen(value, len) bauma_json_newStrWithLen_ext((value), (len), bauma_getDefaultMemAllocator())
 
-BAUMA_DEF bauma_JsonNode *bauma_json_newArray_ext(bauma_pDynmem_handler pMemHandler);
-#define bauma_json_newArray() bauma_json_newArray_ext(&bauma_default_dynmem_handler)
+BAUMA_DEF bauma_JsonNode *bauma_json_newArray_ext(bauma_IMemAllocator* pAlloc);
+#define bauma_json_newArray() bauma_json_newArray_ext(bauma_getDefaultMemAllocator())
 BAUMA_DEF void bauma_json_array_append(bauma_JsonNode* pNode, bauma_JsonNode* pArrayElement);
 
-BAUMA_DEF bauma_JsonNode *bauma_json_newObject_ext(bauma_pDynmem_handler pMemHandler);
-#define bauma_json_newObject() bauma_json_newObject_ext(&bauma_default_dynmem_handler)
+BAUMA_DEF bauma_JsonNode *bauma_json_newObject_ext(bauma_IMemAllocator* pAlloc);
+#define bauma_json_newObject() bauma_json_newObject_ext(bauma_getDefaultMemAllocator())
 BAUMA_DEF void bauma_json_object_append(bauma_JsonNode* pNode, const char *pKey, bauma_JsonNode *pValue);
 
 BAUMA_DEF void bauma_json_delete(bauma_JsonNode *pNode);
 
-BAUMA_DEF bauma_JsonNode *bauma_json_parse_ext(bauma_IInputStream *pStream,
+BAUMA_DEF bauma_JsonNode *bauma_json_parse_ext(const char *pStr,
+                                               size_t len,
                                                bauma_StringBuilder* pErrFormatter,
-                                               bauma_pDynmem_handler pMemHandler);
+                                               bauma_IMemAllocator* pAlloc);
 
-#define bauma_json_parse(pStream) bauma_json_parse_ext((pStream), NULL, &bauma_default_dynmem_handler)
+#define bauma_json_parse(pStream) bauma_json_parse_ext((pStream), NULL, bauma_getDefaultMemAllocator())
 
 BAUMA_DEF bauma_JsonNode *bauma_json_parseStr_ext(const char *pStr,
                                                   bauma_StringBuilder* pErrFormatter,
-                                                  bauma_pDynmem_handler pMemHandler);
+                                                  bauma_IMemAllocator* pAlloc);
 
-#define bauma_json_parseStr(pStr) bauma_json_parseStr_ext((pStr), NULL, &bauma_default_dynmem_handler)
+#define bauma_json_parseStr(pStr) bauma_json_parseStr_ext((pStr), NULL, bauma_getDefaultMemAllocator())
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -165,67 +166,67 @@ static void bauma_json_NodePtr_destruct(void *ppNode) {
 	}
 }
 
-BAUMA_DEF bauma_JsonNode *bauma_json_new_ext(bauma_pDynmem_handler pMemHandler) {
+BAUMA_DEF bauma_JsonNode *bauma_json_new_ext(bauma_IMemAllocator* pAlloc) {
 	bauma_JsonNode *p;
-	bauma_json_assert(pMemHandler != NULL);
-	p = (bauma_JsonNode*)(*pMemHandler)(NULL, sizeof(bauma_JsonNode), NULL);
+	bauma_json_assert(pAlloc != NULL);
+	p = (bauma_JsonNode*)(*pAlloc->pRealloc)(pAlloc, NULL, sizeof(bauma_JsonNode), NULL);
 	memset(p, 0, sizeof(*p));
-	p->pMemHandler = pMemHandler;
+	p->pAlloc = pAlloc;
 	return p;
 }
 
-BAUMA_DEF bauma_JsonNode *bauma_json_newNull_ext(bauma_pDynmem_handler pMemHandler) {
-	bauma_JsonNode *p = bauma_json_new_ext(pMemHandler);
+BAUMA_DEF bauma_JsonNode *bauma_json_newNull_ext(bauma_IMemAllocator* pAlloc) {
+	bauma_JsonNode *p = bauma_json_new_ext(pAlloc);
 	p->type = BAUMA_JSON_NODE_TYPE_NULL;
 	return p;
 }
 
-BAUMA_DEF bauma_JsonNode *bauma_json_newBool_ext(bauma_bool_t value, bauma_pDynmem_handler pMemHandler) {
-	bauma_JsonNode *p = bauma_json_new_ext(pMemHandler);
+BAUMA_DEF bauma_JsonNode *bauma_json_newBool_ext(bauma_bool_t value, bauma_IMemAllocator* pAlloc) {
+	bauma_JsonNode *p = bauma_json_new_ext(pAlloc);
 	p->type = BAUMA_JSON_NODE_TYPE_BOOL;
 	p->value.b = value;
 	return p;
 }
 
-BAUMA_DEF bauma_JsonNode *bauma_json_newSigned_ext(bauma_intmax_t value, bauma_pDynmem_handler pMemHandler) {
-	bauma_JsonNode *p = bauma_json_new_ext(pMemHandler);
+BAUMA_DEF bauma_JsonNode *bauma_json_newSigned_ext(bauma_intmax_t value, bauma_IMemAllocator* pAlloc) {
+	bauma_JsonNode *p = bauma_json_new_ext(pAlloc);
 	p->type = BAUMA_JSON_NODE_TYPE_SIGNED;
 	p->value.si = value;
 	return p;
 }
 
-BAUMA_DEF bauma_JsonNode *bauma_json_newUnsigned_ext(bauma_uintmax_t value, bauma_pDynmem_handler pMemHandler) {
-	bauma_JsonNode *p = bauma_json_new_ext(pMemHandler);
+BAUMA_DEF bauma_JsonNode *bauma_json_newUnsigned_ext(bauma_uintmax_t value, bauma_IMemAllocator* pAlloc) {
+	bauma_JsonNode *p = bauma_json_new_ext(pAlloc);
 	p->type = BAUMA_JSON_NODE_TYPE_UNSIGNED;
 	p->value.ui = value;
 	return p;
 }
 
-BAUMA_DEF bauma_JsonNode *bauma_json_newDouble_ext(double value, bauma_pDynmem_handler pMemHandler) {
-	bauma_JsonNode *p = bauma_json_new_ext(pMemHandler);
+BAUMA_DEF bauma_JsonNode *bauma_json_newDouble_ext(double value, bauma_IMemAllocator* pAlloc) {
+	bauma_JsonNode *p = bauma_json_new_ext(pAlloc);
 	p->type = BAUMA_JSON_NODE_TYPE_DOUBLE;
 	p->value.d = value;
 	return p;
 }
 
-BAUMA_DEF bauma_JsonNode *bauma_json_newStr_ext(const char *pValue, bauma_pDynmem_handler pMemHandler) {
-	bauma_JsonNode *p = bauma_json_new_ext(pMemHandler);
+BAUMA_DEF bauma_JsonNode *bauma_json_newStr_ext(const char *pValue, bauma_IMemAllocator* pAlloc) {
+	bauma_JsonNode *p = bauma_json_new_ext(pAlloc);
 	p->type = BAUMA_JSON_NODE_TYPE_STRING;
-	p->value.p = bauma_strdup_ext(pValue, pMemHandler);
+	p->value.p = bauma_strdup_ext(pValue, pAlloc);
 	return p;
 }
 
-BAUMA_DEF bauma_JsonNode *bauma_json_newStrWithLen_ext(const char *pValue, size_t valueLen, bauma_pDynmem_handler pMemHandler) {
-	bauma_JsonNode *p = bauma_json_new_ext(pMemHandler);
+BAUMA_DEF bauma_JsonNode *bauma_json_newStrWithLen_ext(const char *pValue, size_t valueLen, bauma_IMemAllocator* pAlloc) {
+	bauma_JsonNode *p = bauma_json_new_ext(pAlloc);
 	p->type = BAUMA_JSON_NODE_TYPE_STRING;
-	p->value.p = bauma_strdupn_ext(pValue, valueLen, pMemHandler);
+	p->value.p = bauma_strdupn_ext(pValue, valueLen, pAlloc);
 	return p;
 }
 
-BAUMA_DEF bauma_JsonNode *bauma_json_newArray_ext(bauma_pDynmem_handler pMemHandler) {
-	bauma_JsonNode *p = bauma_json_new_ext(pMemHandler);
+BAUMA_DEF bauma_JsonNode *bauma_json_newArray_ext(bauma_IMemAllocator* pAlloc) {
+	bauma_JsonNode *p = bauma_json_new_ext(pAlloc);
 	p->type = BAUMA_JSON_NODE_TYPE_ARRAY;
-	bauma_Vector_construct_ext(&p->value.v, bauma_JsonNode*, &bauma_json_NodePtr_destruct, pMemHandler);
+	bauma_Vector_construct_ext(&p->value.v, bauma_JsonNode*, &bauma_json_NodePtr_destruct, pAlloc);
 	return p;
 }
 
@@ -242,18 +243,18 @@ BAUMA_DEF void bauma_json_object_append(bauma_JsonNode* pNode, const char *pKey,
 	bauma_json_assert(pValue != NULL);
 	bauma_json_assert(pNode->type == BAUMA_JSON_NODE_TYPE_OBJECT);
 	if (pValue->pKey != NULL) {
-		(*pValue->pMemHandler)(pValue->pKey, 0, NULL);
+		(*pValue->pAlloc->pRealloc)(pValue->pAlloc, pValue->pKey, 0, NULL);
 		pValue->pKey = NULL;
 	}
-	pValue->pKey = bauma_strdup_ext(pKey, pValue->pMemHandler);
+	pValue->pKey = bauma_strdup_ext(pKey, pValue->pAlloc);
 	bauma_Vector_append(&pNode->value.v, bauma_JsonNode*, &pValue);
 }
 
 
-BAUMA_DEF bauma_JsonNode *bauma_json_newObject_ext(bauma_pDynmem_handler pMemHandler) {
-	bauma_JsonNode *p = bauma_json_new_ext(pMemHandler);
+BAUMA_DEF bauma_JsonNode *bauma_json_newObject_ext(bauma_IMemAllocator* pAlloc) {
+	bauma_JsonNode *p = bauma_json_new_ext(pAlloc);
 	p->type = BAUMA_JSON_NODE_TYPE_OBJECT;
-	bauma_Vector_construct_ext(&p->value.v, bauma_JsonNode*, &bauma_json_NodePtr_destruct, pMemHandler);
+	bauma_Vector_construct_ext(&p->value.v, bauma_JsonNode*, &bauma_json_NodePtr_destruct, pAlloc);
 	return p;
 }
 
@@ -261,13 +262,13 @@ BAUMA_DEF void bauma_json_delete(bauma_JsonNode *pNode) {
 	if (pNode == NULL) {
 		return;
 	}
-	bauma_json_assert(pNode->pMemHandler != NULL);
+	bauma_json_assert(pNode->pAlloc != NULL);
 	if (pNode->pKey != NULL) {
-		(*pNode->pMemHandler)(pNode->pKey, 0, NULL);
+		(*pNode->pAlloc->pRealloc)(pNode->pAlloc, pNode->pKey, 0, NULL);
 	}
 	switch(pNode->type) {
 		case BAUMA_JSON_NODE_TYPE_STRING: {
-			(*pNode->pMemHandler)(pNode->value.p, 0, NULL);
+			(*pNode->pAlloc->pRealloc)(pNode->pAlloc, pNode->value.p, 0, NULL);
 			break;
 		}
 		case BAUMA_JSON_NODE_TYPE_ARRAY: /* fall through */
@@ -277,7 +278,7 @@ BAUMA_DEF void bauma_json_delete(bauma_JsonNode *pNode) {
 		}
 		default: break;
 	}
-	(*pNode->pMemHandler)(pNode, 0, NULL);
+	(*pNode->pAlloc->pRealloc)(pNode->pAlloc, pNode, 0, NULL);
 }
 
 static int bauma_json_nextChar(bauma_IInputStream *pStream) {
@@ -292,8 +293,8 @@ static int bauma_json_nextChar(bauma_IInputStream *pStream) {
 
 static bauma_JsonNode *bauma_json_parse_array(bauma_IInputStream *pStream,
                                               bauma_StringBuilder* pErrFormatter,
-                                              bauma_pDynmem_handler pMemHandler) {
-	bauma_JsonNode *pArray = bauma_json_newArray_ext(pMemHandler);
+                                              bauma_IMemAllocator* pAlloc) {
+	bauma_JsonNode *pArray = bauma_json_newArray_ext(pAlloc);
 	for(;;) {
 		bauma_JsonNode *pArrayElement;
 		int c = bauma_json_nextChar(pStream);
@@ -306,7 +307,7 @@ static bauma_JsonNode *bauma_json_parse_array(bauma_IInputStream *pStream,
 		}
 		if (c == ',') continue;
 		(*pStream->pUnget)(pStream);
-		pArrayElement = bauma_json_parse_ext(pStream, pErrFormatter, pMemHandler);
+		pArrayElement = bauma_json_parse_ext(pStream, pErrFormatter, pAlloc);
 		if (pArrayElement == NULL) {
 			bauma_json_delete(pArray);
 			return NULL;
@@ -316,25 +317,24 @@ static bauma_JsonNode *bauma_json_parse_array(bauma_IInputStream *pStream,
 	return NULL; /* unreachable */
 }
 
-BAUMA_DEF bauma_JsonNode *bauma_json_parse_ext(bauma_IInputStream *pStream,
+BAUMA_DEF bauma_JsonNode *bauma_json_parse_ext(const char *pStr,
+                                               size_t len,
                                                bauma_StringBuilder* pErrFormatter,
-                                               bauma_pDynmem_handler pMemHandler) {
+                                               bauma_IMemAllocator* pAlloc) {
 	int c;
 	bauma_json_assert(pStream != NULL);
-	bauma_json_assert(pMemHandler != NULL);
+	bauma_json_assert(pAlloc != NULL);
 	c = bauma_json_nextChar(pStream);
 	switch(c) {
-		case '[': return bauma_json_parse_array(pStream, pErrFormatter, pMemHandler);
+		case '[': return bauma_json_parse_array(pStream, pErrFormatter, pAlloc);
 		default: return NULL;
 	}
 }
 
 BAUMA_DEF bauma_JsonNode *bauma_json_parseStr_ext(const char *pStr,
                                                   bauma_StringBuilder* pErrFormatter,
-                                                  bauma_pDynmem_handler pMemHandler) {
-	bauma_InputStreamFromMemory stream;
-	bauma_InputStreamFromMemory_construct(&stream, pStr, strlen(pStr));
-	return bauma_json_parse_ext(&stream.base, pErrFormatter, pMemHandler);
+                                                  bauma_IMemAllocator* pAlloc) {
+	return bauma_json_parse_ext(pStr, strlen(pStr), pErrFormatter, pAlloc);
 }
 
 

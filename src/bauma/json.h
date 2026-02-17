@@ -62,6 +62,11 @@ but makes writing this json dialect a joy.
 	extern "C" {
 #endif
 
+typedef struct bauma_json_StringWithLength {
+	const char *pStr;
+	size_t len;
+} bauma_json_StringWithLength;
+
 typedef unsigned int bauma_JsonNodeType;
 
 #define BAUMA_JSON_NODE_TYPE_INVALID  0
@@ -125,18 +130,11 @@ BAUMA_DEF void bauma_json_object_append(bauma_JsonNode* pNode, const char *pKey,
 
 BAUMA_DEF void bauma_json_delete(bauma_JsonNode *pNode);
 
-BAUMA_DEF bauma_JsonNode *bauma_json_parse_ext(const char *pStr,
-                                               size_t len,
-                                               bauma_StringBuilder* pErrFormatter,
-                                               bauma_IMemAllocator* pAlloc);
+BAUMA_DEF bauma_JsonNode *bauma_json_parse_ext(bauma_json_StringWithLength *pStrWithLen,
+                                               bauma_StringBuilder *pErrFormatter,
+                                               bauma_IMemAllocator *pAlloc);
 
-#define bauma_json_parse(pStream) bauma_json_parse_ext((pStream), NULL, bauma_getDefaultMemAllocator())
-
-BAUMA_DEF bauma_JsonNode *bauma_json_parseStr_ext(const char *pStr,
-                                                  bauma_StringBuilder* pErrFormatter,
-                                                  bauma_IMemAllocator* pAlloc);
-
-#define bauma_json_parseStr(pStr) bauma_json_parseStr_ext((pStr), NULL, bauma_getDefaultMemAllocator())
+BAUMA_DEF bauma_JsonNode *bauma_json_parse(const void *pMem, size_t len);
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -281,33 +279,40 @@ BAUMA_DEF void bauma_json_delete(bauma_JsonNode *pNode) {
 	(*pNode->pAlloc->pRealloc)(pNode->pAlloc, pNode, 0, NULL);
 }
 
-static int bauma_json_nextChar(bauma_IInputStream *pStream) {
-	int c;
-	bauma_json_assert(pStream != NULL);
-	do {
-		c = (*pStream->pGetChar)(pStream);
-		if (c < 0) return -1;
-	} while(isspace(c));
-	return c;
+static void bauma_json_skipWhiteSpace(bauma_json_StringWithLength *pStrWithLen) {
+	while(pStrWithLen->len > 0) {
+		if(!isspace(*pStrWithLen->pStr)) break;
+		++pStrWithLen->pStr;
+		--pStrWithLen->len;
+	}
 }
 
-static bauma_JsonNode *bauma_json_parse_array(bauma_IInputStream *pStream,
-                                              bauma_StringBuilder* pErrFormatter,
-                                              bauma_IMemAllocator* pAlloc) {
+static bauma_JsonNode *bauma_json_parse_array(bauma_json_StringWithLength *pStrWithLen,
+                                              bauma_StringBuilder *pErrFormatter,
+                                              bauma_IMemAllocator *pAlloc) {
 	bauma_JsonNode *pArray = bauma_json_newArray_ext(pAlloc);
+	/* skip the '[' */
+	++pStrWithLen->pStr;
+	--pStrWithLen->len;
 	for(;;) {
 		bauma_JsonNode *pArrayElement;
-		int c = bauma_json_nextChar(pStream);
-		if (c < 0) {
+		bauma_json_skipWhiteSpace(pStrWithLen);
+		if (pStrWithLen->len == 0) {
 			bauma_json_delete(pArray);
 			return NULL;
 		}
+		char c = *pStrWithLen->pStr;
 		if (c == ']') { /* end of array */
+			++pStrWithLen->pStr;
+			--pStrWithLen->len;
 			return pArray;
 		}
-		if (c == ',') continue;
-		(*pStream->pUnget)(pStream);
-		pArrayElement = bauma_json_parse_ext(pStream, pErrFormatter, pAlloc);
+		if (c == ',') {
+			++pStrWithLen->pStr;
+			--pStrWithLen->len;
+			continue;
+		}
+		pArrayElement = bauma_json_parse_ext(pStrWithLen, pErrFormatter, pAlloc);
 		if (pArrayElement == NULL) {
 			bauma_json_delete(pArray);
 			return NULL;
@@ -317,26 +322,27 @@ static bauma_JsonNode *bauma_json_parse_array(bauma_IInputStream *pStream,
 	return NULL; /* unreachable */
 }
 
-BAUMA_DEF bauma_JsonNode *bauma_json_parse_ext(const char *pStr,
-                                               size_t len,
-                                               bauma_StringBuilder* pErrFormatter,
-                                               bauma_IMemAllocator* pAlloc) {
-	int c;
-	bauma_json_assert(pStream != NULL);
+BAUMA_DEF bauma_JsonNode *bauma_json_parse_ext(bauma_json_StringWithLength *pStrWithLen,
+                                               bauma_StringBuilder *pErrFormatter,
+                                               bauma_IMemAllocator *pAlloc) {
+	char c;
+	bauma_json_assert(pStrWithLen != NULL);
 	bauma_json_assert(pAlloc != NULL);
-	c = bauma_json_nextChar(pStream);
+	bauma_json_skipWhiteSpace(pStrWithLen);
+	if (pStrWithLen->len == 0) return NULL;
+	c = *pStrWithLen->pStr;
 	switch(c) {
-		case '[': return bauma_json_parse_array(pStream, pErrFormatter, pAlloc);
+		case '[': return bauma_json_parse_array(pStrWithLen, pErrFormatter, pAlloc);
 		default: return NULL;
 	}
 }
 
-BAUMA_DEF bauma_JsonNode *bauma_json_parseStr_ext(const char *pStr,
-                                                  bauma_StringBuilder* pErrFormatter,
-                                                  bauma_IMemAllocator* pAlloc) {
-	return bauma_json_parse_ext(pStr, strlen(pStr), pErrFormatter, pAlloc);
+BAUMA_DEF bauma_JsonNode *bauma_json_parse(const void *pMem, size_t len) {
+	bauma_json_StringWithLength strWithLen;
+	strWithLen.pStr = (const char*)pMem;
+	strWithLen.len = len;
+	return bauma_json_parse_ext(&strWithLen, NULL, bauma_getDefaultMemAllocator());
 }
-
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -391,6 +397,6 @@ int main(int argc, char *argv[]) {
 	return 0;
 }
 
-#endif /* BAUMA_CCAL_TEST */
+#endif /* BAUMA_JSON_TEST */
 
-#endif /* BAUMA_CCAL_H_INCLUDED */
+#endif /* BAUMA_JSON_H_INCLUDED */

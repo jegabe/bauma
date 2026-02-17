@@ -134,7 +134,9 @@ BAUMA_DEF bauma_JsonNode *bauma_json_parse_ext(bauma_json_StringWithLength *pStr
                                                bauma_StringBuilder *pErrFormatter,
                                                bauma_IMemAllocator *pAlloc);
 
-BAUMA_DEF bauma_JsonNode *bauma_json_parse(const void *pMem, size_t len);
+BAUMA_DEF bauma_JsonNode *bauma_json_parseMem(const void *pMem, size_t len);
+BAUMA_DEF bauma_JsonNode *bauma_json_parseStr(const char *pStr);
+
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -337,11 +339,17 @@ BAUMA_DEF bauma_JsonNode *bauma_json_parse_ext(bauma_json_StringWithLength *pStr
 	}
 }
 
-BAUMA_DEF bauma_JsonNode *bauma_json_parse(const void *pMem, size_t len) {
+BAUMA_DEF bauma_JsonNode *bauma_json_parseMem(const void *pMem, size_t len) {
 	bauma_json_StringWithLength strWithLen;
 	strWithLen.pStr = (const char*)pMem;
 	strWithLen.len = len;
 	return bauma_json_parse_ext(&strWithLen, NULL, bauma_getDefaultMemAllocator());
+}
+
+BAUMA_DEF bauma_JsonNode *bauma_json_parseStr(const char *pStr) {
+	bauma_json_StringWithLength strWithLen;
+	strWithLen.pStr = pStr;
+	strWithLen.len = strlen(pStr);
 }
 
 #ifdef __cplusplus
@@ -355,6 +363,7 @@ BAUMA_DEF bauma_JsonNode *bauma_json_parse(const void *pMem, size_t len) {
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <math.h>
 
 #ifdef __cplusplus
 	extern "C" {
@@ -379,7 +388,82 @@ void bauma_test_exit_fail(const char *exp, const char *file, int line) {
 		f(); \
 	} while(0)
 
-void test_something(void) {
+void test_new(void) {
+	bauma_JsonNode *pNode;
+	bauma_JsonNode *pSubNode;
+	pNode = bauma_json_new();
+	/*
+	typedef union bauma_JsonNodeUnion {
+		bauma_bool_t    b;
+		bauma_intmax_t  si;
+		bauma_uintmax_t ui;
+		double          d;
+		char            *p;
+		bauma_Vector    v;
+	} bauma_JsonNodeUnion;
+
+	typedef struct bauma_JsonNode {
+		bauma_JsonNodeType    type;
+		bauma_JsonNodeUnion   value;
+		char                  *pKey;
+		bauma_IMemAllocator*  pAlloc;
+	} bauma_JsonNode;
+	*/
+	BAUMA_EXPECT(pNode != NULL);
+	BAUMA_EXPECT(pNode->type == BAUMA_JSON_NODE_TYPE_INVALID);
+	BAUMA_EXPECT(pNode->pKey == NULL);
+	BAUMA_EXPECT(pNode->pAlloc == bauma_getDefaultMemAllocator());
+	bauma_json_delete(pNode);
+	pNode = bauma_json_newNull();
+	BAUMA_EXPECT(pNode != NULL);
+	BAUMA_EXPECT(pNode->type == BAUMA_JSON_NODE_TYPE_NULL);
+	bauma_json_delete(pNode);
+	pNode = bauma_json_newBool(BAUMA_FALSE);
+	BAUMA_EXPECT(pNode->type == BAUMA_JSON_NODE_TYPE_BOOL);
+	BAUMA_EXPECT(!pNode->value.b);
+	bauma_json_delete(pNode);
+	pNode = bauma_json_newBool(BAUMA_TRUE);
+	BAUMA_EXPECT(pNode->type == BAUMA_JSON_NODE_TYPE_BOOL);
+	BAUMA_EXPECT(pNode->value.b);
+	bauma_json_delete(pNode);
+	pNode = bauma_json_newSigned(BAUMA_INTMAX_MIN);
+	BAUMA_EXPECT(pNode->type == BAUMA_JSON_NODE_TYPE_SIGNED);
+	BAUMA_EXPECT(pNode->value.si == BAUMA_INTMAX_MIN);
+	bauma_json_delete(pNode);
+	pNode = bauma_json_newSigned(BAUMA_INTMAX_MAX);
+	BAUMA_EXPECT(pNode->type == BAUMA_JSON_NODE_TYPE_SIGNED);
+	BAUMA_EXPECT(pNode->value.si == BAUMA_INTMAX_MAX);
+	bauma_json_delete(pNode);
+	pNode = bauma_json_newUnsigned(0u);
+	BAUMA_EXPECT(pNode->type == BAUMA_JSON_NODE_TYPE_UNSIGNED);
+	BAUMA_EXPECT(pNode->value.ui == 0u);
+	bauma_json_delete(pNode);
+	pNode = bauma_json_newUnsigned(BAUMA_UINTMAX_MAX);
+	BAUMA_EXPECT(pNode->type == BAUMA_JSON_NODE_TYPE_UNSIGNED);
+	BAUMA_EXPECT(pNode->value.ui == BAUMA_UINTMAX_MAX);
+	bauma_json_delete(pNode);
+	pNode = bauma_json_newDouble(3.14);
+	BAUMA_EXPECT(pNode->type == BAUMA_JSON_NODE_TYPE_DOUBLE);
+	BAUMA_EXPECT(fabs(pNode->value.d - 3.14) < 0.001);
+	bauma_json_delete(pNode);
+	pNode = bauma_json_newStr("Hello");
+	BAUMA_EXPECT(pNode->type == BAUMA_JSON_NODE_TYPE_STRING);
+	BAUMA_EXPECT(strcmp(pNode->value.p, "Hello") == 0);
+	bauma_json_delete(pNode);
+	pNode = bauma_json_newStrWithLen("Hello", 3u);
+	BAUMA_EXPECT(pNode->type == BAUMA_JSON_NODE_TYPE_STRING);
+	BAUMA_EXPECT(strcmp(pNode->value.p, "Hel") == 0);
+	bauma_json_delete(pNode);
+	pNode = bauma_json_newArray();
+	bauma_json_array_append(pNode, bauma_json_newStr("Hello"));
+	BAUMA_EXPECT(pNode->type == BAUMA_JSON_NODE_TYPE_ARRAY);
+	bauma_json_delete(pNode);
+	pNode = bauma_json_newObject();
+	bauma_json_object_append(pNode, "Key", bauma_json_newStr("Hello"));
+	BAUMA_EXPECT(pNode->type == BAUMA_JSON_NODE_TYPE_OBJECT);
+	pSubNode = *bauma_Vector_at(&pNode->value.v, 0, bauma_JsonNode*);
+	BAUMA_EXPECT(strcmp(pSubNode->pKey, "Key") == 0);
+	bauma_json_delete(pNode);
 }
 
 
@@ -390,7 +474,7 @@ void test_something(void) {
 int main(int argc, char *argv[]) {
 	(void)argc;
 	(void)argv;
-	BAUMA_TEST(test_something);
+	BAUMA_TEST(test_new);
 
 	printf("All tests passed.\n");
 	fflush(stdout);

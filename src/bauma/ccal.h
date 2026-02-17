@@ -217,6 +217,18 @@ BAUMA_DEF void *bauma_malloc(size_t size);
 BAUMA_DEF void bauma_free(void *p);
 BAUMA_DEF void *bauma_realloc(void *pOld, size_t newSize);
 
+#define bauma_new(ppData, dataType, ctor) \
+	do { \
+		(*ppData) = (dataType*)bauma_malloc(sizeof(dataType)); \
+		ctor(*ppData); \
+	} while(0)
+
+#define bauma_delete(ppData, dtor) \
+	do { \
+		dtor(*ppData); \
+		bauma_free(*ppData); \
+	} while(0)
+
 typedef void (*bauma_pDestructor)(void* pCurrentElement);
 
 typedef void (*bauma_pForEachHandler)(void *pCurrentElement, void *pOptUserData);

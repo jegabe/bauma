@@ -1,5 +1,5 @@
-#ifndef bauma_json_H_INCLUDED
-#define bauma_json_H_INCLUDED
+#ifndef BAUMA_JSON_H_INCLUDED
+#define BAUMA_JSON_H_INCLUDED
 
 /*
 ==============================================================================
@@ -31,8 +31,28 @@ more pleasant:
 
 - Allows trailing commata in lists, such as [1,2,3,] without errors
 - Allows C- and C++ style comments
-- Allows object/map keys to be written without quotes as long as they don't contain white space and are
-  in the range of [a-z][A-Z][0-9]_- without initial number character
+- Allows object/map keys (and other strings too) to be written without quotes
+  as long as they don't contain white space and are
+  in the range of [a-z][A-Z][0-9]_- without initial number character.
+
+So, for instance, this is recognized:
+
+{
+    name: Arnold, // The name
+    age: 34,      // The age
+}
+
+This makes it much more comfortable than this:
+
+{
+    "name_comment": "The name",
+    "name": "Arnold",
+    "age_comment": "The age",
+    "age": 34
+}
+
+Having those additional features doesn't make the parser much more complicated
+but makes writing this json dialect a joy.
 
 */
 

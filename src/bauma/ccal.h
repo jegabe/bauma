@@ -37,8 +37,6 @@ CCAL has no dependencies except for some common C89 header such as <string.h>,
 
 The following data structures and algorithms are supported:
 
-- bauma_dynarray_append(): Minimalist macro to have dynamic arrays without bauma_Vector overhead
-  but less powerful
 - bauma_Vector: Powerful, general purpose dynamic array, also nestable in other containers
 
 How to include in other projects:
@@ -187,17 +185,37 @@ such as "static inline" or "declspec(dllimport)"
 	extern "C" {
 #endif
 
-/*! Initial dynamic array capacity for bauma_dynarray_append */
+/*! Initial dynamic array capacity for various containers */
 #define BAUMA_INITIAL_CAPACITY 16u
 
-/*! Capacity growth factor for bauma_dynarray_append */
+/*! Capacity growth factor for various containers */
 #define BAUMA_CAPACITY_GROWTH 2u
 
 #define bauma_min(a, b) ((a) < (b) ? (a) : (b))
 #define bauma_max(a, b) ((a) < (b) ? (a) : (b))
 
-/*! \brief Signature for memory allocators for customizing containers */
-typedef void*(*bauma_pDynmem_handler)(void*, size_t, size_t*);
+typedef struct bauma_IMemAllocator bauma_IMemAllocator;
+
+struct bauma_IMemAllocator {
+  void (*pDestroy)(bauma_IMemAllocator *pSelf);
+  void *(*pRealloc)(bauma_IMemAllocator *pSelf,
+                    void *pOld,
+                    size_t newSsize,
+                    size_t *pOptRealSize);
+};
+
+#ifdef BAUMA_DYNAMIC_LINKAGE
+	BAUMA_DEF bauma_IMemAllocator *bauma_getDefaultMemAllocator(void);
+#else
+	extern const bauma_IMemAllocator bauma_defaultMemAllocator;
+	#define bauma_getDefaultMemAllocator() \
+		((bauma_IMemAllocator*)&bauma_defaultMemAllocator)
+#endif
+
+/*! Uses bauma_getDefaultMemAllocator */
+BAUMA_DEF void *bauma_malloc(size_t size);
+BAUMA_DEF void bauma_free(void *p);
+BAUMA_DEF void *bauma_realloc(void *pOld, size_t newSize);
 
 typedef void (*bauma_pDestructor)(void* pCurrentElement);
 
@@ -205,31 +223,6 @@ typedef void (*bauma_pForEachHandler)(void *pCurrentElement, void *pOptUserData)
 
 /*! \brief Prints error message to stderr and calls exit(1) to terminate the application */
 BAUMA_DEF void bauma_exit_err(const char *msg);
-
-/*!
-\brief To allocate, re-allocate and free memory according to bauma_memalloc_function.
-
-This is designed to behave more well-defined than plain realloc(): When going out of memory,
-the application is terminated instead of returning NULL pointer; when size is zero, NULL
-is guaranteed to be returned since that is a legitimate pointer to a memory block of size zero.
-The realsize parameter is optional and can be used when the memory allocator is smart enough to
-know the real memory block sizes which might be greater than size. This info can be used
-to make smarter reallocations, but the default implementation based on malloc/realloc/free can
-of course not know that.
-\param pOld Old memory block or NULL to allocate a new memory block
-\param newSize Wanted memory block size or 0 to deallocate
-\param pOptRealSize Output parameter receiving the number of allocated bytes
-*/
-BAUMA_DEF void *bauma_default_dynmem_handler(void *pOld, size_t newSsize, size_t *pOptRealSize);
-
-/*! Short-hand for just allocating memory */
-#define bauma_malloc(s) bauma_default_dynmem_handler(NULL, s, NULL)
-
-/*! Short-hand for just freeing memoy*/
-#define bauma_free(p) (void)bauma_default_dynmem_handler(p, 0, NULL)
-
-/*! Short-hand for just reallicating freeing memoy, ignoring the real block size */
-#define bauma_realloc(p, n) bauma_default_dynmem_handler(p, n, NULL)
 
 
 /*!
@@ -250,73 +243,26 @@ BAUMA_DEF void bauma_memblock_destructor(void* ppMemBlock);
 \param p A null-terminated string
 \param alloc Memory allocator to be used
 */
-BAUMA_DEF char* bauma_strdup_ext(const char* p, bauma_pDynmem_handler alloc);
+BAUMA_DEF char* bauma_strdup_ext(const char* p, bauma_IMemAllocator *pAlloc);
 
 /*!
 \brief Short-hand of bauma_strdup_ext() using the default allocator
 \param p A null-terminated string
 */
-#define bauma_strdup(p) bauma_strdup_ext(p, &bauma_default_dynmem_handler)
+#define bauma_strdup(p) bauma_strdup_ext(p, bauma_getDefaultMemAllocator())
 
 /*
 \brief Allocates a copy of the passed null-terminated string and returns it
 \param p A null-terminated string
 \param alloc Memory allocator to be used
 */
-BAUMA_DEF char* bauma_strdupn_ext(const char* p, size_t n, bauma_pDynmem_handler alloc);
+BAUMA_DEF char* bauma_strdupn_ext(const char* p, size_t n, bauma_IMemAllocator *pAlloc);
 
 /*!
 \brief Short-hand of bauma_strdup_ext() using the default allocator
 \param p A null-terminated string
 */
-#define bauma_strdupn(p, l) bauma_strdupn_ext(p, l, &bauma_default_dynmem_handler)
-
-/*!
-\brief Minimalistic approach for dynamically growing array.
-
-To use it, define a struct having 3 elements: items, size and capacity,
-just like this:
-\code
-typedef struct Ints
-{
-	int *items;
-	size_t size;
-	size_t capacity;
-} Ints;
-\endcode
-and intialize that with "{0}". After that, bauma_dynarray_append can be used to dynamically
-append items, doing reallocations where needed. Full example:
-\code
-typedef struct Ints
-{
-	int *items;
-	size_t size;
-	size_t capacity;
-} Ints;
-
-Ints ints = {0};
-bauma_dynarray_append(&ints, int, 0);
-bauma_dynarray_append(&ints, int, 0);
-bauma_dynarray_append(&ints, int, 0);
-bauma_free(ints.items);
-\endcode
-*/
-#define bauma_dynarray_append(d, t, e) \
-	do { \
-		if ((d)->size >= (d)->capacity) { \
-			size_t newcap_; \
-			size_t realNewCap_; \
-			if ((d)->capacity == 0) { \
-				newcap_ = BAUMA_INITIAL_CAPACITY; \
-			} \
-			else { \
-				newcap_ = (d)->capacity * BAUMA_CAPACITY_GROWTH; \
-			} \
-			(d)->items = (t*)bauma_default_dynmem_handler((d)->items, newcap_ * sizeof(t), &realNewCap_); \
-			(d)->capacity = realNewCap_ / sizeof(t); \
-		} \
-		(d)->items[(d)->size++] = e; \
-	} while(0)
+#define bauma_strdupn(p, l) bauma_strdupn_ext(p, l, bauma_getDefaultMemAllocator())
 
 typedef union bauma_VectorDataPtr_ {
 /* Used by the implementation: */
@@ -347,14 +293,14 @@ typedef union bauma_VectorDataPtr_ {
 } bauma_VectorDataPtr_;
 
 typedef struct bauma_Vector {
-	bauma_VectorDataPtr_  d;
-	size_t                elementSize;
-	size_t                size;
-	size_t                capacity;
-	bauma_pDestructor     pDestructor;
-	bauma_pDynmem_handler pMemHandler;
+	bauma_VectorDataPtr_      d;
+	size_t                    elementSize;
+	size_t                    size;
+	size_t                    capacity;
+	bauma_pDestructor         pDestructor;
+	bauma_IMemAllocator       *pAlloc;
 #if BAUMA_DEBUG
-	const char            *pDataType;
+	const char                *pDataType;
 #endif
 } bauma_Vector;
 
@@ -370,7 +316,7 @@ BAUMA_DEF void BAUMA_DEBUG_SUFFIX(bauma_Vector_construct_impl)(
 	bauma_Vector *pSelf,
 	size_t elemSize, 
 	bauma_pDestructor pElementDestructor,
-	bauma_pDynmem_handler pMemHandler
+	bauma_IMemAllocator *pAlloc
 	BAUMA_DEBUG_OPT_PARAM(const char* pDataType)
 );
 
@@ -388,7 +334,7 @@ BAUMA_DEF void BAUMA_DEBUG_SUFFIX(bauma_Vector_construct_impl)(
 		pSelf, \
 		sizeof(dataType), \
 		pElementDestructor, \
-		&bauma_default_dynmem_handler \
+		bauma_getDefaultMemAllocator() \
 		BAUMA_DEBUG_OPT_PARAM(#dataType) \
 	)
 
@@ -429,11 +375,11 @@ typedef struct bauma_StringBuilder {
 	char* pStr;
 	size_t size; /* not counting the null terminator */
 	size_t capacity;
-	bauma_pDynmem_handler pMemHandler;
+	bauma_IMemAllocator *pAlloc;
 } bauma_StringBuilder;
 
-BAUMA_DEF void bauma_StringBuilder_construct_ext(bauma_StringBuilder *pSelf, size_t capacity, bauma_pDynmem_handler pMemHandler);
-#define bauma_StringBuilder_construct(pSelf) bauma_StringBuilder_construct_ext((pSelf), BAUMA_INITIAL_CAPACITY, &bauma_default_dynmem_handler)
+BAUMA_DEF void bauma_StringBuilder_construct_ext(bauma_StringBuilder *pSelf, size_t capacity, bauma_IMemAllocator *pAlloc);
+#define bauma_StringBuilder_construct(pSelf) bauma_StringBuilder_construct_ext((pSelf), BAUMA_INITIAL_CAPACITY, bauma_getDefaultMemAllocator())
 BAUMA_DEF void bauma_StringBuilder_destruct(bauma_StringBuilder *pSelf);
 #define bauma_StringBuilder_getStr(pSelf) ((pSelf)->pStr)
 #define bauma_StringBuilder_getSize(pSelf) ((pSelf)->size)
@@ -498,7 +444,14 @@ BAUMA_DEF void bauma_exit_err(const char *msg) {
 #endif
 }
 
-BAUMA_DEF void *bauma_default_dynmem_handler(void *pOld, size_t newSize, size_t *pOptRealSize) {
+static void bauma_defaultMemAllocator_destroy(const bauma_IMemAllocator *pSelf) {
+	(void)pSelf;
+}
+
+static void *bauma_defaultMemAllocator_realloc(const bauma_IMemAllocator *pSelf,
+                                               void *pOld,
+                                               size_t newSize,
+                                               size_t *pOptRealSize) {
 #ifdef bauma_custom_dynmem_handler
 	bauma_custom_dynmem_handler(pOld, newSize, pOptRealSize);
 #else
@@ -534,27 +487,66 @@ BAUMA_DEF void *bauma_default_dynmem_handler(void *pOld, size_t newSize, size_t 
 #endif
 }
 
-BAUMA_DEF void bauma_memblock_destructor(void* ppMemBlock) {
-	void* pMemBlock = *(void**)ppMemBlock;
-	bauma_default_dynmem_handler(pMemBlock, 0, NULL);
+#ifdef BAUMA_DYNAMIC_LINKAGE
+
+static const bauma_IMemAllocator bauma_defaultMemAllocator = {
+	 &bauma_defaultMemAllocator_destroy
+	,&bauma_defaultMemAllocator_realloc
+};
+
+BAUMA_DEF bauma_IMemAllocator *bauma_getDefaultMemAllocator(void) {
+	return (bauma_IMemAllocator*)&bauma_defaultMemAllocator;
 }
 
-BAUMA_DEF char* bauma_strdup_ext(const char* p, bauma_pDynmem_handler alloc) {
+/* To make the following code faster */
+#define bauma_getDefaultMemAllocator() \
+	((bauma_IMemAllocator*)&bauma_defaultMemAllocator)
+
+#else
+
+const bauma_IMemAllocator bauma_defaultMemAllocator = {
+	 &bauma_defaultMemAllocator_destroy
+	,&bauma_defaultMemAllocator_realloc
+};
+
+#endif
+
+BAUMA_DEF void *bauma_malloc(size_t size) {
+	bauma_IMemAllocator* pAlloc = bauma_getDefaultMemAllocator();
+	return (*pAlloc->pRealloc)(pAlloc, NULL, size, NULL);
+}
+
+BAUMA_DEF void bauma_free(void *p) {
+	bauma_IMemAllocator* pAlloc = bauma_getDefaultMemAllocator();
+	(void)(*pAlloc->pRealloc)(pAlloc, p, 0, NULL);
+}
+
+BAUMA_DEF void *bauma_realloc(void *pOld, size_t newSize) {
+	bauma_IMemAllocator* pAlloc = bauma_getDefaultMemAllocator();
+	return (*pAlloc->pRealloc)(pAlloc, pOld, newSize, NULL);
+}
+
+BAUMA_DEF void bauma_memblock_destructor(void* ppMemBlock) {
+	void* pMemBlock = *(void**)ppMemBlock;
+	bauma_free(pMemBlock);
+}
+
+BAUMA_DEF char* bauma_strdup_ext(const char* p, bauma_IMemAllocator *pAlloc) {
 	size_t l;
 	char *c;
 	bauma_assert((p != NULL) && "String must not be NULL");
-	bauma_assert((alloc != NULL) && "Allocator must not be NULL");
+	bauma_assert((pAlloc != NULL) && "Allocator must not be NULL");
 	l = strlen(p) + 1u; /* +1 to include the null terminator */
-	c = (char*)((*alloc)(NULL, l, NULL));
+	c = (char*)((pAlloc->pRealloc)(pAlloc, NULL, l, NULL));
 	memcpy(c, p, l);
 	return c;
 }
 
-BAUMA_DEF char* bauma_strdupn_ext(const char* p, size_t n, bauma_pDynmem_handler alloc) {
+BAUMA_DEF char* bauma_strdupn_ext(const char* p, size_t n, bauma_IMemAllocator *pAlloc) {
 	char *c;
 	bauma_assert((p != NULL) && "String must not be NULL");
-	bauma_assert((alloc != NULL) && "Allocator must not be NULL");
-	c = (char*)((*alloc)(NULL, n + 1u, NULL));
+	bauma_assert((pAlloc != NULL) && "Allocator must not be NULL");
+	c = (char*)((*pAlloc->pRealloc)(pAlloc, NULL, n + 1u, NULL));
 	memcpy(c, p, n);
 	c[n] = '\0';
 	return c;
@@ -564,18 +556,18 @@ BAUMA_DEF void BAUMA_DEBUG_SUFFIX(bauma_Vector_construct_impl)(
 	bauma_Vector *pSelf,
 	size_t elemSize, 
 	bauma_pDestructor pElementDestructor,
-	bauma_pDynmem_handler pMemHandler
+	bauma_IMemAllocator *pAlloc
 	BAUMA_DEBUG_OPT_PARAM(const char* pDataType)
 ) {
 	bauma_assert(pSelf != NULL);
 	bauma_assert(elemSize > 0);
-	bauma_assert(pMemHandler != NULL);
+	bauma_assert(pAlloc != NULL);
 	pSelf->d.pData = NULL;
 	pSelf->elementSize = elemSize;
 	pSelf->size = 0;
 	pSelf->capacity = 0;
 	pSelf->pDestructor = pElementDestructor;
-	pSelf->pMemHandler = pMemHandler;
+	pSelf->pAlloc = pAlloc;
 #if BAUMA_DEBUG
 	bauma_assert(pDataType != NULL);
 	pSelf->pDataType = pDataType;
@@ -592,7 +584,7 @@ BAUMA_DEF void bauma_Vector_destruct(bauma_Vector *pSelf) {
 			(*pSelf->pDestructor)(p);
 		}
 	}
-	(*pSelf->pMemHandler)(pSelf->d.pData, 0, NULL);
+	(*pSelf->pAlloc->pRealloc)(pSelf->pAlloc, pSelf->d.pData, 0, NULL);
 #if BAUMA_DEBUG
 	memset(pSelf, 0xFF, sizeof(*pSelf));
 #endif
@@ -602,7 +594,7 @@ BAUMA_DEF void bauma_Vector_reserve(bauma_Vector *pSelf, size_t num) {
 	size_t newCap;
 	size_t realNewCap;
 	bauma_assert(pSelf != NULL);
-	bauma_assert(pSelf->pMemHandler != NULL);
+	bauma_assert(pSelf->pAlloc != NULL);
 	if ((pSelf->size + num) <= (pSelf->capacity)) {
 		return;
 	}
@@ -615,8 +607,7 @@ BAUMA_DEF void bauma_Vector_reserve(bauma_Vector *pSelf, size_t num) {
 	while((pSelf->size + num) > newCap) {
 		newCap *= BAUMA_CAPACITY_GROWTH;
 	}
-	bauma_assert(pSelf->pMemHandler != NULL);
-	pSelf->d.pData = (*pSelf->pMemHandler)(pSelf->d.pData, newCap * pSelf->elementSize, &realNewCap);
+	pSelf->d.pData = (*pSelf->pAlloc->pRealloc)(pSelf->pAlloc, pSelf->d.pData, newCap * pSelf->elementSize, &realNewCap);
 	pSelf->capacity = realNewCap / pSelf->elementSize;
 }
 
@@ -669,21 +660,21 @@ BAUMA_DEF void bauma_Vector_callForEach(bauma_Vector *pSelf, bauma_pForEachHandl
 static const char BAUMA_NULLSTR_[1] = {'\0'};
 #define BAUMA_NULLSTR ((char*)BAUMA_NULLSTR_)
 
-BAUMA_DEF void bauma_StringBuilder_construct_ext(bauma_StringBuilder *pSelf, size_t capacity, bauma_pDynmem_handler pMemHandler) {
+BAUMA_DEF void bauma_StringBuilder_construct_ext(bauma_StringBuilder *pSelf, size_t capacity, bauma_IMemAllocator *pAlloc) {
 	bauma_assert(pSelf != NULL);
 	bauma_assert(capacity > 0);
-	bauma_assert(pMemHandler != NULL);
+	bauma_assert(pAlloc != NULL);
 	pSelf->pStr = BAUMA_NULLSTR;
 	pSelf->size = 0;
 	pSelf->capacity = 0;
-	pSelf->pMemHandler = pMemHandler;
+	pSelf->pAlloc = pAlloc;
 }
 
 BAUMA_DEF void bauma_StringBuilder_destruct(bauma_StringBuilder *pSelf) {
 	bauma_assert(pSelf != NULL);
-	bauma_assert(pSelf->pMemHandler != NULL);
+	bauma_assert(pSelf->pAlloc != NULL);
 	if (pSelf->pStr != BAUMA_NULLSTR) {
-		(*pSelf->pMemHandler)(pSelf->pStr, 0, NULL);
+		(*pSelf->pAlloc->pRealloc)(pSelf->pAlloc, pSelf->pStr, 0, NULL);
 	}
 #if BAUMA_DEBUG
 	memset(pSelf, 0xFF, sizeof(*pSelf));
@@ -695,10 +686,10 @@ BAUMA_DEF char *bauma_StringBuilder_release(bauma_StringBuilder *pSelf) {
 	bauma_assert(pSelf != NULL);
 	bauma_assert(pSelf->pStr != NULL);
 	bauma_assert(pSelf->pStr[pSelf->size] == '\0');
-	bauma_assert(pSelf->pMemHandler != NULL);
+	bauma_assert(pSelf->pAlloc != NULL);
 	if (pSelf->pStr == BAUMA_NULLSTR) {
 		/* Give client always something on the heap */
-		p = (*pSelf->pMemHandler)(NULL, 1u, NULL);
+		p = (*pSelf->pAlloc->pRealloc)(pSelf->pAlloc, NULL, 1u, NULL);
 		p[0] = '\0';
 	}
 	else {
@@ -714,7 +705,7 @@ BAUMA_DEF void bauma_StringBuilder_reserve(bauma_StringBuilder *pSelf, size_t nu
 	size_t newCap;
 	size_t realNewCap;
 	bauma_assert(pSelf != NULL);
-	bauma_assert(pSelf->pMemHandler != NULL);
+	bauma_assert(pSelf->pAlloc != NULL);
 	if ((pSelf->size + num) <= (pSelf->capacity)) {
 		return;
 	}
@@ -727,13 +718,13 @@ BAUMA_DEF void bauma_StringBuilder_reserve(bauma_StringBuilder *pSelf, size_t nu
 	while((pSelf->size + num) > newCap) {
 		newCap *= BAUMA_CAPACITY_GROWTH;
 	}
-	bauma_assert(pSelf->pMemHandler != NULL);
+	bauma_assert(pSelf->pAlloc != NULL);
 	if (pSelf->pStr == BAUMA_NULLSTR) {
-		pSelf->pStr = (*pSelf->pMemHandler)(NULL, newCap + 1u, &realNewCap);
+		pSelf->pStr = (*pSelf->pAlloc->pRealloc)(pSelf->pAlloc, NULL, newCap + 1u, &realNewCap);
 		pSelf->pStr[0] = '\0';
 	}
 	else {
-		pSelf->pStr = (*pSelf->pMemHandler)(pSelf->pStr, newCap + 1u, &realNewCap);
+		pSelf->pStr = (*pSelf->pAlloc->pRealloc)(pSelf->pAlloc, pSelf->pStr, newCap + 1u, &realNewCap);
 	}
 	pSelf->capacity = realNewCap - 1u;
 }
@@ -818,7 +809,7 @@ BAUMA_DEF void bauma_StringBuilder_appendBool(bauma_StringBuilder *pSelf, bauma_
 
 static int bauma_InputStreamFromMemory_getChar(bauma_IInputStream *pSelf_) {
 	bauma_InputStreamFromMemory *pSelf;
-	bauma_assert(pSelf != NULL);
+	bauma_assert(pSelf_ != NULL);
 	pSelf = (bauma_InputStreamFromMemory*)pSelf_;
 	if (pSelf->size > 0) {
 		int result = *pSelf->pMem;
@@ -832,7 +823,7 @@ static int bauma_InputStreamFromMemory_getChar(bauma_IInputStream *pSelf_) {
 static size_t bauma_InputStreamFromMemory_get(bauma_IInputStream *pSelf_, char* pBuf, size_t bufSize) {
 	size_t num;
 	bauma_InputStreamFromMemory *pSelf;
-	bauma_assert(pSelf != NULL);
+	bauma_assert(pSelf_ != NULL);
 	pSelf = (bauma_InputStreamFromMemory*)pSelf_;
 	num = bauma_min(pSelf->size, bufSize);
 	memcpy(pBuf, pSelf->pMem, num);
@@ -843,7 +834,7 @@ static size_t bauma_InputStreamFromMemory_get(bauma_IInputStream *pSelf_, char* 
 
 static void bauma_InputStreamFromMemory_unget(bauma_IInputStream *pSelf_) {
 	bauma_InputStreamFromMemory *pSelf;
-	bauma_assert(pSelf != NULL);
+	bauma_assert(pSelf_ != NULL);
 	pSelf = (bauma_InputStreamFromMemory*)pSelf_;
 	--pSelf->pMem;
 	++pSelf->size;
@@ -908,26 +899,6 @@ typedef struct Ints {
 	size_t capacity;
 } Ints;
 
-void test_dynarray_append(void) {
-	Ints ints = {0};
-	size_t i;
-	bauma_dynarray_append(&ints, int, 0);
-	bauma_dynarray_append(&ints, int, 1);
-	bauma_dynarray_append(&ints, int, 2);
-	BAUMA_EXPECT(ints.size == 3);
-	BAUMA_EXPECT(ints.capacity == BAUMA_INITIAL_CAPACITY);
-	for (i=3; i<BAUMA_INITIAL_CAPACITY; ++i)
-	{
-		bauma_dynarray_append(&ints, int, (int)i);
-	}
-	BAUMA_EXPECT(ints.size == BAUMA_INITIAL_CAPACITY);
-	BAUMA_EXPECT(ints.capacity == BAUMA_INITIAL_CAPACITY);
-	bauma_dynarray_append(&ints, int, BAUMA_INITIAL_CAPACITY);
-	BAUMA_EXPECT(ints.capacity == (BAUMA_INITIAL_CAPACITY * BAUMA_CAPACITY_GROWTH));
-
-	bauma_free(ints.items);
-}
-
 void test_dummy_int_destruct(int* p) {
 	(void)p;
 }
@@ -940,7 +911,7 @@ void test_vector_construct(void) {
 	BAUMA_EXPECT(v.size == 0);
 	BAUMA_EXPECT(v.capacity == 0);
 	BAUMA_EXPECT(v.pDestructor == (bauma_pDestructor)&test_dummy_int_destruct);
-	BAUMA_EXPECT(v.pMemHandler == &bauma_default_dynmem_handler);
+	BAUMA_EXPECT(v.pAlloc == bauma_getDefaultMemAllocator());
 #if BAUMA_DEBUG
 	BAUMA_EXPECT(strcmp(v.pDataType, "int") == 0);
 #endif
@@ -1042,7 +1013,7 @@ void test_stringBuilder_construct(void) {
 	BAUMA_EXPECT(sb.pStr = BAUMA_NULLSTR);
 	BAUMA_EXPECT(sb.size == 0);
 	BAUMA_EXPECT(sb.capacity == 0);
-	BAUMA_EXPECT(sb.pMemHandler = &bauma_default_dynmem_handler);
+	BAUMA_EXPECT(sb.pAlloc = bauma_getDefaultMemAllocator());
 	bauma_StringBuilder_destruct(&sb);
 }
 
@@ -1058,7 +1029,7 @@ void test_stringBuilder_release(void) {
 	BAUMA_EXPECT(sb.pStr = BAUMA_NULLSTR);
 	BAUMA_EXPECT(sb.size == 0);
 	BAUMA_EXPECT(sb.capacity == 0);
-	BAUMA_EXPECT(sb.pMemHandler = &bauma_default_dynmem_handler);
+	BAUMA_EXPECT(sb.pAlloc = bauma_getDefaultMemAllocator());
 	bauma_StringBuilder_destruct(&sb);
 	/* Release of empty string should heap-allocate: */
 	bauma_StringBuilder_construct(&sb);
@@ -1184,7 +1155,6 @@ int main(int argc, char *argv[]) {
 	(void)argc;
 	(void)argv;
 	BAUMA_TEST(test_strdup);
-	BAUMA_TEST(test_dynarray_append);
 	BAUMA_TEST(test_vector_construct);
 	BAUMA_TEST(test_vector_append);
 	BAUMA_TEST(test_vector_at);

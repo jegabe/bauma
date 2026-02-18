@@ -625,7 +625,9 @@ BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parse_ext(bauma_nson_StringWithLength 
 	bauma_nson_assert(pStrWithLen != NULL);
 	bauma_nson_assert(pAlloc != NULL);
 	bauma_nson_skip(pStrWithLen);
+	bauma_nson_assert(pStrWithLen->pStr[pStrWithLen->len] == '\0');
 	if (pStrWithLen->len == 0) return NULL;
+	if (pStrWithLen->pStr[pStrWithLen->len] != '\0') return NULL;
 	c = *pStrWithLen->pStr;
 	switch(c) {
 		case '[': return bauma_nson_parse_array(pStrWithLen, pErrFormatter, pAlloc);

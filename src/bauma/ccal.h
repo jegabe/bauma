@@ -381,6 +381,8 @@ BAUMA_DEF void BAUMA_DEBUG_SUFFIX(bauma_Vector_append_impl)(
 	    pElement < ((dataType*)(((char*)(pSelf)->d.pData) + ((pSelf)->size) * (pSelf)->elementSize)); \
 		pElement = ((dataType*)(((char*)(pElement)) + (pSelf)->elementSize)))
 
+#define bauma_Vector_getSize(pSelf) ((pSelf)->size)
+
 BAUMA_DEF void bauma_Vector_callForEach(bauma_Vector *pSelf, bauma_pForEachHandler pFunc, void *pOptUserData);
 
 typedef struct bauma_StringBuilder {

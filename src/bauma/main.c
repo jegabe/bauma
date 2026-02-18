@@ -1,8 +1,7 @@
-#include <stdio.h>
+#define _CRT_SECURE_NO_WARNINGS
 #define BAUMA_CCAL_IMPLEMENTATION
-#include <bauma/ccal.h>
+#define BAUMA_NSON_IMPLEMENTATION
+#define BAUMA_NSON_TEST
 
-int main(int argc, char *argv[]) {
-    printf("Hello, World!\n");
-    return 0;
-}
+#include <bauma/ccal.h>
+#include <bauma/nson.h>

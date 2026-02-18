@@ -624,8 +624,8 @@ BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parse_ext(bauma_nson_StringWithLength 
 	char c;
 	bauma_nson_assert(pStrWithLen != NULL);
 	bauma_nson_assert(pAlloc != NULL);
-	bauma_nson_skip(pStrWithLen);
 	bauma_nson_assert(pStrWithLen->pStr[pStrWithLen->len] == '\0');
+	bauma_nson_skip(pStrWithLen);
 	if (pStrWithLen->len == 0) return NULL;
 	if (pStrWithLen->pStr[pStrWithLen->len] != '\0') return NULL;
 	c = *pStrWithLen->pStr;
@@ -854,7 +854,7 @@ int main(int argc, char *argv[]) {
 	(void)argc;
 	(void)argv;
 	BAUMA_TEST(test_new);
-  BAUMA_TEST(test_parse);
+	BAUMA_TEST(test_parse);
 
 	printf("All tests passed.\n");
 	fflush(stdout);

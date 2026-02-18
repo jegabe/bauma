@@ -837,10 +837,10 @@ void test_parse(void) {
 	BAUMA_EXPECT(pNode->type == BAUMA_NSON_NODE_TYPE_STRING);
 	BAUMA_EXPECT(strcmp(pNode->value.p, "\x01") == 0);
 	bauma_nson_delete(pNode);
-	pNode = bauma_nson_parseStr("\"\\u00E4\"");
+	pNode = bauma_nson_parseStr("\"H\\u00E4llo\"");
 	BAUMA_EXPECT(pNode != NULL);
 	BAUMA_EXPECT(pNode->type == BAUMA_NSON_NODE_TYPE_STRING);
-	BAUMA_EXPECT(strcmp(pNode->value.p, "\xC3\xA4") == 0);
+	BAUMA_EXPECT(strcmp(pNode->value.p, "H\xC3\xA4llo") == 0);
 	bauma_nson_delete(pNode);
 }
 

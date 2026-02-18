@@ -71,6 +71,10 @@ but makes writing this json dialect a joy.
 	extern "C" {
 #endif
 
+#ifndef BAUMA_NSON_DEF
+	#define BAUMA_NSON_DEF
+#endif
+
 typedef struct bauma_nson_StringWithLength {
 	const char *pStr;
 	size_t len;
@@ -105,46 +109,46 @@ typedef struct bauma_NsonNode {
 	bauma_IMemAllocator*  pAlloc;
 } bauma_NsonNode;
 
-BAUMA_DEF bauma_NsonNode *bauma_nson_new_ext(bauma_IMemAllocator* pAlloc);
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_new_ext(bauma_IMemAllocator* pAlloc);
 #define bauma_nson_new() bauma_nson_new_ext(bauma_getDefaultMemAllocator())
 
-BAUMA_DEF bauma_NsonNode *bauma_nson_newNull_ext(bauma_IMemAllocator* pAlloc);
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_newNull_ext(bauma_IMemAllocator* pAlloc);
 #define bauma_nson_newNull() bauma_nson_newNull_ext(bauma_getDefaultMemAllocator())
 
-BAUMA_DEF bauma_NsonNode *bauma_nson_newBool_ext(bauma_bool_t value, bauma_IMemAllocator* pAlloc);
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_newBool_ext(bauma_bool_t value, bauma_IMemAllocator* pAlloc);
 #define bauma_nson_newBool(value) bauma_nson_newBool_ext((value), bauma_getDefaultMemAllocator())
 
-BAUMA_DEF bauma_NsonNode *bauma_nson_newSigned_ext(bauma_intmax_t value, bauma_IMemAllocator* pAlloc);
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_newSigned_ext(bauma_intmax_t value, bauma_IMemAllocator* pAlloc);
 #define bauma_nson_newSigned(value) bauma_nson_newSigned_ext((value), bauma_getDefaultMemAllocator())
 
-BAUMA_DEF bauma_NsonNode *bauma_nson_newUnsigned_ext(bauma_uintmax_t value, bauma_IMemAllocator* pAlloc);
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_newUnsigned_ext(bauma_uintmax_t value, bauma_IMemAllocator* pAlloc);
 #define bauma_nson_newUnsigned(value) bauma_nson_newUnsigned_ext((value), bauma_getDefaultMemAllocator())
 
-BAUMA_DEF bauma_NsonNode *bauma_nson_newDouble_ext(double value, bauma_IMemAllocator* pAlloc);
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_newDouble_ext(double value, bauma_IMemAllocator* pAlloc);
 #define bauma_nson_newDouble(value) bauma_nson_newDouble_ext((value), bauma_getDefaultMemAllocator())
 
-BAUMA_DEF bauma_NsonNode *bauma_nson_newStr_ext(const char *pValue, bauma_IMemAllocator* pAlloc);
-#define bauma_nson_newStr(value) bauma_nson_newStr_ext((value), bauma_getDefaultMemAllocator())
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_newStr_ext(const char *pValue, bauma_bool_t xferOwnership, bauma_IMemAllocator* pAlloc);
+#define bauma_nson_newStr(value) bauma_nson_newStr_ext((value), BAUMA_FALSE, bauma_getDefaultMemAllocator())
 
-BAUMA_DEF bauma_NsonNode *bauma_nson_newStrWithLen_ext(const char *pValue, size_t valueLen, bauma_IMemAllocator* pAlloc);
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_newStrWithLen_ext(const char *pValue, size_t valueLen, bauma_IMemAllocator* pAlloc);
 #define bauma_nson_newStrWithLen(value, len) bauma_nson_newStrWithLen_ext((value), (len), bauma_getDefaultMemAllocator())
 
-BAUMA_DEF bauma_NsonNode *bauma_nson_newArray_ext(bauma_IMemAllocator* pAlloc);
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_newArray_ext(bauma_IMemAllocator* pAlloc);
 #define bauma_nson_newArray() bauma_nson_newArray_ext(bauma_getDefaultMemAllocator())
-BAUMA_DEF void bauma_nson_array_append(bauma_NsonNode* pNode, bauma_NsonNode* pArrayElement);
+BAUMA_NSON_DEF void bauma_nson_array_append(bauma_NsonNode* pNode, bauma_NsonNode* pArrayElement);
 
-BAUMA_DEF bauma_NsonNode *bauma_nson_newObject_ext(bauma_IMemAllocator* pAlloc);
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_newObject_ext(bauma_IMemAllocator* pAlloc);
 #define bauma_nson_newObject() bauma_nson_newObject_ext(bauma_getDefaultMemAllocator())
-BAUMA_DEF void bauma_nson_object_append(bauma_NsonNode* pNode, const char *pKey, bauma_bool_t xferKeyOwnership, bauma_NsonNode *pValue);
+BAUMA_NSON_DEF void bauma_nson_object_append(bauma_NsonNode* pNode, const char *pKey, bauma_bool_t xferKeyOwnership, bauma_NsonNode *pValue);
 
-BAUMA_DEF void bauma_nson_delete(bauma_NsonNode *pNode);
+BAUMA_NSON_DEF void bauma_nson_delete(bauma_NsonNode *pNode);
 
-BAUMA_DEF bauma_NsonNode *bauma_nson_parse_ext(bauma_nson_StringWithLength *pStrWithLen,
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parse_ext(bauma_nson_StringWithLength *pStrWithLen,
                                                bauma_StringBuilder *pErrFormatter,
                                                bauma_IMemAllocator *pAlloc);
 
-BAUMA_DEF bauma_NsonNode *bauma_nson_parseMem(const void *pMem, size_t len);
-BAUMA_DEF bauma_NsonNode *bauma_nson_parseStr(const char *pStr);
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parseMem(const void *pMem, size_t len);
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parseStr(const char *pStr);
 
 
 #ifdef __cplusplus
@@ -177,7 +181,7 @@ static void bauma_nson_NodePtr_destruct(void *ppNode) {
 	}
 }
 
-BAUMA_DEF bauma_NsonNode *bauma_nson_new_ext(bauma_IMemAllocator* pAlloc) {
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_new_ext(bauma_IMemAllocator* pAlloc) {
 	bauma_NsonNode *p;
 	bauma_nson_assert(pAlloc != NULL);
 	p = (bauma_NsonNode*)(*pAlloc->pRealloc)(pAlloc, NULL, sizeof(bauma_NsonNode), NULL);
@@ -186,69 +190,74 @@ BAUMA_DEF bauma_NsonNode *bauma_nson_new_ext(bauma_IMemAllocator* pAlloc) {
 	return p;
 }
 
-BAUMA_DEF bauma_NsonNode *bauma_nson_newNull_ext(bauma_IMemAllocator* pAlloc) {
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_newNull_ext(bauma_IMemAllocator* pAlloc) {
 	bauma_NsonNode *p = bauma_nson_new_ext(pAlloc);
 	p->type = BAUMA_NSON_NODE_TYPE_NULL;
 	return p;
 }
 
-BAUMA_DEF bauma_NsonNode *bauma_nson_newBool_ext(bauma_bool_t value, bauma_IMemAllocator* pAlloc) {
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_newBool_ext(bauma_bool_t value, bauma_IMemAllocator* pAlloc) {
 	bauma_NsonNode *p = bauma_nson_new_ext(pAlloc);
 	p->type = BAUMA_NSON_NODE_TYPE_BOOL;
 	p->value.b = value;
 	return p;
 }
 
-BAUMA_DEF bauma_NsonNode *bauma_nson_newSigned_ext(bauma_intmax_t value, bauma_IMemAllocator* pAlloc) {
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_newSigned_ext(bauma_intmax_t value, bauma_IMemAllocator* pAlloc) {
 	bauma_NsonNode *p = bauma_nson_new_ext(pAlloc);
 	p->type = BAUMA_NSON_NODE_TYPE_SIGNED;
 	p->value.si = value;
 	return p;
 }
 
-BAUMA_DEF bauma_NsonNode *bauma_nson_newUnsigned_ext(bauma_uintmax_t value, bauma_IMemAllocator* pAlloc) {
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_newUnsigned_ext(bauma_uintmax_t value, bauma_IMemAllocator* pAlloc) {
 	bauma_NsonNode *p = bauma_nson_new_ext(pAlloc);
 	p->type = BAUMA_NSON_NODE_TYPE_UNSIGNED;
 	p->value.ui = value;
 	return p;
 }
 
-BAUMA_DEF bauma_NsonNode *bauma_nson_newDouble_ext(double value, bauma_IMemAllocator* pAlloc) {
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_newDouble_ext(double value, bauma_IMemAllocator* pAlloc) {
 	bauma_NsonNode *p = bauma_nson_new_ext(pAlloc);
 	p->type = BAUMA_NSON_NODE_TYPE_DOUBLE;
 	p->value.d = value;
 	return p;
 }
 
-BAUMA_DEF bauma_NsonNode *bauma_nson_newStr_ext(const char *pValue, bauma_IMemAllocator* pAlloc) {
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_newStr_ext(const char *pValue, bauma_bool_t xferOwnership, bauma_IMemAllocator* pAlloc) {
 	bauma_NsonNode *p = bauma_nson_new_ext(pAlloc);
 	p->type = BAUMA_NSON_NODE_TYPE_STRING;
-	p->value.p = bauma_strdup_ext(pValue, pAlloc);
+	if (xferOwnership) {
+		p->value.p = (char*)pValue;
+	}
+	else {
+		p->value.p = bauma_strdup_ext(pValue, pAlloc);
+	}
 	return p;
 }
 
-BAUMA_DEF bauma_NsonNode *bauma_nson_newStrWithLen_ext(const char *pValue, size_t valueLen, bauma_IMemAllocator* pAlloc) {
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_newStrWithLen_ext(const char *pValue, size_t valueLen, bauma_IMemAllocator* pAlloc) {
 	bauma_NsonNode *p = bauma_nson_new_ext(pAlloc);
 	p->type = BAUMA_NSON_NODE_TYPE_STRING;
 	p->value.p = bauma_strdupn_ext(pValue, valueLen, pAlloc);
 	return p;
 }
 
-BAUMA_DEF bauma_NsonNode *bauma_nson_newArray_ext(bauma_IMemAllocator* pAlloc) {
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_newArray_ext(bauma_IMemAllocator* pAlloc) {
 	bauma_NsonNode *p = bauma_nson_new_ext(pAlloc);
 	p->type = BAUMA_NSON_NODE_TYPE_ARRAY;
 	bauma_Vector_construct_ext(&p->value.v, bauma_NsonNode*, &bauma_nson_NodePtr_destruct, pAlloc);
 	return p;
 }
 
-BAUMA_DEF void bauma_nson_array_append(bauma_NsonNode *pNode, bauma_NsonNode *pArrayElement) {
+BAUMA_NSON_DEF void bauma_nson_array_append(bauma_NsonNode *pNode, bauma_NsonNode *pArrayElement) {
 	bauma_nson_assert(pNode != NULL);
 	bauma_nson_assert(pArrayElement != NULL);
 	bauma_nson_assert(pNode->type == BAUMA_NSON_NODE_TYPE_ARRAY);
 	bauma_Vector_append(&pNode->value.v, bauma_NsonNode*, &pArrayElement);
 }
 
-BAUMA_DEF void bauma_nson_object_append(bauma_NsonNode* pNode, const char *pKey, bauma_bool_t xferKeyOwnership, bauma_NsonNode *pValue) {
+BAUMA_NSON_DEF void bauma_nson_object_append(bauma_NsonNode* pNode, const char *pKey, bauma_bool_t xferKeyOwnership, bauma_NsonNode *pValue) {
 	bauma_nson_assert(pNode != NULL);
 	bauma_nson_assert(pKey != NULL);
 	bauma_nson_assert(pValue != NULL);
@@ -267,14 +276,14 @@ BAUMA_DEF void bauma_nson_object_append(bauma_NsonNode* pNode, const char *pKey,
 }
 
 
-BAUMA_DEF bauma_NsonNode *bauma_nson_newObject_ext(bauma_IMemAllocator* pAlloc) {
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_newObject_ext(bauma_IMemAllocator* pAlloc) {
 	bauma_NsonNode *p = bauma_nson_new_ext(pAlloc);
 	p->type = BAUMA_NSON_NODE_TYPE_OBJECT;
 	bauma_Vector_construct_ext(&p->value.v, bauma_NsonNode*, &bauma_nson_NodePtr_destruct, pAlloc);
 	return p;
 }
 
-BAUMA_DEF void bauma_nson_delete(bauma_NsonNode *pNode) {
+BAUMA_NSON_DEF void bauma_nson_delete(bauma_NsonNode *pNode) {
 	if (pNode == NULL) {
 		return;
 	}
@@ -424,10 +433,102 @@ static bauma_NsonNode *bauma_nson_parse_object(bauma_nson_StringWithLength *pStr
 static bauma_NsonNode *bauma_nson_parse_string(bauma_nson_StringWithLength *pStrWithLen,
                                                bauma_StringBuilder *pErrFormatter,
                                                bauma_IMemAllocator *pAlloc) {
-	(void)pStrWithLen;
-	(void)pErrFormatter;
-	(void)pAlloc;
-	return NULL;
+	/* skip the '"' */
+	bauma_NsonNode *pResult = NULL;
+	bauma_StringBuilder b;
+	/* skip the '"' */
+	++pStrWithLen->pStr;
+	--pStrWithLen->len;
+	bauma_StringBuilder_construct_ext(&b, pAlloc);
+	while (pStrWithLen->len > 0) {
+		char c = pStrWithLen->pStr[0];
+		switch(c) {
+			case '"': {
+				char *pStr = bauma_StringBuilder_release(&b);
+				pResult = bauma_nson_newStr_ext(pStr, BAUMA_TRUE, pAlloc);
+				++pStrWithLen->pStr;
+				--pStrWithLen->len;
+				goto out;
+			}
+			case '\\': {
+				char c2; 
+				if (pStrWithLen->len < 2u) {
+					goto out;
+				}
+				c2 = pStrWithLen->pStr[1];
+				switch(c2) {
+					case '"':
+					case '\\':
+					case '/': {
+						bauma_StringBuilder_appendChar(&b, c2, 1u);
+						pStrWithLen->pStr += 2;
+						pStrWithLen->len -= 2u;
+						break;
+					}
+					case 'b': {
+						bauma_StringBuilder_appendChar(&b, '\b', 1u);
+						pStrWithLen->pStr += 2;
+						pStrWithLen->len -= 2u;
+						break;
+					}
+					case 'f': {
+						bauma_StringBuilder_appendChar(&b, '\f', 1u);
+						pStrWithLen->pStr += 2;
+						pStrWithLen->len -= 2u;
+						break;
+					}
+					case 'n': {
+						bauma_StringBuilder_appendChar(&b, '\n', 1u);
+						pStrWithLen->pStr += 2;
+						pStrWithLen->len -= 2u;
+						break;
+					}
+					case 'r': {
+						bauma_StringBuilder_appendChar(&b, '\r', 1u);
+						pStrWithLen->pStr += 2;
+						pStrWithLen->len -= 2u;
+						break;
+					}
+					case 't': {
+						bauma_StringBuilder_appendChar(&b, '\t', 1u);
+						pStrWithLen->pStr += 2;
+						pStrWithLen->len -= 2u;
+						break;
+					}
+					case 'u': {
+						char buf[5];
+						unsigned long hex;
+						if (pStrWithLen->len < 6u) {
+							goto out;
+						}
+						buf[0] = pStrWithLen->pStr[2];
+						buf[1] = pStrWithLen->pStr[3];
+						buf[2] = pStrWithLen->pStr[4];
+						buf[3] = pStrWithLen->pStr[5];
+						buf[4] = '\0';
+						errno = 0;
+						hex = strtoul(buf, NULL, 16);
+						if ((hex == 0) && (errno == ERANGE)) goto out;
+						bauma_StringBuilder_appendCodePointUtf8(&b, hex);
+						pStrWithLen->pStr += 6;
+						pStrWithLen->len -= 6u;
+						break;
+					}
+					default: goto out;
+				}
+				break;
+			}
+			default: {
+				bauma_StringBuilder_appendChar(&b, c, 1u);
+				++pStrWithLen->pStr;
+				--pStrWithLen->len;
+				break;
+			}
+		}
+	}
+out:
+	bauma_StringBuilder_destruct(&b);
+	return pResult;
 }
 
 static bauma_NsonNode *bauma_nson_parse_token(bauma_nson_StringWithLength *pStrWithLen,
@@ -517,7 +618,7 @@ static bauma_NsonNode *bauma_nson_parse_token(bauma_nson_StringWithLength *pStrW
 }
 
 
-BAUMA_DEF bauma_NsonNode *bauma_nson_parse_ext(bauma_nson_StringWithLength *pStrWithLen,
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parse_ext(bauma_nson_StringWithLength *pStrWithLen,
                                                bauma_StringBuilder *pErrFormatter,
                                                bauma_IMemAllocator *pAlloc) {
 	char c;
@@ -534,14 +635,14 @@ BAUMA_DEF bauma_NsonNode *bauma_nson_parse_ext(bauma_nson_StringWithLength *pStr
 	}
 }
 
-BAUMA_DEF bauma_NsonNode *bauma_nson_parseMem(const void *pMem, size_t len) {
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parseMem(const void *pMem, size_t len) {
 	bauma_nson_StringWithLength strWithLen;
 	strWithLen.pStr = (const char*)pMem;
 	strWithLen.len = len;
 	return bauma_nson_parse_ext(&strWithLen, NULL, bauma_getDefaultMemAllocator());
 }
 
-BAUMA_DEF bauma_NsonNode *bauma_nson_parseStr(const char *pStr) {
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parseStr(const char *pStr) {
 	bauma_nson_StringWithLength strWithLen;
 	strWithLen.pStr = pStr;
 	strWithLen.len = strlen(pStr);
@@ -713,8 +814,33 @@ void test_parse(void) {
 	bauma_nson_delete(pNode);
 	pNode = bauma_nson_parseStr("[1 /* comment */ 2] // comment");
 	BAUMA_EXPECT(pNode != NULL);
-	BAUMA_EXPECT(pNode->type == BAUMA_NSON_NODE_TYPE_OBJECT);
+	BAUMA_EXPECT(pNode->type == BAUMA_NSON_NODE_TYPE_ARRAY);
 	BAUMA_EXPECT(bauma_Vector_getSize(&pNode->value.v) == 2);
+	bauma_nson_delete(pNode);
+	pNode = bauma_nson_parseStr("\"Hello\"");
+	BAUMA_EXPECT(pNode != NULL);
+	BAUMA_EXPECT(pNode->type == BAUMA_NSON_NODE_TYPE_STRING);
+	BAUMA_EXPECT(strcmp(pNode->value.p, "Hello") == 0);
+	bauma_nson_delete(pNode);
+	pNode = bauma_nson_parseStr("\"\\r\\n\"");
+	BAUMA_EXPECT(pNode != NULL);
+	BAUMA_EXPECT(pNode->type == BAUMA_NSON_NODE_TYPE_STRING);
+	BAUMA_EXPECT(strcmp(pNode->value.p, "\r\n") == 0);
+	bauma_nson_delete(pNode);
+	pNode = bauma_nson_parseStr("\"\\\"\"");
+	BAUMA_EXPECT(pNode != NULL);
+	BAUMA_EXPECT(pNode->type == BAUMA_NSON_NODE_TYPE_STRING);
+	BAUMA_EXPECT(strcmp(pNode->value.p, "\"") == 0);
+	bauma_nson_delete(pNode);
+	pNode = bauma_nson_parseStr("\"\\u0001\"");
+	BAUMA_EXPECT(pNode != NULL);
+	BAUMA_EXPECT(pNode->type == BAUMA_NSON_NODE_TYPE_STRING);
+	BAUMA_EXPECT(strcmp(pNode->value.p, "\x01") == 0);
+	bauma_nson_delete(pNode);
+	pNode = bauma_nson_parseStr("\"\\u00E4\"");
+	BAUMA_EXPECT(pNode != NULL);
+	BAUMA_EXPECT(pNode->type == BAUMA_NSON_NODE_TYPE_STRING);
+	BAUMA_EXPECT(strcmp(pNode->value.p, "\xC3\xA4") == 0);
 	bauma_nson_delete(pNode);
 }
 

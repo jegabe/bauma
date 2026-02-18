@@ -711,6 +711,11 @@ void test_parse(void) {
 	BAUMA_EXPECT(pNode->type == BAUMA_NSON_NODE_TYPE_OBJECT);
 	BAUMA_EXPECT(bauma_Vector_getSize(&pNode->value.v) == 2);
 	bauma_nson_delete(pNode);
+	pNode = bauma_nson_parseStr("[1 /* comment */ 2] // comment");
+	BAUMA_EXPECT(pNode != NULL);
+	BAUMA_EXPECT(pNode->type == BAUMA_NSON_NODE_TYPE_OBJECT);
+	BAUMA_EXPECT(bauma_Vector_getSize(&pNode->value.v) == 2);
+	bauma_nson_delete(pNode);
 }
 
 #ifdef __cplusplus

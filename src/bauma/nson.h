@@ -299,15 +299,42 @@ BAUMA_DEF void bauma_nson_delete(bauma_NsonNode *pNode) {
 
 static void bauma_nson_skip(bauma_nson_StringWithLength *pStrWithLen) {
 	while(pStrWithLen->len > 0) {
-		char c = *pStrWithLen->pStr;
+		char c = pStrWithLen->pStr[0];
+		char c2 = '\0';
+		if (pStrWithLen->len > 1u) {
+			c2 = pStrWithLen->pStr[1];
+		}
 		if ((c == ':') || (c == ',') || isspace(c)) {
-			/* keep going */
+			++pStrWithLen->pStr;
+			--pStrWithLen->len;
+		}
+		else if ((c == '/' ) && (c2 == '*')) {
+			const char *pEnd;
+			size_t numSkip;
+			pEnd = strstr(pStrWithLen->pStr+2, "*/");
+			if (pEnd == NULL) return;
+			pEnd += 2u;
+			numSkip = pEnd - pStrWithLen->pStr;
+			pStrWithLen->pStr += numSkip;
+			pStrWithLen->len -= numSkip;
+		}
+		else if (((c == '/' ) && (c2 == '/')) || (c == '#')) {
+			const char* pNl;
+			size_t numSkip;
+			pNl = (const char*)memchr(pStrWithLen->pStr+2, '\n', pStrWithLen->len - 2u);
+			if (pNl == NULL) {
+				pNl = (const char*)memchr(pStrWithLen->pStr+2, '\r', pStrWithLen->len - 2u);
+			}
+			if (pNl == NULL) {
+				return;
+			}
+			numSkip = pNl - pStrWithLen->pStr;
+			pStrWithLen->pStr += numSkip;
+			pStrWithLen->len -= numSkip;
 		}
 		else {
 			break;
 		}
-		++pStrWithLen->pStr;
-		--pStrWithLen->len;
 	}
 }
 

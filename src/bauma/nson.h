@@ -76,8 +76,9 @@ but makes writing this json dialect a joy.
 #endif
 
 typedef struct bauma_nson_StringWithLength {
-	const char *pStr;
-	size_t len;
+	const char *pBegin; /* for error reporting to calculate error offset */
+	const char *pStr; /* incremented while parsing */
+	size_t len; /* decremented while parsing */
 } bauma_nson_StringWithLength;
 
 typedef unsigned int bauma_NsonNodeType;
@@ -102,12 +103,14 @@ typedef union bauma_NsonNodeUnion {
 	bauma_Vector    v; /* for maps and arrays, this points to all values */
 } bauma_NsonNodeUnion;
 
-typedef struct bauma_NsonNode {
+typedef struct bauma_NsonNode bauma_NsonNode;
+
+struct bauma_NsonNode {
 	bauma_NsonNodeType    type;
 	bauma_NsonNodeUnion   value;
-	char                  *pKey; /* Key string for map items, else NULL */
+	bauma_NsonNode        *pObjectValue; /* ptr from key to value in JSON maps */
 	bauma_IMemAllocator*  pAlloc;
-} bauma_NsonNode;
+};
 
 BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_new_ext(bauma_IMemAllocator* pAlloc);
 #define bauma_nson_new() bauma_nson_new_ext(bauma_getDefaultMemAllocator())
@@ -139,13 +142,13 @@ BAUMA_NSON_DEF void bauma_nson_array_append(bauma_NsonNode* pNode, bauma_NsonNod
 
 BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_newObject_ext(bauma_IMemAllocator* pAlloc);
 #define bauma_nson_newObject() bauma_nson_newObject_ext(bauma_getDefaultMemAllocator())
-BAUMA_NSON_DEF void bauma_nson_object_append(bauma_NsonNode* pNode, const char *pKey, bauma_bool_t xferKeyOwnership, bauma_NsonNode *pValue);
+BAUMA_NSON_DEF void bauma_nson_object_append(bauma_NsonNode* pNode, bauma_NsonNode *pKey, bauma_NsonNode *pValue);
 
 BAUMA_NSON_DEF void bauma_nson_delete(bauma_NsonNode *pNode);
 
 BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parse_ext(bauma_nson_StringWithLength *pStrWithLen,
-                                               bauma_StringBuilder *pErrFormatter,
-                                               bauma_IMemAllocator *pAlloc);
+                                                    bauma_StringBuilder *pErrFormatter,
+                                                    bauma_IMemAllocator *pAlloc);
 
 BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parseMem(const void *pMem, size_t len);
 BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parseStr(const char *pStr);
@@ -174,7 +177,9 @@ BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parseStr(const char *pStr);
 	extern "C" {
 #endif
 
-static void bauma_nson_NodePtr_destruct(void *ppNode) {
+#define BAUMA_NSON_NUMBER_PARSE_BUFFER_SIZE 64u
+
+BAUMA_NSON_DEF void bauma_nson_NodePtr_destruct(void *ppNode) {
 	if (ppNode != NULL) {
 		bauma_NsonNode* p = *(bauma_NsonNode**)ppNode;
 		bauma_nson_delete(p);
@@ -257,22 +262,16 @@ BAUMA_NSON_DEF void bauma_nson_array_append(bauma_NsonNode *pNode, bauma_NsonNod
 	bauma_Vector_append(&pNode->value.v, bauma_NsonNode*, &pArrayElement);
 }
 
-BAUMA_NSON_DEF void bauma_nson_object_append(bauma_NsonNode* pNode, const char *pKey, bauma_bool_t xferKeyOwnership, bauma_NsonNode *pValue) {
+BAUMA_NSON_DEF void bauma_nson_object_append(bauma_NsonNode* pNode, bauma_NsonNode *pKey, bauma_NsonNode *pValue) {
 	bauma_nson_assert(pNode != NULL);
 	bauma_nson_assert(pKey != NULL);
 	bauma_nson_assert(pValue != NULL);
 	bauma_nson_assert(pNode->type == BAUMA_NSON_NODE_TYPE_OBJECT);
-	if (pValue->pKey != NULL) {
-		(*pValue->pAlloc->pRealloc)(pValue->pAlloc, pValue->pKey, 0, NULL);
-		pValue->pKey = NULL;
+	if (pKey->pObjectValue != NULL) {
+		bauma_nson_delete(pKey->pObjectValue);
 	}
-	if (xferKeyOwnership) {
-		pValue->pKey = (char*)pKey;
-	}
-	else {
-		pValue->pKey = bauma_strdup_ext(pKey, pValue->pAlloc);
-	}
-	bauma_Vector_append(&pNode->value.v, bauma_NsonNode*, &pValue);
+	pKey->pObjectValue = pValue;
+	bauma_Vector_append(&pNode->value.v, bauma_NsonNode*, &pKey);
 }
 
 
@@ -288,8 +287,8 @@ BAUMA_NSON_DEF void bauma_nson_delete(bauma_NsonNode *pNode) {
 		return;
 	}
 	bauma_nson_assert(pNode->pAlloc != NULL);
-	if (pNode->pKey != NULL) {
-		(*pNode->pAlloc->pRealloc)(pNode->pAlloc, pNode->pKey, 0, NULL);
+	if (pNode->pObjectValue != NULL) {
+		bauma_nson_delete(pNode->pObjectValue);
 	}
 	switch(pNode->type) {
 		case BAUMA_NSON_NODE_TYPE_STRING: {
@@ -306,7 +305,7 @@ BAUMA_NSON_DEF void bauma_nson_delete(bauma_NsonNode *pNode) {
 	(*pNode->pAlloc->pRealloc)(pNode->pAlloc, pNode, 0, NULL);
 }
 
-static void bauma_nson_skip(bauma_nson_StringWithLength *pStrWithLen) {
+BAUMA_NSON_DEF void bauma_nson_skip(bauma_nson_StringWithLength *pStrWithLen) {
 	while(pStrWithLen->len > 0) {
 		char c = pStrWithLen->pStr[0];
 		char c2 = '\0';
@@ -320,9 +319,12 @@ static void bauma_nson_skip(bauma_nson_StringWithLength *pStrWithLen) {
 		else if ((c == '/' ) && (c2 == '*')) {
 			const char *pEnd;
 			size_t numSkip;
-			pEnd = strstr(pStrWithLen->pStr+2, "*/");
+			pEnd = (const char*)bauma_memmem(pStrWithLen->pStr + 2,
+			                                 pStrWithLen->len - 2u,
+			                                 "*/",
+			                                 2u);
 			if (pEnd == NULL) return;
-			pEnd += 2u;
+			pEnd += 2;
 			numSkip = pEnd - pStrWithLen->pStr;
 			pStrWithLen->pStr += numSkip;
 			pStrWithLen->len -= numSkip;
@@ -332,12 +334,14 @@ static void bauma_nson_skip(bauma_nson_StringWithLength *pStrWithLen) {
 			size_t numSkip;
 			pNl = (const char*)memchr(pStrWithLen->pStr+2, '\n', pStrWithLen->len - 2u);
 			if (pNl == NULL) {
-				pNl = (const char*)memchr(pStrWithLen->pStr+2, '\r', pStrWithLen->len - 2u);
+				pNl = (const char*)memchr(pStrWithLen->pStr+2,
+				                          '\r',
+				                          pStrWithLen->len - 2u);
 			}
 			if (pNl == NULL) {
 				return;
 			}
-			numSkip = pNl - pStrWithLen->pStr;
+			numSkip = pNl - pStrWithLen->pStr + 1;
 			pStrWithLen->pStr += numSkip;
 			pStrWithLen->len -= numSkip;
 		}
@@ -347,9 +351,18 @@ static void bauma_nson_skip(bauma_nson_StringWithLength *pStrWithLen) {
 	}
 }
 
-static bauma_NsonNode *bauma_nson_parse_array(bauma_nson_StringWithLength *pStrWithLen,
-                                              bauma_StringBuilder *pErrFormatter,
-                                              bauma_IMemAllocator *pAlloc) {
+BAUMA_NSON_DEF void bauma_nson_fmtErr(bauma_StringBuilder *pErrFormatter, const char* pMsg, bauma_nson_StringWithLength *pStrWithLen) {
+	if (pErrFormatter != NULL) {
+		bauma_StringBuilder_appendStr(pErrFormatter, pMsg);
+		bauma_StringBuilder_appendStr(pErrFormatter, " (offset ");
+		bauma_StringBuilder_appendUnsigned(pErrFormatter, (bauma_uintmax_t)(pStrWithLen->pStr - pStrWithLen->pBegin));
+		bauma_StringBuilder_appendStr(pErrFormatter, ")");
+	}
+}
+
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parse_array(bauma_nson_StringWithLength *pStrWithLen,
+                                                      bauma_StringBuilder *pErrFormatter,
+                                                      bauma_IMemAllocator *pAlloc) {
 	bauma_NsonNode *pArray = bauma_nson_newArray_ext(pAlloc);
 	/* skip the '[' */
 	++pStrWithLen->pStr;
@@ -359,6 +372,7 @@ static bauma_NsonNode *bauma_nson_parse_array(bauma_nson_StringWithLength *pStrW
 		bauma_nson_skip(pStrWithLen);
 		if (pStrWithLen->len == 0) {
 			bauma_nson_delete(pArray);
+			bauma_nson_fmtErr(pErrFormatter, "Error parsing array: end of data reached", pStrWithLen);
 			return NULL;
 		}
 		char c = *pStrWithLen->pStr;
@@ -367,7 +381,6 @@ static bauma_NsonNode *bauma_nson_parse_array(bauma_nson_StringWithLength *pStrW
 			--pStrWithLen->len;
 			return pArray;
 		}
-		bauma_nson_skip(pStrWithLen);
 		pArrayElement = bauma_nson_parse_ext(pStrWithLen, pErrFormatter, pAlloc);
 		if (pArrayElement == NULL) {
 			bauma_nson_delete(pArray);
@@ -378,9 +391,9 @@ static bauma_NsonNode *bauma_nson_parse_array(bauma_nson_StringWithLength *pStrW
 	return NULL; /* unreachable */
 }
 
-static bauma_NsonNode *bauma_nson_parse_object(bauma_nson_StringWithLength *pStrWithLen,
-                                               bauma_StringBuilder *pErrFormatter,
-                                               bauma_IMemAllocator *pAlloc) {
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parse_object(bauma_nson_StringWithLength *pStrWithLen,
+                                                       bauma_StringBuilder *pErrFormatter,
+                                                       bauma_IMemAllocator *pAlloc) {
 	bauma_NsonNode *pObject = bauma_nson_newObject_ext(pAlloc);
 	/* skip the '[' */
 	++pStrWithLen->pStr;
@@ -391,6 +404,7 @@ static bauma_NsonNode *bauma_nson_parse_object(bauma_nson_StringWithLength *pStr
 		bauma_nson_skip(pStrWithLen);
 		if (pStrWithLen->len == 0) {
 			bauma_nson_delete(pObject);
+			bauma_nson_fmtErr(pErrFormatter, "Error parsing object: end of data reached before key", pStrWithLen);
 			return NULL;
 		}
 		char c = *pStrWithLen->pStr;
@@ -399,20 +413,8 @@ static bauma_NsonNode *bauma_nson_parse_object(bauma_nson_StringWithLength *pStr
 			--pStrWithLen->len;
 			return pObject;
 		}
-		bauma_nson_skip(pStrWithLen);
 		pKeyElement = bauma_nson_parse_ext(pStrWithLen, pErrFormatter, pAlloc);
 		if (pKeyElement == NULL) {
-			bauma_nson_delete(pObject);
-			return NULL;
-		}
-		if (pKeyElement->type != BAUMA_NSON_NODE_TYPE_STRING) {
-			bauma_nson_delete(pKeyElement);
-			bauma_nson_delete(pObject);
-			return NULL;
-		}
-		bauma_nson_skip(pStrWithLen);
-		if (pStrWithLen->len == 0) {
-			bauma_nson_delete(pKeyElement);
 			bauma_nson_delete(pObject);
 			return NULL;
 		}
@@ -422,10 +424,7 @@ static bauma_NsonNode *bauma_nson_parse_object(bauma_nson_StringWithLength *pStr
 			bauma_nson_delete(pObject);
 			return NULL;
 		}
-		bauma_nson_object_append(pObject, pKeyElement->value.p, BAUMA_TRUE, pValueElement);
-		pKeyElement->value.p = NULL; /* ownership transfered */
-		pKeyElement->type = BAUMA_NSON_NODE_TYPE_INVALID;
-		bauma_nson_delete(pKeyElement);
+		bauma_nson_object_append(pObject, pKeyElement, pValueElement);
 	}
 	return NULL; /* unreachable */
 }
@@ -443,87 +442,95 @@ static bauma_NsonNode *bauma_nson_parse_string(bauma_nson_StringWithLength *pStr
 	while (pStrWithLen->len > 0) {
 		char c = pStrWithLen->pStr[0];
 		switch(c) {
-			case '"': {
-				char *pStr = bauma_StringBuilder_release(&b);
-				pResult = bauma_nson_newStr_ext(pStr, BAUMA_TRUE, pAlloc);
-				++pStrWithLen->pStr;
-				--pStrWithLen->len;
+		case '"': {
+			char *pStr = bauma_StringBuilder_release(&b);
+			pResult = bauma_nson_newStr_ext(pStr, BAUMA_TRUE, pAlloc);
+			++pStrWithLen->pStr;
+			--pStrWithLen->len;
+			goto out;
+		}
+		case '\\': {
+			char c2; 
+			if (pStrWithLen->len < 2u) {
+				bauma_nson_fmtErr(pErrFormatter, "Error parsing string: escape sequence too short", pStrWithLen);
 				goto out;
 			}
-			case '\\': {
-				char c2; 
-				if (pStrWithLen->len < 2u) {
+			c2 = pStrWithLen->pStr[1];
+			switch(c2) {
+			case '"':
+			case '\\':
+			case '/': {
+				bauma_StringBuilder_appendChar(&b, c2, 1u);
+				pStrWithLen->pStr += 2;
+				pStrWithLen->len -= 2u;
+				break;
+			}
+			case 'b': {
+				bauma_StringBuilder_appendChar(&b, '\b', 1u);
+				pStrWithLen->pStr += 2;
+				pStrWithLen->len -= 2u;
+				break;
+			}
+			case 'f': {
+				bauma_StringBuilder_appendChar(&b, '\f', 1u);
+				pStrWithLen->pStr += 2;
+				pStrWithLen->len -= 2u;
+				break;
+			}
+			case 'n': {
+				bauma_StringBuilder_appendChar(&b, '\n', 1u);
+				pStrWithLen->pStr += 2;
+				pStrWithLen->len -= 2u;
+				break;
+			}
+			case 'r': {
+				bauma_StringBuilder_appendChar(&b, '\r', 1u);
+				pStrWithLen->pStr += 2;
+				pStrWithLen->len -= 2u;
+				break;
+			}
+			case 't': {
+				bauma_StringBuilder_appendChar(&b, '\t', 1u);
+				pStrWithLen->pStr += 2;
+				pStrWithLen->len -= 2u;
+				break;
+			}
+			case 'u': {
+				char buf[5];
+				unsigned long hex;
+				if (pStrWithLen->len < 6u) {
+					bauma_nson_fmtErr(pErrFormatter, "Error parsing string: unicode escape sequence too short", pStrWithLen);
 					goto out;
 				}
-				c2 = pStrWithLen->pStr[1];
-				switch(c2) {
-					case '"':
-					case '\\':
-					case '/': {
-						bauma_StringBuilder_appendChar(&b, c2, 1u);
-						pStrWithLen->pStr += 2;
-						pStrWithLen->len -= 2u;
-						break;
-					}
-					case 'b': {
-						bauma_StringBuilder_appendChar(&b, '\b', 1u);
-						pStrWithLen->pStr += 2;
-						pStrWithLen->len -= 2u;
-						break;
-					}
-					case 'f': {
-						bauma_StringBuilder_appendChar(&b, '\f', 1u);
-						pStrWithLen->pStr += 2;
-						pStrWithLen->len -= 2u;
-						break;
-					}
-					case 'n': {
-						bauma_StringBuilder_appendChar(&b, '\n', 1u);
-						pStrWithLen->pStr += 2;
-						pStrWithLen->len -= 2u;
-						break;
-					}
-					case 'r': {
-						bauma_StringBuilder_appendChar(&b, '\r', 1u);
-						pStrWithLen->pStr += 2;
-						pStrWithLen->len -= 2u;
-						break;
-					}
-					case 't': {
-						bauma_StringBuilder_appendChar(&b, '\t', 1u);
-						pStrWithLen->pStr += 2;
-						pStrWithLen->len -= 2u;
-						break;
-					}
-					case 'u': {
-						char buf[5];
-						unsigned long hex;
-						if (pStrWithLen->len < 6u) {
-							goto out;
-						}
-						buf[0] = pStrWithLen->pStr[2];
-						buf[1] = pStrWithLen->pStr[3];
-						buf[2] = pStrWithLen->pStr[4];
-						buf[3] = pStrWithLen->pStr[5];
-						buf[4] = '\0';
-						errno = 0;
-						hex = strtoul(buf, NULL, 16);
-						if ((hex == 0) && (errno == ERANGE)) goto out;
-						bauma_StringBuilder_appendCodePointUtf8(&b, hex);
-						pStrWithLen->pStr += 6;
-						pStrWithLen->len -= 6u;
-						break;
-					}
-					default: goto out;
+				buf[0] = pStrWithLen->pStr[2];
+				buf[1] = pStrWithLen->pStr[3];
+				buf[2] = pStrWithLen->pStr[4];
+				buf[3] = pStrWithLen->pStr[5];
+				buf[4] = '\0';
+				errno = 0;
+				hex = strtoul(buf, NULL, 16);
+				if ((hex == 0) && (errno == ERANGE)) {
+					bauma_nson_fmtErr(pErrFormatter, "Error parsing string: unicode escape sequence invalid", pStrWithLen);
+					goto out;
 				}
+				bauma_StringBuilder_appendCodePointUtf8(&b, hex);
+				pStrWithLen->pStr += 6;
+				pStrWithLen->len -= 6u;
 				break;
 			}
 			default: {
-				bauma_StringBuilder_appendChar(&b, c, 1u);
-				++pStrWithLen->pStr;
-				--pStrWithLen->len;
-				break;
+				bauma_nson_fmtErr(pErrFormatter, "Error parsing string: wrong escape sequence", pStrWithLen);
+				goto out;
 			}
+			}
+			break;
+		}
+		default: {
+			bauma_StringBuilder_appendChar(&b, c, 1u);
+			++pStrWithLen->pStr;
+			--pStrWithLen->len;
+			break;
+		}
 		}
 	}
 out:
@@ -540,57 +547,91 @@ static bauma_NsonNode *bauma_nson_parse_token(bauma_nson_StringWithLength *pStrW
 	bauma_bool_t containsDot = BAUMA_FALSE;
 	while(pStrWithLen->len > 0) {
 		char c = *pStrWithLen->pStr;
-		if ((c == ':') || (c == ',') || (c == '[') || (c == ']') || (c == '{') || (c == '}') || isspace(c)) break;
+		if ((c == ':') || (c == ',') || (c == '[') || (c == ']') ||
+		    (c == '{') || (c == '}') || isspace(c)) break;
 		if (c == '.') containsDot = BAUMA_TRUE;
 		++len;
 		++pStrWithLen->pStr;
 		--pStrWithLen->len;
 	}
 	if (len == 0) {
+		bauma_nson_fmtErr(pErrFormatter, "Error parsing token: length is zero", pStrWithLen);
 		return NULL;
 	}
 	if (((p[0] >= '0') && (p[0] <= '9')) || (p[0] == '.') || (p[0] == '+') || (p[0] == '-')) {
 		/* expect token to be an integer of floating point number */
+		char parseBuf[BAUMA_NSON_NUMBER_PARSE_BUFFER_SIZE];
+		char *pParseBuf; /* A null terminated array to have reliable stdlib number parsing */
+		if (len < sizeof(parseBuf)) {
+			pParseBuf = parseBuf; /* avoid dyn. mem alloc in most cases */
+		}
+		else {
+			pParseBuf = (char*)(*pAlloc->pRealloc)(pAlloc, NULL, len+1, NULL);
+		}
+		#define NSON_FREE_PARSE_BUF() \
+			do { \
+				if (pParseBuf != parseBuf) { \
+					(*pAlloc->pRealloc)(pAlloc, pParseBuf, 0, NULL); \
+				} \
+			} while(0)
+		memcpy(pParseBuf, p, len);	
+		pParseBuf[len] = '\0';
 		errno = 0;
 		if (containsDot) { /* parse as double */
 			double value;
-			value = strtod(p, NULL);
+			value = strtod(pParseBuf, NULL);
 			if ((value == 0.0) && (errno == ERANGE)) {
+				NSON_FREE_PARSE_BUF();
+				bauma_nson_fmtErr(pErrFormatter, "Error parsing double: value out of range", pStrWithLen);
 				return NULL;
 			}
 			if (value == HUGE_VAL) {
+				NSON_FREE_PARSE_BUF();
+				bauma_nson_fmtErr(pErrFormatter, "Error parsing double: value out of range", pStrWithLen);
 				return NULL;
 			}
+			NSON_FREE_PARSE_BUF();
 			return bauma_nson_newDouble_ext(value, pAlloc);
 		}
 		if (p[0] == '-') {
 			bauma_intmax_t value;
 			#ifdef LLONG_MAX
-				value = (bauma_intmax_t)strtoll(p, NULL, 10);
+				value = (bauma_intmax_t)strtoll(pParseBuf, NULL, 10);
 				if (((value == LLONG_MAX) || (value == LLONG_MIN) || (value == 0)) && (errno == ERANGE)) {
+					NSON_FREE_PARSE_BUF();
+					bauma_nson_fmtErr(pErrFormatter, "Error parsing signed integer: value out of range", pStrWithLen);
 					return NULL;
 				}
 			#else
 				value = (bauma_intmax_t)strtol(p, NULL, 10);
 				if (((value == LONG_MAX) || (value == LONG_MIN) || (value == 0)) && (errno == ERANGE)) {
+					NSON_FREE_PARSE_BUF();
+					bauma_nson_fmtErr(pErrFormatter, "Error parsing signed integer: value out of range", pStrWithLen);
 					return NULL;
 				}
 			#endif
+			NSON_FREE_PARSE_BUF();
 			return bauma_nson_newSigned_ext(value, pAlloc);
 		}
 		bauma_uintmax_t value;
 		#ifdef ULLONG_MAX
-			value = (bauma_uintmax_t)strtoull(p, NULL, 10);
+			value = (bauma_uintmax_t)strtoull(pParseBuf, NULL, 10);
 			if (((value == ULLONG_MAX) || (value == 0)) && (errno == ERANGE)) {
+				NSON_FREE_PARSE_BUF();
+				bauma_nson_fmtErr(pErrFormatter, "Error parsing unsigned integer: value out of range", pStrWithLen);
 				return NULL;
 			}
 		#else
 			value = (bauma_uintmax_t)strtoul(p, NULL, 10);
 			if (((value == ULONG_MAX) || (value == 0)) && (errno == ERANGE)) {
+				NSON_FREE_PARSE_BUF();
+				bauma_nson_fmtErr(pErrFormatter, "Error parsing unsigned integer: value out of range", pStrWithLen);
 				return NULL;
 			}
 		#endif
+		NSON_FREE_PARSE_BUF();
 		return bauma_nson_newUnsigned_ext(value, pAlloc);
+		#undef NSON_FREE_PARSE_BUF
 	}
 	if ((len == 4u) && (memcmp(p, "null", 4u) == 0)) {
 		return bauma_nson_newNull_ext(pAlloc);
@@ -609,25 +650,24 @@ static bauma_NsonNode *bauma_nson_parse_token(bauma_nson_StringWithLength *pStrW
 				/* good */
 			}
 			else {
+				bauma_nson_fmtErr(pErrFormatter, "Error parsing token: invalid", pStrWithLen);
 				return NULL;
 			}
 		}
 		return bauma_nson_newStrWithLen_ext(p, len, pAlloc);
 	}
+	bauma_nson_fmtErr(pErrFormatter, "Error parsing token: invalid", pStrWithLen);
 	return NULL;
 }
 
-
 BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parse_ext(bauma_nson_StringWithLength *pStrWithLen,
-                                               bauma_StringBuilder *pErrFormatter,
-                                               bauma_IMemAllocator *pAlloc) {
+                                                    bauma_StringBuilder *pErrFormatter,
+                                                    bauma_IMemAllocator *pAlloc) {
 	char c;
 	bauma_nson_assert(pStrWithLen != NULL);
 	bauma_nson_assert(pAlloc != NULL);
-	bauma_nson_assert(pStrWithLen->pStr[pStrWithLen->len] == '\0');
 	bauma_nson_skip(pStrWithLen);
 	if (pStrWithLen->len == 0) return NULL;
-	if (pStrWithLen->pStr[pStrWithLen->len] != '\0') return NULL;
 	c = *pStrWithLen->pStr;
 	switch(c) {
 		case '[': return bauma_nson_parse_array(pStrWithLen, pErrFormatter, pAlloc);
@@ -639,6 +679,7 @@ BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parse_ext(bauma_nson_StringWithLength 
 
 BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parseMem(const void *pMem, size_t len) {
 	bauma_nson_StringWithLength strWithLen;
+	strWithLen.pBegin = (const char*)pMem;
 	strWithLen.pStr = (const char*)pMem;
 	strWithLen.len = len;
 	return bauma_nson_parse_ext(&strWithLen, NULL, bauma_getDefaultMemAllocator());
@@ -646,6 +687,7 @@ BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parseMem(const void *pMem, size_t len)
 
 BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parseStr(const char *pStr) {
 	bauma_nson_StringWithLength strWithLen;
+	strWithLen.pBegin = pStr;
 	strWithLen.pStr = pStr;
 	strWithLen.len = strlen(pStr);
 	return bauma_nson_parse_ext(&strWithLen, NULL, bauma_getDefaultMemAllocator());
@@ -693,7 +735,7 @@ void test_new(void) {
 	pNode = bauma_nson_new();
 	BAUMA_EXPECT(pNode != NULL);
 	BAUMA_EXPECT(pNode->type == BAUMA_NSON_NODE_TYPE_INVALID);
-	BAUMA_EXPECT(pNode->pKey == NULL);
+	BAUMA_EXPECT(pNode->pObjectValue == NULL);
 	BAUMA_EXPECT(pNode->pAlloc == bauma_getDefaultMemAllocator());
 	bauma_nson_delete(pNode);
 	pNode = bauma_nson_newNull();
@@ -741,10 +783,12 @@ void test_new(void) {
 	BAUMA_EXPECT(pNode->type == BAUMA_NSON_NODE_TYPE_ARRAY);
 	bauma_nson_delete(pNode);
 	pNode = bauma_nson_newObject();
-	bauma_nson_object_append(pNode, "Key", BAUMA_FALSE, bauma_nson_newStr("Hello"));
+	bauma_nson_object_append(pNode, bauma_nson_newStr("Key"), bauma_nson_newStr("Hello"));
 	BAUMA_EXPECT(pNode->type == BAUMA_NSON_NODE_TYPE_OBJECT);
 	pSubNode = *bauma_Vector_at(&pNode->value.v, 0, bauma_NsonNode*);
-	BAUMA_EXPECT(strcmp(pSubNode->pKey, "Key") == 0);
+	BAUMA_EXPECT(strcmp(pSubNode->value.p, "Key") == 0);
+	BAUMA_EXPECT(pSubNode->pObjectValue != NULL);
+	BAUMA_EXPECT(strcmp(pSubNode->pObjectValue->value.p, "Hello") == 0);
 	bauma_nson_delete(pNode);
 }
 
@@ -814,7 +858,7 @@ void test_parse(void) {
 	BAUMA_EXPECT(pNode->type == BAUMA_NSON_NODE_TYPE_OBJECT);
 	BAUMA_EXPECT(bauma_Vector_getSize(&pNode->value.v) == 2);
 	bauma_nson_delete(pNode);
-	pNode = bauma_nson_parseStr("[1 /* comment */ 2] // comment");
+	pNode = bauma_nson_parseStr(" // comment \n[1 /* comment */ 2] // comment");
 	BAUMA_EXPECT(pNode != NULL);
 	BAUMA_EXPECT(pNode->type == BAUMA_NSON_NODE_TYPE_ARRAY);
 	BAUMA_EXPECT(bauma_Vector_getSize(&pNode->value.v) == 2);

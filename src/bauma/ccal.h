@@ -250,13 +250,15 @@ BAUMA_CCAL_DEF char* bauma_strdup_ext(const char* p, bauma_IMemAllocator *pAlloc
 \param p A null-terminated string
 \param alloc Memory allocator to be used
 */
-BAUMA_CCAL_DEF char* bauma_strdupn_ext(const char* p, size_t n, bauma_IMemAllocator *pAlloc);
+BAUMA_CCAL_DEF char *bauma_strdupn_ext(const char* p, size_t n, bauma_IMemAllocator *pAlloc);
 
 /*!
 \brief Short-hand of bauma_strdup_ext() using the default allocator
 \param p A null-terminated string
 */
 #define bauma_strdupn(p, l) bauma_strdupn_ext(p, l, bauma_getDefaultMemAllocator())
+
+BAUMA_CCAL_DEF void *bauma_memmem(const void *pHayStack, size_t hayStackSize, const void *pNeedle, size_t needleSize);
 
 typedef union bauma_VectorDataPtr_ {
 /* Used by the implementation: */
@@ -441,11 +443,11 @@ BAUMA_CCAL_DEF void bauma_exit_err(const char *msg) {
 #endif
 }
 
-static void bauma_defaultMemAllocator_destroy(bauma_IMemAllocator *pSelf) {
+BAUMA_CCAL_DEF void bauma_defaultMemAllocator_destroy(bauma_IMemAllocator *pSelf) {
 	(void)pSelf;
 }
 
-static void *bauma_defaultMemAllocator_realloc(bauma_IMemAllocator *pSelf,
+BAUMA_CCAL_DEF void *bauma_defaultMemAllocator_realloc(bauma_IMemAllocator *pSelf,
                                                void *pOld,
                                                size_t newSize,
                                                size_t *pOptRealSize) {
@@ -529,6 +531,23 @@ BAUMA_CCAL_DEF char* bauma_strdupn_ext(const char* p, size_t n, bauma_IMemAlloca
 	c[n] = '\0';
 	return c;
 }
+
+BAUMA_CCAL_DEF void *bauma_memmem(const void *pHayStack, size_t hayStackSize, const void *pNeedle, size_t needleSize) {
+    const unsigned char *h = (const unsigned char *)pHayStack;
+    const unsigned char *n = (const unsigned char *)pNeedle;
+    const unsigned char *p = h;
+    const unsigned char *end = h + hayStackSize - needleSize + 1;
+    if (needleSize == 0) return (void *)h;
+    if (needleSize > hayStackSize) return NULL;
+    while ((p = memchr(p, n[0], end - p)) != NULL) {
+        if (memcmp(p, n, needleSize) == 0) {
+            return (void *)p;
+        }
+        ++p;
+    }
+    return NULL;
+}
+
 
 BAUMA_CCAL_DEF void BAUMA_DEBUG_SUFFIX(bauma_Vector_construct_impl)(
 	bauma_Vector *pSelf,
@@ -817,7 +836,7 @@ BAUMA_CCAL_DEF void bauma_StringBuilder_appendCodePointUtf8(bauma_StringBuilder 
 }
 
 
-static int bauma_InputStreamFromMemory_getChar(bauma_IInputStream *pSelf_) {
+BAUMA_CCAL_DEF int bauma_InputStreamFromMemory_getChar(bauma_IInputStream *pSelf_) {
 	bauma_InputStreamFromMemory *pSelf;
 	bauma_assert(pSelf_ != NULL);
 	pSelf = (bauma_InputStreamFromMemory*)pSelf_;
@@ -830,7 +849,7 @@ static int bauma_InputStreamFromMemory_getChar(bauma_IInputStream *pSelf_) {
 	return -1;
 }
 
-static size_t bauma_InputStreamFromMemory_get(bauma_IInputStream *pSelf_, char* pBuf, size_t bufSize) {
+BAUMA_CCAL_DEF size_t bauma_InputStreamFromMemory_get(bauma_IInputStream *pSelf_, char* pBuf, size_t bufSize) {
 	size_t num;
 	bauma_InputStreamFromMemory *pSelf;
 	bauma_assert(pSelf_ != NULL);
@@ -842,7 +861,7 @@ static size_t bauma_InputStreamFromMemory_get(bauma_IInputStream *pSelf_, char* 
 	return num;
 }
 
-static void bauma_InputStreamFromMemory_unget(bauma_IInputStream *pSelf_) {
+BAUMA_CCAL_DEF void bauma_InputStreamFromMemory_unget(bauma_IInputStream *pSelf_) {
 	bauma_InputStreamFromMemory *pSelf;
 	bauma_assert(pSelf_ != NULL);
 	pSelf = (bauma_InputStreamFromMemory*)pSelf_;

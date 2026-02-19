@@ -603,7 +603,7 @@ static bauma_NsonNode *bauma_nson_parse_token(bauma_nson_StringWithLength *pStrW
 					return NULL;
 				}
 			#else
-				value = (bauma_intmax_t)strtol(p, NULL, 10);
+				value = (bauma_intmax_t)strtol(pParseBuf, NULL, 10);
 				if (((value == LONG_MAX) || (value == LONG_MIN) || (value == 0)) && (errno == ERANGE)) {
 					NSON_FREE_PARSE_BUF();
 					bauma_nson_fmtErr(pErrFormatter, "Error parsing signed integer: value out of range", pStrWithLen);
@@ -622,7 +622,7 @@ static bauma_NsonNode *bauma_nson_parse_token(bauma_nson_StringWithLength *pStrW
 				return NULL;
 			}
 		#else
-			value = (bauma_uintmax_t)strtoul(p, NULL, 10);
+			value = (bauma_uintmax_t)strtoul(pParseBuf, NULL, 10);
 			if (((value == ULONG_MAX) || (value == 0)) && (errno == ERANGE)) {
 				NSON_FREE_PARSE_BUF();
 				bauma_nson_fmtErr(pErrFormatter, "Error parsing unsigned integer: value out of range", pStrWithLen);

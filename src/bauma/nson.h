@@ -65,6 +65,8 @@ Having those additional features doesn't make the parser much more complicated
 but makes writing this json dialect a joy.
 */
 
+#include <limits.h>
+#include <float.h>
 #include <bauma/ccal.h>
 
 #ifdef __cplusplus
@@ -153,6 +155,33 @@ BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parse_ext(bauma_nson_StringWithLength 
 BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parseMem(const void *pMem, size_t len);
 BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parseStr(const char *pStr);
 
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_get(bauma_NsonNode *pNode, const char *pPath);
+
+BAUMA_NSON_DEF bauma_bool_t bauma_nson_getBool_ext(bauma_NsonNode *pNode, const char *pPath, bauma_bool_t defaultWhenNotFound, bauma_bool_t *pOptOutSuccess);
+#define bauma_nson_getBool(pNode, pPath) bauma_nson_getBool_ext((pNode), (pPath), BAUMA_FALSE, NULL)
+
+BAUMA_NSON_DEF bauma_intmax_t bauma_nson_getInt_ext(bauma_NsonNode *pNode, const char *pPath, bauma_intmax_t minValue, bauma_intmax_t maxValue, bauma_intmax_t, bauma_bool_t defaultWhenNotFound, bauma_bool_t *pOptOutSuccess);
+#define bauma_nson_getShort(pNode, pPath) ((short)bauma_nson_getInt_ext((pNode), (pPath), SHRT_MIN, SHRT_MAX, 0, NULL))
+#define bauma_nson_getInt(pNode, pPath) ((int)bauma_nson_getInt_ext((pNode), (pPath), INT_MIN, INT_MAX, 0, NULL))
+#define bauma_nson_getLong(pNode, pPath) ((long)bauma_nson_getInt_ext((pNode), (pPath), LONG_MIN, LONG_MAX, 0, NULL))
+#ifdef LLONG_MAX
+	#define bauma_nson_getLongLong(pNode, pPath) ((long long)bauma_nson_getInt_ext((pNode), (pPath), LLONG_MIN, LLONG_MAX, 0, NULL))
+#endif
+
+BAUMA_NSON_DEF bauma_uintmax_t bauma_nson_getUint_ext(bauma_NsonNode *pNode, const char *pPath, bauma_uintmax_t minValue, bauma_uintmax_t maxValue, bauma_uintmax_t, double defaultWhenNotFound, bauma_bool_t *pOptOutSuccess);
+#define bauma_nson_getUshort(pNode, pPath) ((unsigned short)bauma_nson_getUint_ext((pNode), (pPath), 0, USHRT_MAX, 0, NULL))
+#define bauma_nson_getUint(pNode, pPath) ((unsigned int)bauma_nson_getUint_ext((pNode), (pPath), 0, UINT_MAX, 0, NULL))
+#define bauma_nson_getUlong(pNode, pPath) ((long)bauma_nson_getUint_ext((pNode), (pPath), 0, ULONG_MAX, 0, NULL))
+#ifdef ULLONG_MAX
+	#define bauma_nson_getUlongLong(pNode, pPath) ((unsigned long long)bauma_nson_getUint_ext((pNode), (pPath), 0, ULLONG_MAX, 0, NULL))
+#endif
+
+BAUMA_NSON_DEF double bauma_nson_getDouble_ext(bauma_NsonNode *pNode, const char *pPath, double minValue, double maxValue, double defaultWhenNotFound, bauma_bool_t *pOptOutSuccess);
+#define bauma_nson_getFloat(pNode, pPath) ((float)bauma_nson_getDouble_ext((pNode), (pPath), -FLT_MAX, FLT_MAX, 0.0, NULL))
+#define bauma_nson_getDouble(pNode, pPath) bauma_nson_getDouble_ext((pNode), (pPath), -DBL_MAX, DBL_MAX, 0.0, NULL)
+
+BAUMA_NSON_DEF const char *bauma_nson_getString_ext(bauma_NsonNode *pNode, const char *pPath, const char *pDefaultWhenNotFound, bauma_bool_t *pOptOutSuccess);
+#define bauma_nson_getString(pNode, pPath) bauma_nson_getString_ext((pNode), (pPath), "", NULL)
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -693,6 +722,71 @@ BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parseStr(const char *pStr) {
 	return bauma_nson_parse_ext(&strWithLen, NULL, bauma_getDefaultMemAllocator());
 }
 
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_get(bauma_NsonNode *pNode, const char *pPath) {
+	size_t pathLen;
+	bauma_nson_assert(pNode != NULL);
+	bauma_nson_assert(pPath != NULL);
+	pathLen = strlen(pPath);
+	if (pathLen == 0) return pNode;
+	while (pathLen > 0) {
+		if (*pPath == '[') { /* array indexing */
+			char tmp[BAUMA_UINTMAX_MAX_DECIMAL_LENGTH+1];
+			size_t num;
+			bauma_uintmax_t idx;
+			const char* pEnd = strchr(pPath+1, ']');
+			if (pEnd == 0) return NULL;
+			num = (size_t)(pEnd - (pPath+1));
+			if (num > BAUMA_UINTMAX_MAX_DECIMAL_LENGTH) return NULL;
+			memcpy(tmp, pPath+1, num);
+			tmp[num] = '\0';
+			errno = 0;
+#ifdef ULLONG_MAX
+			idx = strtoull(tmp, NULL, 10);
+#else
+			idx = bauma_uintmax_t strtoul(tmp, NULL, 10);
+#endif
+			if (errno != 0) return NULL;
+			if (idx > SIZE_MAX) return NULL;
+			if (pNode->type != BAUMA_NSON_NODE_TYPE_ARRAY) return NULL;
+			if (idx > bauma_Vector_getSize(&pNode->value.v)) return NULL;
+			pNode = *bauma_Vector_at(&pNode->value.v, (size_t)idx, bauma_NsonNode*);
+			num = (size_t)((pEnd+1) - pPath);
+			pPath += num;
+			pathLen -= num;
+		}
+		else { /* find object element by key string */
+			size_t num;
+			size_t i;
+			bauma_NsonNode *pSubNode;
+			bauma_bool_t found = BAUMA_FALSE;
+			const char* pEnd = strchr(pPath, '/');
+			if (pEnd == NULL) pEnd = pPath + pathLen;
+			num = (size_t)(pEnd - pPath);
+			if (num == 0) return NULL;
+			if (pNode->type != BAUMA_NSON_NODE_TYPE_OBJECT) return NULL;
+			for (i=0; i<bauma_Vector_getSize(&pNode->value.v); ++i) {
+				pSubNode = *bauma_Vector_at(&pNode->value.v, i, bauma_NsonNode*);
+				if (pSubNode->type != BAUMA_NSON_NODE_TYPE_STRING) return NULL;
+				bauma_assert(pSubNode->value.p != NULL);
+				if (strlen(pSubNode->value.p) != num) continue;
+				if (memcmp(pSubNode->value.p, pPath, num) == 0) {
+					bauma_nson_assert(pSubNode->pObjectValue != NULL);
+					pNode = pSubNode->pObjectValue;
+					found = BAUMA_TRUE;
+					if (*pEnd == '/') ++pEnd; /* jump over '/' */
+					num = (pEnd - pPath);
+					pPath += num;
+					pathLen -= num;
+					break;
+				}
+			}
+			if (!found) return NULL;
+		}
+	}
+	return pNode;
+}
+
+
 #ifdef __cplusplus
 	} /* extern "C" */
 #endif
@@ -888,6 +982,41 @@ void test_parse(void) {
 	BAUMA_EXPECT(pNode->type == BAUMA_NSON_NODE_TYPE_STRING);
 	BAUMA_EXPECT(strcmp(pNode->value.p, "H\xC3\xA4llo") == 0);
 	bauma_nson_delete(pNode);
+	pNode = bauma_nson_parseStr(
+		"{\n"
+		"	name: Anybody,\n"
+		"	age: 42, // comment\n"
+		"	hobbies: [reading, writing, swimming,]\n"
+		"}\n"
+	);
+	BAUMA_EXPECT(pNode != NULL);
+	BAUMA_EXPECT(pNode->type == BAUMA_NSON_NODE_TYPE_OBJECT);
+	bauma_nson_delete(pNode);
+}
+
+void test_get(void) {
+	bauma_NsonNode *pNode, *pSubNode;
+	pNode = bauma_nson_parseStr(
+		"{\n"
+		"	name: Anybody,\n"
+		"	age: 42, // comment\n"
+		"	hobbies: [reading, writing, swimming,]\n"
+		"}\n"
+	);
+	BAUMA_EXPECT(pNode != NULL);
+	pSubNode = bauma_nson_get(pNode, "name");
+	BAUMA_EXPECT(pSubNode != NULL);
+	BAUMA_EXPECT(pSubNode->type = BAUMA_NSON_NODE_TYPE_STRING);
+	BAUMA_EXPECT(strcmp(pSubNode->value.p, "Anybody") == 0);
+	pSubNode = bauma_nson_get(pNode, "age");
+	BAUMA_EXPECT(pSubNode != NULL);
+	BAUMA_EXPECT(pSubNode->type = BAUMA_NSON_NODE_TYPE_UNSIGNED);
+	BAUMA_EXPECT(pSubNode->value.ui == 42u);
+	pSubNode = bauma_nson_get(pNode, "hobbies/[2]");
+	BAUMA_EXPECT(pSubNode != NULL);
+	BAUMA_EXPECT(pSubNode->type = BAUMA_NSON_NODE_TYPE_STRING);
+	BAUMA_EXPECT(strcmp(pSubNode->value.p, "swimming") == 0);
+	bauma_nson_delete(pNode);
 }
 
 #ifdef __cplusplus
@@ -899,6 +1028,7 @@ int main(int argc, char *argv[]) {
 	(void)argv;
 	BAUMA_TEST(test_new);
 	BAUMA_TEST(test_parse);
+	BAUMA_TEST(test_get);
 
 	printf("All tests passed.\n");
 	fflush(stdout);

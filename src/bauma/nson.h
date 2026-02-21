@@ -160,7 +160,7 @@ BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_get(bauma_NsonNode *pNode, const char 
 BAUMA_NSON_DEF bauma_bool_t bauma_nson_getBool_ext(bauma_NsonNode *pNode, const char *pPath, bauma_bool_t defaultWhenNotFound, bauma_bool_t *pOptOutSuccess);
 #define bauma_nson_getBool(pNode, pPath) bauma_nson_getBool_ext((pNode), (pPath), BAUMA_FALSE, NULL)
 
-BAUMA_NSON_DEF bauma_intmax_t bauma_nson_getInt_ext(bauma_NsonNode *pNode, const char *pPath, bauma_intmax_t minValue, bauma_intmax_t maxValue, bauma_intmax_t, bauma_bool_t defaultWhenNotFound, bauma_bool_t *pOptOutSuccess);
+BAUMA_NSON_DEF bauma_intmax_t bauma_nson_getInt_ext(bauma_NsonNode *pNode, const char *pPath, bauma_intmax_t minValue, bauma_intmax_t maxValue, bauma_intmax_t defaultWhenNotFound, bauma_bool_t *pOptOutSuccess);
 #define bauma_nson_getShort(pNode, pPath) ((short)bauma_nson_getInt_ext((pNode), (pPath), SHRT_MIN, SHRT_MAX, 0, NULL))
 #define bauma_nson_getInt(pNode, pPath) ((int)bauma_nson_getInt_ext((pNode), (pPath), INT_MIN, INT_MAX, 0, NULL))
 #define bauma_nson_getLong(pNode, pPath) ((long)bauma_nson_getInt_ext((pNode), (pPath), LONG_MIN, LONG_MAX, 0, NULL))
@@ -168,7 +168,7 @@ BAUMA_NSON_DEF bauma_intmax_t bauma_nson_getInt_ext(bauma_NsonNode *pNode, const
 	#define bauma_nson_getLongLong(pNode, pPath) ((long long)bauma_nson_getInt_ext((pNode), (pPath), LLONG_MIN, LLONG_MAX, 0, NULL))
 #endif
 
-BAUMA_NSON_DEF bauma_uintmax_t bauma_nson_getUint_ext(bauma_NsonNode *pNode, const char *pPath, bauma_uintmax_t minValue, bauma_uintmax_t maxValue, bauma_uintmax_t, double defaultWhenNotFound, bauma_bool_t *pOptOutSuccess);
+BAUMA_NSON_DEF bauma_uintmax_t bauma_nson_getUint_ext(bauma_NsonNode *pNode, const char *pPath, bauma_uintmax_t minValue, bauma_uintmax_t maxValue, bauma_uintmax_t defaultWhenNotFound, bauma_bool_t *pOptOutSuccess);
 #define bauma_nson_getUshort(pNode, pPath) ((unsigned short)bauma_nson_getUint_ext((pNode), (pPath), 0, USHRT_MAX, 0, NULL))
 #define bauma_nson_getUint(pNode, pPath) ((unsigned int)bauma_nson_getUint_ext((pNode), (pPath), 0, UINT_MAX, 0, NULL))
 #define bauma_nson_getUlong(pNode, pPath) ((long)bauma_nson_getUint_ext((pNode), (pPath), 0, ULONG_MAX, 0, NULL))
@@ -786,6 +786,79 @@ BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_get(bauma_NsonNode *pNode, const char 
 	return pNode;
 }
 
+BAUMA_NSON_DEF bauma_bool_t bauma_nson_getBool_ext(bauma_NsonNode *pNode, const char *pPath, bauma_bool_t defaultWhenNotFound, bauma_bool_t *pOptOutSuccess) {
+	bauma_NsonNode *pSubNode;
+	bauma_nson_assert(pNode != NULL);
+	if (pOptOutSuccess != NULL) {
+		*pOptOutSuccess = BAUMA_FALSE;
+	}
+	pSubNode = bauma_nson_get(pNode, pPath);
+	if (pSubNode == NULL) {
+		return defaultWhenNotFound;
+	}
+	if (pSubNode->type != BAUMA_NSON_NODE_TYPE_BOOL) {
+		return defaultWhenNotFound;
+	}
+	if (pOptOutSuccess != NULL) {
+		*pOptOutSuccess = BAUMA_TRUE;
+	}
+	return pSubNode->value.b;
+}
+
+BAUMA_NSON_DEF bauma_intmax_t bauma_nson_getInt_ext(bauma_NsonNode *pNode, const char *pPath, bauma_intmax_t minValue, bauma_intmax_t maxValue, bauma_intmax_t defaultWhenNotFound, bauma_bool_t *pOptOutSuccess) {
+	bauma_NsonNode *pSubNode;
+	bauma_nson_assert(pNode != NULL);
+	if (pOptOutSuccess != NULL) {
+		*pOptOutSuccess = BAUMA_FALSE;
+	}
+	pSubNode = bauma_nson_get(pNode, pPath);
+	if (pSubNode == NULL) {
+		return defaultWhenNotFound;
+	}
+	switch(pSubNode->type) {
+		case BAUMA_NSON_NODE_TYPE_BOOL: {
+			bauma_intmax_t result = (pNode->value.b) ? 1 : 0;
+			if ((result < minValue) || (result > maxValue)) return defaultWhenNotFound;
+			if (pOptOutSuccess != NULL) {
+				*pOptOutSuccess = BAUMA_TRUE;
+			}
+			return result;
+		}
+		case BAUMA_NSON_NODE_TYPE_SIGNED: {
+			bauma_intmax_t result = pNode->value.si;
+			if ((result < minValue) || (result > maxValue)) return defaultWhenNotFound;
+			if (pOptOutSuccess != NULL) {
+				*pOptOutSuccess = BAUMA_TRUE;
+			}
+			return result;
+		}
+		case BAUMA_NSON_NODE_TYPE_UNSIGNED: {
+			bauma_intmax_t result;
+			if (pNode->value.ui > (bauma_intmax_t)BAUMA_INTMAX_MAX) return defaultWhenNotFound;
+			result = (bauma_intmax_t)pNode->value.ui;
+			if ((result < minValue) || (result > maxValue)) return defaultWhenNotFound;
+			if (pOptOutSuccess != NULL) {
+				*pOptOutSuccess = BAUMA_TRUE;
+			}
+			return result;
+		}
+		case BAUMA_NSON_NODE_TYPE_DOUBLE: {
+			bauma_intmax_t result;
+			result = (bauma_intmax_t)pNode->value.d;
+			if (((double)result) != pNode->value.d) return defaultWhenNotFound;
+			if ((result < minValue) || (result > maxValue)) return defaultWhenNotFound;
+			if (pOptOutSuccess != NULL) {
+				*pOptOutSuccess = BAUMA_TRUE;
+			}
+			return result;
+		}
+		default: return defaultWhenNotFound;
+	}
+}
+
+BAUMA_NSON_DEF bauma_uintmax_t bauma_nson_getUint_ext(bauma_NsonNode *pNode, const char *pPath, bauma_uintmax_t minValue, bauma_uintmax_t maxValue, bauma_uintmax_t defaultWhenNotFound, bauma_bool_t *pOptOutSuccess);
+BAUMA_NSON_DEF double bauma_nson_getDouble_ext(bauma_NsonNode *pNode, const char *pPath, double minValue, double maxValue, double defaultWhenNotFound, bauma_bool_t *pOptOutSuccess);
+BAUMA_NSON_DEF const char *bauma_nson_getString_ext(bauma_NsonNode *pNode, const char *pPath, const char *pDefaultWhenNotFound, bauma_bool_t *pOptOutSuccess);
 
 #ifdef __cplusplus
 	} /* extern "C" */

@@ -379,7 +379,7 @@ typedef struct bauma_StringBuilder {
 } bauma_StringBuilder;
 
 BAUMA_CCAL_DEF void bauma_StringBuilder_construct_ext(bauma_StringBuilder *pSelf, bauma_IMemAllocator *pAlloc);
-#define bauma_StringBuilder_construct(pSelf) bauma_StringBuilder_construct_ext((pSelf), BAUMA_INITIAL_CAPACITY, bauma_getDefaultMemAllocator())
+#define bauma_StringBuilder_construct(pSelf) bauma_StringBuilder_construct_ext((pSelf), bauma_getDefaultMemAllocator())
 BAUMA_CCAL_DEF void bauma_StringBuilder_destruct(bauma_StringBuilder *pSelf);
 #define bauma_StringBuilder_getStr(pSelf) ((pSelf)->pStr)
 #define bauma_StringBuilder_getSize(pSelf) ((pSelf)->size)
@@ -394,6 +394,7 @@ BAUMA_CCAL_DEF void bauma_StringBuilder_appendUnsigned(bauma_StringBuilder *pSel
 BAUMA_CCAL_DEF void bauma_StringBuilder_appendDouble(bauma_StringBuilder *pSelf, double d);
 BAUMA_CCAL_DEF void bauma_StringBuilder_appendBool(bauma_StringBuilder *pSelf, bauma_bool_t b);
 BAUMA_CCAL_DEF void bauma_StringBuilder_appendCodePointUtf8(bauma_StringBuilder *pSelf, unsigned long codePoint);
+BAUMA_CCAL_DEF void bauma_StringBuilder_clear(bauma_StringBuilder *pSelf);
 
 typedef struct bauma_IInputStream {
 	int (*pGetChar)(struct bauma_IInputStream *pSelf);
@@ -837,6 +838,14 @@ BAUMA_CCAL_DEF void bauma_StringBuilder_appendCodePointUtf8(bauma_StringBuilder 
 	bauma_StringBuilder_appendStrWithLen(pSelf, (const char*)&c[0], l);
 }
 
+BAUMA_CCAL_DEF void bauma_StringBuilder_clear(bauma_StringBuilder *pSelf) {
+	bauma_assert(pSelf != NULL);
+	if (pSelf->capacity > 0) {
+		pSelf->pStr[0] = '\0';
+		pSelf->size = 0;
+	}
+
+}
 
 BAUMA_CCAL_DEF int bauma_InputStreamFromMemory_getChar(bauma_IInputStream *pSelf_) {
 	bauma_InputStreamFromMemory *pSelf;

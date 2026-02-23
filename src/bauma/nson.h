@@ -944,7 +944,6 @@ BAUMA_NSON_DEF void bauma_nson_putIndent(bauma_StringBuilder *pDst, const char *
 
 /*! Checks if the string could be printed without escapes or double quotes in NSON */
 BAUMA_NSON_DEF bauma_bool_t bauma_nson_isSimpleToken(const char *pStr, size_t len) {
-	size_t i;
 	if (len == 0) return BAUMA_FALSE;
 	if ((len == 4u) && (memcmp(pStr, "null",  4u) == 0)) return BAUMA_FALSE;
 	if ((len == 4u) && (memcmp(pStr, "true",  4u) == 0)) return BAUMA_FALSE;
@@ -992,10 +991,11 @@ BAUMA_NSON_DEF void bauma_jsonEscape(bauma_StringBuilder *pDst, const char *pStr
 				char buf[7];
 				size_t n;
 #if BAUMA_MODERN_C
-				n = (size_t)snprintf(buf, sizeof(buf) "\\u%04X", (int)((unsigned char)*pStr));
+				n = (size_t)snprintf(buf, sizeof(buf), "\\u%04X", (int)((unsigned char)*pStr));
 #else
 				n = (size_t)sprintf(buf, "\\u%04X", (int)((unsigned char)*pStr));
 #endif
+				bauma_nson_assert(n == 6u);
 				bauma_StringBuilder_appendStrWithLen(pDst, buf, n);
 			}
 			else {
@@ -1018,10 +1018,6 @@ BAUMA_NSON_DEF void bauma_nson_toString_impl(bauma_StringBuilder *pDst, bauma_Ns
 		bauma_nson_putIndent(pDst, pIndent, indentSize, indentLevel);
 	}
 	switch(pNode->type) {
-/*
-#define BAUMA_NSON_NODE_TYPE_ARRAY    7
-#define BAUMA_NSON_NODE_TYPE_OBJECT   8
-*/
 		case BAUMA_NSON_NODE_TYPE_NULL:     bauma_StringBuilder_appendStrWithLen(pDst, "null", 4u);    break;
 		case BAUMA_NSON_NODE_TYPE_BOOL:     bauma_StringBuilder_appendBool(pDst, pNode->value.b);      break;
 		case BAUMA_NSON_NODE_TYPE_SIGNED:   bauma_StringBuilder_appendSigned(pDst, pNode->value.si);   break;
@@ -1038,11 +1034,33 @@ BAUMA_NSON_DEF void bauma_nson_toString_impl(bauma_StringBuilder *pDst, bauma_Ns
 			}
 			break;
 		}
-		TODO hier weitermachen
+		case BAUMA_NSON_NODE_TYPE_ARRAY: {
+			size_t i, size;
+			bauma_NsonNode *pSubNode;
+			bauma_StringBuilder_appendChar(pDst, '[', 1u);
+			if (pretty) {
+				bauma_StringBuilder_appendChar(pDst, '\n', 1u);
+			}
+			++indentLevel;
+			size = bauma_Vector_getSize(&pNode->value.v);
+			for (i=0; i<size; ++i) {
+				pSubNode = *bauma_Vector_at(&pNode->value.v, i, bauma_NsonNode*);
+				bauma_nson_toString_impl(pDst, pSubNode, dialect, pretty, pIndent, indentSize, indentLevel);
+				if (((dialect == BAUMA_NSON_DIALECT_NSON) && (size > 1)) || ((i+1) < size)) {
+					bauma_StringBuilder_appendChar(pDst, ',', 1u);
+				}
+				if (pretty) {
+					bauma_StringBuilder_appendChar(pDst, '\n', 1u);
+				}
+			}
+			--indentLevel;
+			bauma_StringBuilder_appendChar(pDst, ']', 1u);
+			break;
+		}
+		case BAUMA_NSON_NODE_TYPE_OBJECT: {
+			break;
+		}
 		default: break;
-	}
-	if (pretty) {
-		bauma_StringBuilder_appendChar(pDst, '\n', 1u);
 	}
 }
 
@@ -1050,7 +1068,10 @@ BAUMA_NSON_DEF void bauma_nson_toString_ext(bauma_StringBuilder *pDst, bauma_Nso
 	bauma_nson_assert(pDst != NULL);
 	bauma_nson_assert(pNode != NULL);
 	bauma_nson_assert(pIndent != NULL);
-	return bauma_nson_toString_impl(pDst, pNode, dialect, pretty, pIndent, strlen(pIndent), 0);
+	bauma_nson_toString_impl(pDst, pNode, dialect, pretty, pIndent, strlen(pIndent), 0);
+	if (pretty) {
+		bauma_StringBuilder_appendChar(pDst, '\n', 1u);
+	}
 }
 
 
@@ -1286,6 +1307,77 @@ void test_get(void) {
 	bauma_nson_delete(pNode);
 }
 
+void test_toString(void) {
+	/*
+	BAUMA_NSON_DEF void bauma_nson_toString_ext(bauma_StringBuilder *pDst, bauma_NsonNode *pNode, bauma_NsonDialect dialect, bauma_bool_t pretty, const char *pIndent) {
+	*/
+	bauma_StringBuilder b;
+	bauma_NsonNode *pNode;
+	bauma_StringBuilder_construct(&b);
+	pNode = bauma_nson_parseStr("null");
+	BAUMA_EXPECT(pNode != NULL);
+	bauma_nson_toString_ext(&b, pNode, BAUMA_NSON_DIALECT_JSON, BAUMA_FALSE, "");
+	bauma_nson_delete(pNode);
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&b), "null") == 0);
+	bauma_StringBuilder_clear(&b);
+	pNode = bauma_nson_parseStr("true");
+	BAUMA_EXPECT(pNode != NULL);
+	bauma_nson_toString_ext(&b, pNode, BAUMA_NSON_DIALECT_JSON, BAUMA_FALSE, "");
+	bauma_nson_delete(pNode);
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&b), "true") == 0);
+	bauma_StringBuilder_clear(&b);
+	pNode = bauma_nson_parseStr("false");
+	BAUMA_EXPECT(pNode != NULL);
+	bauma_nson_toString_ext(&b, pNode, BAUMA_NSON_DIALECT_JSON, BAUMA_FALSE, "");
+	bauma_nson_delete(pNode);
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&b), "false") == 0);
+	bauma_StringBuilder_clear(&b);
+	pNode = bauma_nson_parseStr("0");
+	BAUMA_EXPECT(pNode != NULL);
+	bauma_nson_toString_ext(&b, pNode, BAUMA_NSON_DIALECT_JSON, BAUMA_FALSE, "");
+	bauma_nson_delete(pNode);
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&b), "0") == 0);
+	bauma_StringBuilder_clear(&b);
+	pNode = bauma_nson_parseStr("\"Hello\"");
+	BAUMA_EXPECT(pNode != NULL);
+	bauma_nson_toString_ext(&b, pNode, BAUMA_NSON_DIALECT_JSON, BAUMA_FALSE, "");
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&b), "\"Hello\"") == 0);
+	bauma_StringBuilder_clear(&b);
+	bauma_nson_toString_ext(&b, pNode, BAUMA_NSON_DIALECT_NSON, BAUMA_TRUE, "");
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&b), "Hello\n") == 0);
+	bauma_nson_delete(pNode);
+	bauma_StringBuilder_clear(&b);
+	pNode = bauma_nson_parseStr("[]");
+	BAUMA_EXPECT(pNode != NULL);
+	bauma_nson_toString_ext(&b, pNode, BAUMA_NSON_DIALECT_JSON, BAUMA_FALSE, "");
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&b), "[]") == 0);
+	bauma_StringBuilder_clear(&b);
+	bauma_nson_toString_ext(&b, pNode, BAUMA_NSON_DIALECT_JSON, BAUMA_TRUE, "\t");
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&b), "[\n]\n") == 0);
+	bauma_StringBuilder_clear(&b);
+	bauma_nson_delete(pNode);
+	pNode = bauma_nson_parseStr("[1]");
+	BAUMA_EXPECT(pNode != NULL);
+	bauma_nson_toString_ext(&b, pNode, BAUMA_NSON_DIALECT_JSON, BAUMA_FALSE, "");
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&b), "[1]") == 0);
+	bauma_StringBuilder_clear(&b);
+	bauma_nson_toString_ext(&b, pNode, BAUMA_NSON_DIALECT_JSON, BAUMA_TRUE, "\t");
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&b), "[\n\t1\n]\n") == 0);
+	bauma_StringBuilder_clear(&b);
+	bauma_nson_delete(pNode);
+	pNode = bauma_nson_parseStr("[1,2]");
+	BAUMA_EXPECT(pNode != NULL);
+	bauma_nson_toString(&b, pNode);
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&b), "[\n\t1,\n\t2\n]\n") == 0);
+	bauma_StringBuilder_clear(&b);
+	bauma_nson_toString_ext(&b, pNode, BAUMA_NSON_DIALECT_NSON, BAUMA_TRUE, "\t");
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&b), "[\n\t1,\n\t2,\n]\n") == 0);
+	bauma_StringBuilder_clear(&b);
+	bauma_nson_delete(pNode);
+
+	bauma_StringBuilder_destruct(&b);
+}
+
 #ifdef __cplusplus
 	} /* extern "C" */
 #endif
@@ -1296,6 +1388,7 @@ int main(int argc, char *argv[]) {
 	BAUMA_TEST(test_new);
 	BAUMA_TEST(test_parse);
 	BAUMA_TEST(test_get);
+	BAUMA_TEST(test_toString);
 
 	printf("All tests passed.\n");
 	fflush(stdout);

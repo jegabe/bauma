@@ -477,9 +477,9 @@ BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parse_object(bauma_nson_StringWithLeng
 	return NULL; /* unreachable */
 }
 
-static bauma_NsonNode *bauma_nson_parse_string(bauma_nson_StringWithLength *pStrWithLen,
-                                               bauma_StringBuilder *pErrFormatter,
-                                               bauma_IMemAllocator *pAlloc) {
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parse_string(bauma_nson_StringWithLength *pStrWithLen,
+                                                       bauma_StringBuilder *pErrFormatter,
+                                                       bauma_IMemAllocator *pAlloc) {
 	/* skip the '"' */
 	bauma_NsonNode *pResult = NULL;
 	bauma_StringBuilder b;
@@ -586,9 +586,9 @@ out:
 	return pResult;
 }
 
-static bauma_NsonNode *bauma_nson_parse_token(bauma_nson_StringWithLength *pStrWithLen,
-                                              bauma_StringBuilder *pErrFormatter,
-                                              bauma_IMemAllocator *pAlloc) {
+BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_parse_token(bauma_nson_StringWithLength *pStrWithLen,
+                                                      bauma_StringBuilder *pErrFormatter,
+                                                      bauma_IMemAllocator *pAlloc) {
 	const char *p = pStrWithLen->pStr;
 	size_t len = 0;
 	size_t i;

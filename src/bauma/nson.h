@@ -96,6 +96,12 @@ typedef unsigned int bauma_NsonNodeType;
 #define BAUMA_NSON_NODE_TYPE_OBJECT   8
 #define BAUMA_NSON_NODE_NUM_OF_TYPES  9
 
+typedef unsigned int bauma_NsonDialect;
+
+#define BAUMA_NSON_DIALECT_JSON            0
+#define BAUMA_NSON_DIALECT_NSON            1
+#define BAUMA_NSON_DIALECT_NUM_OF_DIALECTS 2
+
 typedef union bauma_NsonNodeUnion {
 	bauma_bool_t    b;
 	bauma_intmax_t  si;
@@ -182,6 +188,9 @@ BAUMA_NSON_DEF double bauma_nson_getDouble_ext(bauma_NsonNode *pNode, const char
 
 BAUMA_NSON_DEF bauma_bool_t bauma_nson_getString_ext(bauma_StringBuilder *pDst, bauma_NsonNode *pNode, const char *pPath, const char *pDefaultWhenNotFound);
 #define bauma_nson_getString(pNode, pPath) bauma_nson_getString_ext((*pDst), (pNode), (pPath), "")
+
+BAUMA_NSON_DEF void bauma_nson_toString_ext(bauma_StringBuilder *pDst, bauma_NsonNode *pNode, bauma_NsonDialect dialect, bauma_bool_t pretty, const char *pIndent);
+#define bauma_nson_toString(pDst, pNode) bauma_nson_toString_ext((pDst), (pNode), BAUMA_NSON_DIALECT_JSON, BAUMA_TRUE, "\t")
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -923,6 +932,124 @@ BAUMA_NSON_DEF bauma_bool_t bauma_nson_getString_ext(bauma_StringBuilder *pDst, 
 	}
 	return BAUMA_TRUE;
 }
+
+BAUMA_NSON_DEF void bauma_nson_putIndent(bauma_StringBuilder *pDst, const char *pIndent, size_t indentSize, size_t indentLevel) {
+	size_t i;
+	bauma_nson_assert(pDst != NULL);
+	bauma_nson_assert(pIndent != NULL);
+	for (i=0; i<indentLevel; ++i) {
+		bauma_StringBuilder_appendStrWithLen(pDst, pIndent, indentSize);
+	}
+}
+
+/*! Checks if the string could be printed without escapes or double quotes in NSON */
+BAUMA_NSON_DEF bauma_bool_t bauma_nson_isSimpleToken(const char *pStr, size_t len) {
+	size_t i;
+	if (len == 0) return BAUMA_FALSE;
+	if (((*pStr >= 'a') && (*pStr <= 'z')) ||
+	    ((*pStr >= 'A') && (*pStr <= 'Z')) ||
+            (*pStr == '_')) {
+		/* good: initial char must not be a number */
+	}
+	else {
+		return BAUMA_FALSE;
+	}
+	++pStr;
+	--len;
+	while(len > 0) {
+		if (((*pStr >= 'a') && (*pStr <= 'z')) ||
+		    ((*pStr >= 'A') && (*pStr <= 'Z')) ||
+		    ((*pStr >= '0') && (*pStr <= '9')) ||
+		    (*pStr == '_')) {
+			/* good: follow-chars can also be number */
+		}
+		else {
+			return BAUMA_FALSE;
+		}
+		++pStr;
+		--len;
+	}
+	return BAUMA_TRUE;
+}
+
+BAUMA_NSON_DEF void bauma_jsonEscape(bauma_StringBuilder *pDst, const char *pStr, size_t len) {
+	bauma_StringBuilder_appendChar(pDst, '"', 1u);
+	while (len > 0) {
+		switch (*pStr) {
+		case '"':  bauma_StringBuilder_appendStrWithLen(pDst, "\\\"", 2u); break;
+		case '\\': bauma_StringBuilder_appendStrWithLen(pDst, "\\\\", 2u); break;
+		case '\b': bauma_StringBuilder_appendStrWithLen(pDst, "\\b",  2u); break;
+		case '\f': bauma_StringBuilder_appendStrWithLen(pDst, "\\f",  2u); break;
+		case '\n': bauma_StringBuilder_appendStrWithLen(pDst, "\\n",  2u); break;
+		case '\r': bauma_StringBuilder_appendStrWithLen(pDst, "\\r",  2u); break;
+		case '\t': bauma_StringBuilder_appendStrWithLen(pDst, "\\t",  2u); break;
+		default: {
+			if (((unsigned char)*pStr <= 0x1F) || ((unsigned char)*pStr == 0x7F)) {
+				/* control chars */
+				char buf[7];
+				size_t n;
+#if BAUMA_MODERN_C
+				n = (size_t)snprintf(buf, sizeof(buf) "\\u%04X", (int)((unsigned char)*pStr));
+#else
+				n = (size_t)sprintf(buf, "\\u%04X", (int)((unsigned char)*pStr));
+#endif
+				bauma_StringBuilder_appendStrWithLen(pDst, buf, n);
+			}
+			else {
+				bauma_StringBuilder_appendChar(pDst, *pStr, 1u);
+			}
+			break;
+		}
+		}
+		++pStr;
+		--len;
+	}
+	bauma_StringBuilder_appendChar(pDst, '"', 1u);
+}
+
+BAUMA_NSON_DEF void bauma_nson_toString_impl(bauma_StringBuilder *pDst, bauma_NsonNode *pNode, bauma_NsonDialect dialect, bauma_bool_t pretty, const char *pIndent, size_t indentSize, size_t indentLevel) {
+	bauma_nson_assert(pDst != NULL);
+	bauma_nson_assert(pNode != NULL);
+	bauma_nson_assert(pIndent != NULL);
+	if (pretty) {
+		bauma_nson_putIndent(pDst, pIndent, indentSize, indentLevel);
+	}
+	switch(pNode->type) {
+/*
+#define BAUMA_NSON_NODE_TYPE_ARRAY    7
+#define BAUMA_NSON_NODE_TYPE_OBJECT   8
+*/
+		case BAUMA_NSON_NODE_TYPE_NULL:     bauma_StringBuilder_appendStrWithLen(pDst, "null", 4u);    break;
+		case BAUMA_NSON_NODE_TYPE_BOOL:     bauma_StringBuilder_appendBool(pDst, pNode->value.b);      break;
+		case BAUMA_NSON_NODE_TYPE_SIGNED:   bauma_StringBuilder_appendSigned(pDst, pNode->value.si);   break;
+		case BAUMA_NSON_NODE_TYPE_UNSIGNED: bauma_StringBuilder_appendUnsigned(pDst, pNode->value.ui); break;
+		case BAUMA_NSON_NODE_TYPE_DOUBLE:   bauma_StringBuilder_appendDouble(pDst, pNode->value.d);    break;
+		case BAUMA_NSON_NODE_TYPE_STRING: {
+			const char *p = pNode->value.p;
+			size_t len = strlen(pNode->value.p);
+			if ((dialect == BAUMA_NSON_DIALECT_NSON) && bauma_nson_isSimpleToken(p, len)) {
+				bauma_StringBuilder_appendStrWithLen(pDst, p, len);
+			}
+			else {
+				bauma_jsonEscape(pDst, p, len);
+			}
+			break;
+		}
+		TODO hier weitermachen
+		default: break;
+	}
+	if (pretty) {
+		bauma_StringBuilder_appendChar(pDst, '\n', 1u);
+	}
+}
+
+BAUMA_NSON_DEF void bauma_nson_toString_ext(bauma_StringBuilder *pDst, bauma_NsonNode *pNode, bauma_NsonDialect dialect, bauma_bool_t pretty, const char *pIndent) {
+	bauma_nson_assert(pDst != NULL);
+	bauma_nson_assert(pNode != NULL);
+	bauma_nson_assert(pIndent != NULL);
+	return bauma_nson_toString_impl(pDst, pNode, dialect, pretty, pIndent, strlen(pIndent), 0);
+}
+
 
 #ifdef __cplusplus
 	} /* extern "C" */

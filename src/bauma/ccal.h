@@ -150,14 +150,16 @@ containg the function definitions, which can be linked afterwards.
 	#endif
 #endif
 
+/*! For %g to printf double' that don't loose precision when re-parsed */
+#define BAUMA_DOUBLE_ROUNDTRIP_PRECISION_STR "17"
+
 /*!
-When printf'ing a double with %f, this is the max. num of characters put out:
-- up to 309 digits before the decimal for representing x*10^308 in decimal
-- The decimal separator itself
-- 6 decimal digits after the dot
-- maybe a minus sign taking an additional byte
+When printf'ing a double with %.17g, this is the max. num of characters put out
+inclusive a possible null terminator.
+Example: "-9.999999999999999e+308"
 */
-#define BAUMA_DOUBLE_MAX_DECIMAL_LEN 317u
+#define BAUMA_DOUBLE_MAX_DECIMAL_LEN 25u
+
 
 /*
 Define this before including when something else is needed,
@@ -791,7 +793,7 @@ BAUMA_CCAL_DEF void bauma_StringBuilder_appendUnsigned(bauma_StringBuilder *pSel
 }
 
 BAUMA_CCAL_DEF void bauma_StringBuilder_appendDouble(bauma_StringBuilder *pSelf, double d) {
-	bauma_StringBuilder_appendGeneric(pSelf, BAUMA_DOUBLE_MAX_DECIMAL_LEN, "%f", d);
+	bauma_StringBuilder_appendGeneric(pSelf, BAUMA_DOUBLE_MAX_DECIMAL_LEN, "%." BAUMA_DOUBLE_ROUNDTRIP_PRECISION_STR "g" , d);
 }
 
 BAUMA_CCAL_DEF void bauma_StringBuilder_appendBool(bauma_StringBuilder *pSelf, bauma_bool_t b) {

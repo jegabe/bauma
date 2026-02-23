@@ -944,6 +944,7 @@ BAUMA_NSON_DEF void bauma_nson_putIndent(bauma_StringBuilder *pDst, const char *
 
 /*! Checks if the string could be printed without escapes or double quotes in NSON */
 BAUMA_NSON_DEF bauma_bool_t bauma_nson_isSimpleToken(const char *pStr, size_t len) {
+	TODO check for null, true, false in which case it isn't simple token
 	size_t i;
 	if (len == 0) return BAUMA_FALSE;
 	if (((*pStr >= 'a') && (*pStr <= 'z')) ||

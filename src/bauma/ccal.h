@@ -804,7 +804,7 @@ BAUMA_CCAL_DEF void bauma_StringBuilder_appendBool(bauma_StringBuilder *pSelf, b
 }
 
 BAUMA_CCAL_DEF void bauma_StringBuilder_appendCodePointUtf8(bauma_StringBuilder *pSelf, unsigned long codePoint) {
-	unsigned char c[5];
+	unsigned char c[4];
 	size_t l;
 	bauma_assert(codePoint <= 0x10FFFF);
 	if (codePoint <= 0x7F) {

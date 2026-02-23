@@ -1010,11 +1010,11 @@ BAUMA_NSON_DEF void bauma_jsonEscape(bauma_StringBuilder *pDst, const char *pStr
 	bauma_StringBuilder_appendChar(pDst, '"', 1u);
 }
 
-BAUMA_NSON_DEF void bauma_nson_toString_impl(bauma_StringBuilder *pDst, bauma_NsonNode *pNode, bauma_NsonDialect dialect, bauma_bool_t pretty, const char *pIndent, size_t indentSize, size_t indentLevel) {
+BAUMA_NSON_DEF void bauma_nson_toString_impl(bauma_StringBuilder *pDst, bauma_NsonNode *pNode, bauma_NsonDialect dialect, bauma_bool_t pretty, bauma_bool_t initialIndent, const char *pIndent, size_t indentSize, size_t indentLevel) {
 	bauma_nson_assert(pDst != NULL);
 	bauma_nson_assert(pNode != NULL);
 	bauma_nson_assert(pIndent != NULL);
-	if (pretty) {
+	if (pretty && initialIndent) {
 		bauma_nson_putIndent(pDst, pIndent, indentSize, indentLevel);
 	}
 	switch(pNode->type) {
@@ -1045,7 +1045,7 @@ BAUMA_NSON_DEF void bauma_nson_toString_impl(bauma_StringBuilder *pDst, bauma_Ns
 			size = bauma_Vector_getSize(&pNode->value.v);
 			for (i=0; i<size; ++i) {
 				pSubNode = *bauma_Vector_at(&pNode->value.v, i, bauma_NsonNode*);
-				bauma_nson_toString_impl(pDst, pSubNode, dialect, pretty, pIndent, indentSize, indentLevel);
+				bauma_nson_toString_impl(pDst, pSubNode, dialect, pretty, BAUMA_TRUE, pIndent, indentSize, indentLevel);
 				if (((dialect == BAUMA_NSON_DIALECT_NSON) && (size > 1)) || ((i+1) < size)) {
 					bauma_StringBuilder_appendChar(pDst, ',', 1u);
 				}
@@ -1054,10 +1054,42 @@ BAUMA_NSON_DEF void bauma_nson_toString_impl(bauma_StringBuilder *pDst, bauma_Ns
 				}
 			}
 			--indentLevel;
+			if (pretty) {
+				bauma_nson_putIndent(pDst, pIndent, indentSize, indentLevel);
+			}
 			bauma_StringBuilder_appendChar(pDst, ']', 1u);
 			break;
 		}
 		case BAUMA_NSON_NODE_TYPE_OBJECT: {
+			size_t i, size;
+			bauma_NsonNode *pKeyNode, *pValueNode;
+			bauma_StringBuilder_appendChar(pDst, '{', 1u);
+			if (pretty) {
+				bauma_StringBuilder_appendChar(pDst, '\n', 1u);
+			}
+			++indentLevel;
+			size = bauma_Vector_getSize(&pNode->value.v);
+			for (i=0; i<size; ++i) {
+				pKeyNode = *bauma_Vector_at(&pNode->value.v, i, bauma_NsonNode*);
+				pValueNode = pKeyNode->pObjectValue;
+				bauma_nson_toString_impl(pDst, pKeyNode, dialect, pretty, BAUMA_TRUE, pIndent, indentSize, indentLevel);
+				bauma_StringBuilder_appendChar(pDst, ':', 1u);
+				if (pretty) {
+					bauma_StringBuilder_appendChar(pDst, ' ', 1u);
+				}
+				bauma_nson_toString_impl(pDst, pValueNode, dialect, pretty, BAUMA_FALSE, pIndent, indentSize, indentLevel);
+				if (((dialect == BAUMA_NSON_DIALECT_NSON) && (size > 1)) || ((i+1) < size)) {
+					bauma_StringBuilder_appendChar(pDst, ',', 1u);
+				}
+				if (pretty) {
+					bauma_StringBuilder_appendChar(pDst, '\n', 1u);
+				}
+			}
+			--indentLevel;
+			if (pretty) {
+				bauma_nson_putIndent(pDst, pIndent, indentSize, indentLevel);
+			}
+			bauma_StringBuilder_appendChar(pDst, '}', 1u);
 			break;
 		}
 		default: break;
@@ -1068,7 +1100,7 @@ BAUMA_NSON_DEF void bauma_nson_toString_ext(bauma_StringBuilder *pDst, bauma_Nso
 	bauma_nson_assert(pDst != NULL);
 	bauma_nson_assert(pNode != NULL);
 	bauma_nson_assert(pIndent != NULL);
-	bauma_nson_toString_impl(pDst, pNode, dialect, pretty, pIndent, strlen(pIndent), 0);
+	bauma_nson_toString_impl(pDst, pNode, dialect, pretty, BAUMA_TRUE, pIndent, strlen(pIndent), 0);
 	if (pretty) {
 		bauma_StringBuilder_appendChar(pDst, '\n', 1u);
 	}
@@ -1374,7 +1406,25 @@ void test_toString(void) {
 	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&b), "[\n\t1,\n\t2,\n]\n") == 0);
 	bauma_StringBuilder_clear(&b);
 	bauma_nson_delete(pNode);
-
+	pNode = bauma_nson_parseStr("{key:1,value:2}");
+	BAUMA_EXPECT(pNode != NULL);
+	bauma_nson_toString(&b, pNode);
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&b),
+		"{\n"
+		"	\"key\": 1,\n"
+		"	\"value\": 2\n"
+		"}\n"
+	) == 0);
+	bauma_StringBuilder_clear(&b);
+	bauma_nson_toString_ext(&b, pNode, BAUMA_NSON_DIALECT_NSON, BAUMA_TRUE, "");
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&b),
+		"{\n"
+		"key: 1,\n"
+		"value: 2,\n"
+		"}\n"
+	) == 0);
+	bauma_StringBuilder_clear(&b);
+	bauma_nson_delete(pNode);
 	bauma_StringBuilder_destruct(&b);
 }
 

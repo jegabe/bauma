@@ -150,6 +150,20 @@ containg the function definitions, which can be linked afterwards.
 	#endif
 #endif
 
+#ifdef __cplusplus
+	#if BAUMA_MODERN_C /* C++11 or newer */
+		typedef maxalign_t bauma_maxalign_t;
+	#else
+		typedef double bauma_maxalign_t;
+	#endif
+#else /* C */
+	#if (__STDC_VERSION__ >= 201112L)
+		typedef maxalign_t bauma_maxalign_t;
+	#else
+		typedef double bauma_maxalign_t;
+	#endif
+#endif
+
 /*! For %g to printf double' that don't loose precision when re-parsed */
 #define BAUMA_DOUBLE_ROUNDTRIP_PRECISION_STR "17"
 
@@ -181,6 +195,11 @@ such as "static inline" or "declspec(dllimport)"
 
 #define bauma_min(a, b) ((a) < (b) ? (a) : (b))
 #define bauma_max(a, b) ((a) < (b) ? (a) : (b))
+
+typedef struct bauma_StrWithLen {
+	const char *p;
+	size_t l;
+} bauma_StrWithLen;
 
 typedef struct bauma_IMemAllocator bauma_IMemAllocator;
 
@@ -217,9 +236,39 @@ typedef void (*bauma_pDestructor)(void* pCurrentElement);
 
 typedef void (*bauma_pForEachHandler)(void *pCurrentElement, void *pOptUserData);
 
+typedef size_t (*bauma_pHashFunction)(const void *pKey);
+
+typedef bauma_bool_t (*bauma_pEqualsFunction)(const void *pLhs, const void *pRhs);
+
 /*! \brief Prints error message to stderr and calls exit(1) to terminate the application */
 BAUMA_CCAL_DEF void bauma_exit_err(const char *msg);
 
+/*!
+Returns the proper memory alignment for a data type of known size.
+For char, this will return 1 and so on. The maximum possible value is
+the alignment of bauma_memalign_t. The return value is guaranteed to
+be a power of two.
+ */
+BAUMA_CCAL_DEF size_t bauma_alignof(size_t dataTypeSize);
+
+/*!
+Does run-time structure alignment (insert gaps where needed) to fit a new data type
+at a known offset by conditionally increasing that offset.
+Example for a compiler-generated "gapped" structure:
+\code
+struct X { char a, int b; };
+\endcode  
+If that gaps need to be calculated at run-time rather than compile time,
+bauma_memgap() can be called
+with bauma_memgap(sizeof(char), sizeof(int)) and will return a suitable offset
+to fit an int after a char. In this example, 3 or 7 will be added depending
+of the size of int and on the machine word width. The result is not a gap value
+but the absolute offset.
+\param offset A data structure offset (from beginning) in bytes
+\param followingTypeSize Size of a data type that has to be put at that offset
+\return Adjusted offset which might contain gap bytes
+*/
+BAUMA_CCAL_DEF size_t bauma_memgap(size_t offset, size_t followingTypeSize);
 
 /*!
 Can be used as element destructor (e.g. for vectors) when the element
@@ -233,6 +282,10 @@ also need destruction besides freeing of memory, this function might not do enou
 So this is just for memory blocks containing plain old data.
  */
 BAUMA_CCAL_DEF void bauma_memblock_destructor(void* ppMemBlock);
+
+BAUMA_CCAL_DEF size_t bauma_strHasher(const void *ppStr);
+
+BAUMA_CCAL_DEF bauma_bool_t bauma_strEquals(const void* ppLhs, const void *ppRhs);
 
 /*
 \brief Allocates a copy of the passed null-terminated string and returns it
@@ -318,12 +371,12 @@ BAUMA_CCAL_DEF void BAUMA_DEBUG_SUFFIX(bauma_Vector_construct_impl)(
 	BAUMA_DEBUG_OPT_PARAM(const char* pDataType)
 );
 
-#define bauma_Vector_construct_ext(pSelf, dataType, pElementDestructor, pMemHandler) \
+#define bauma_Vector_construct_ext(pSelf, dataType, pElementDestructor, pAlloc) \
 	BAUMA_DEBUG_SUFFIX(bauma_Vector_construct_impl)( \
 		pSelf, \
 		sizeof(dataType), \
 		pElementDestructor, \
-		pMemHandler \
+		pAlloc \
 		BAUMA_DEBUG_OPT_PARAM(#dataType) \
 	)
 
@@ -370,6 +423,77 @@ BAUMA_CCAL_DEF void BAUMA_DEBUG_SUFFIX(bauma_Vector_append_impl)(
 #define bauma_Vector_getSize(pSelf) ((const size_t)((pSelf)->size))
 
 BAUMA_CCAL_DEF void bauma_Vector_callForEach(bauma_Vector *pSelf, bauma_pForEachHandler pFunc, void *pOptUserData);
+
+typedef struct bauma_HashMapBucketHdr_ {
+	size_t size;
+	size_t capacity;
+	/* followed by dynamically allocated array of [hashCode, key, value], [hashCode, key, value], ... */
+} bauma_HashMapBucketHdr_;
+
+typedef struct bauma_HashMap {
+	bauma_HashMapBucketHdr_   **pBuckets;
+	size_t                    numOfBuckets;
+	size_t                    size;
+	size_t                    keySize;
+	size_t                    valueSize;
+	size_t                    keyOffset;
+	size_t                    valueOffset;
+	size_t                    hashKeyValueStructSize;
+	bauma_pDestructor         pKeyDestructor;
+	bauma_pDestructor         pValueDestructor;
+	bauma_pHashFunction       pKeyHash;
+	bauma_pEqualsFunction     pKeyEquals;
+	bauma_IMemAllocator       *pAlloc;
+#if BAUMA_DEBUG
+	const char                *pKeyDataType;
+	const char                *pValueDataType;
+#endif
+} bauma_HashMap;
+
+
+BAUMA_CCAL_DEF void BAUMA_DEBUG_SUFFIX(bauma_HashMap_construct_impl)(
+	bauma_HashMap *pSelf,
+	size_t keySize,
+	size_t valueSize,
+	bauma_pDestructor pKeyDestructor,
+	bauma_pDestructor pValueDestructor,
+	bauma_pHashFunction pKeyHasher,
+	bauma_pEqualsFunction pKeyEquals,
+	bauma_IMemAllocator *pAlloc
+	BAUMA_DEBUG_OPT_PARAM(const char* pKeyDataType)
+	BAUMA_DEBUG_OPT_PARAM(const char* pValueDataType)
+);
+
+#define bauma_HashMap_construct_ext(pSelf, keyType, valueType, pKeyDestructor, pValueDestructor, pKeyHasher, pKeyEquals, pAlloc) \
+	BAUMA_DEBUG_SUFFIX(bauma_HashMap_construct_impl)( \
+		pSelf, \
+		sizeof(keyType), \
+		sizeof(valueType), \
+		pKeyDestructor, \
+		pValueDestructor, \
+		pKeyHasher, \
+		pKeyEquals, \
+		pAlloc \
+		BAUMA_DEBUG_OPT_PARAM(#keyType) \
+		BAUMA_DEBUG_OPT_PARAM(#valueType) \
+	)
+
+#define bauma_HashMap_construct(pSelf, keyType, valueType, pKeyDestructor, pValueDestructor, pKeyHasher, pKeyEquals) \
+	BAUMA_DEBUG_SUFFIX(bauma_HashMap_construct_impl)( \
+		pSelf, \
+		sizeof(keyType), \
+		sizeof(valueType), \
+		pKeyDestructor, \
+		pValueDestructor, \
+		pKeyHasher, \
+		pKeyEquals, \
+		bauma_getDefaultMemAllocator() \
+		BAUMA_DEBUG_OPT_PARAM(#keyType) \
+		BAUMA_DEBUG_OPT_PARAM(#valueType) \
+	)
+
+BAUMA_CCAL_DEF void bauma_HashMap_destruct(bauma_HashMap *pSelf);
+
 
 typedef struct bauma_StringBuilder {
 	char* pStr;
@@ -418,11 +542,11 @@ BAUMA_CCAL_DEF void bauma_InputStreamFromMemory_construct(bauma_InputStreamFromM
 
 #include <string.h> /* for all kind of memory and string things */
 #include <stdarg.h> /* for variadic functions */
-#ifdef bauma_custom_assert
-	#define bauma_assert(x) bauma_custom_assert(x)
+#ifdef bauma_ccal_custom_assert
+	#define bauma_ccal_assert(x) bauma_ccal_custom_assert(x)
 #else
 	#include <assert.h>
-	#define bauma_assert(x) assert(x)
+	#define bauma_ccal_assert(x) assert(x)
 #endif
 #ifndef bauma_custom_dynmem_handler
 	#include <stdlib.h> /* for malloc(), free(), exit() etc. */
@@ -435,6 +559,47 @@ BAUMA_CCAL_DEF void bauma_InputStreamFromMemory_construct(bauma_InputStreamFromM
 #ifdef __cplusplus
 	extern "C" {
 #endif
+
+typedef struct bauma_AlignFinder_ {
+	char c;
+	bauma_maxalign_t a;
+} bauma_AlignFinder_;
+
+#define BAUMA_MAX_ALIGNMENT offsetof(bauma_AlignFinder_, a)
+
+BAUMA_CCAL_DEF bauma_bool_t bauma_is_power_of_two(size_t value) {
+	return (bauma_bool_t)((value > 0) && !(value & (value - 1)));
+}
+
+BAUMA_CCAL_DEF size_t bauma_alignof(size_t dataTypeSize) {
+	bauma_ccal_assert(bauma_is_power_of_two(BAUMA_MAX_ALIGNMENT));
+	bauma_ccal_assert(dataTypeSize > 0);
+	if (dataTypeSize < BAUMA_MAX_ALIGNMENT) {
+		/* next-power-of-two bit twiddling */
+		--dataTypeSize;
+		dataTypeSize |= dataTypeSize >> 1;
+		dataTypeSize |= dataTypeSize >> 2;
+		dataTypeSize |= dataTypeSize >> 4;
+		dataTypeSize |= dataTypeSize >> 8;
+		dataTypeSize |= dataTypeSize >> 16;
+#if SIZE_MAX > 0xFFFFFFFF
+		dataTypeSize |= dataTypeSize >> 32;
+#endif
+		++dataTypeSize;		
+		bauma_ccal_assert(bauma_is_power_of_two(dataTypeSize));
+		return dataTypeSize;
+	}
+	return BAUMA_MAX_ALIGNMENT;
+}
+
+BAUMA_CCAL_DEF size_t bauma_memgap(size_t offset, size_t followingTypeSize) {
+	/* This is a power of two: */
+	size_t alignOfFollowing = bauma_alignof(followingTypeSize);
+	--alignOfFollowing; /* make bit field out of it */
+	offset += alignOfFollowing;
+	offset &= ~alignOfFollowing;
+	return offset;
+}
 
 BAUMA_CCAL_DEF void bauma_exit_err(const char *msg) {
 #ifdef bauma_custom_exit_err
@@ -514,11 +679,35 @@ BAUMA_CCAL_DEF void bauma_memblock_destructor(void* ppMemBlock) {
 	bauma_free(pMemBlock);
 }
 
+BAUMA_CCAL_DEF size_t bauma_strHasher(const void *ppStr) {
+	const char* p;
+	size_t result = 0;
+	bauma_ccal_assert(ppStr != NULL);
+	p = *(const char**)ppStr;
+	bauma_ccal_assert(p != 0);
+	while(*p) {
+		result = (31u * result) + (size_t)((unsigned char)*p);
+		++p;
+	}
+	return result;
+}
+
+BAUMA_CCAL_DEF bauma_bool_t bauma_strEquals(const void* ppLhs, const void *ppRhs) {
+	const char* pLhs;
+	const char* pRhs;
+	bauma_ccal_assert(ppLhs != NULL);
+	bauma_ccal_assert(ppRhs != NULL);
+	pLhs = *(const char**)ppLhs;
+	pRhs = *(const char**)ppRhs;
+	return (strcmp(pLhs, pRhs) == 0);
+}
+
+
 BAUMA_CCAL_DEF char* bauma_strdup_ext(const char* p, bauma_IMemAllocator *pAlloc) {
 	size_t l;
 	char *c;
-	bauma_assert((p != NULL) && "String must not be NULL");
-	bauma_assert((pAlloc != NULL) && "Allocator must not be NULL");
+	bauma_ccal_assert((p != NULL) && "String must not be NULL");
+	bauma_ccal_assert((pAlloc != NULL) && "Allocator must not be NULL");
 	l = strlen(p) + 1u; /* +1 to include the null terminator */
 	c = (char*)((pAlloc->pRealloc)(pAlloc, NULL, l, NULL));
 	memcpy(c, p, l);
@@ -527,8 +716,8 @@ BAUMA_CCAL_DEF char* bauma_strdup_ext(const char* p, bauma_IMemAllocator *pAlloc
 
 BAUMA_CCAL_DEF char* bauma_strdupn_ext(const char* p, size_t n, bauma_IMemAllocator *pAlloc) {
 	char *c;
-	bauma_assert((p != NULL) && "String must not be NULL");
-	bauma_assert((pAlloc != NULL) && "Allocator must not be NULL");
+	bauma_ccal_assert((p != NULL) && "String must not be NULL");
+	bauma_ccal_assert((pAlloc != NULL) && "Allocator must not be NULL");
 	c = (char*)((*pAlloc->pRealloc)(pAlloc, NULL, n + 1u, NULL));
 	memcpy(c, p, n);
 	c[n] = '\0';
@@ -559,9 +748,9 @@ BAUMA_CCAL_DEF void BAUMA_DEBUG_SUFFIX(bauma_Vector_construct_impl)(
 	bauma_IMemAllocator *pAlloc
 	BAUMA_DEBUG_OPT_PARAM(const char* pDataType)
 ) {
-	bauma_assert(pSelf != NULL);
-	bauma_assert(elemSize > 0);
-	bauma_assert(pAlloc != NULL);
+	bauma_ccal_assert(pSelf != NULL);
+	bauma_ccal_assert(elemSize > 0);
+	bauma_ccal_assert(pAlloc != NULL);
 	pSelf->d.pData = NULL;
 	pSelf->elementSize = elemSize;
 	pSelf->size = 0;
@@ -569,13 +758,13 @@ BAUMA_CCAL_DEF void BAUMA_DEBUG_SUFFIX(bauma_Vector_construct_impl)(
 	pSelf->pDestructor = pElementDestructor;
 	pSelf->pAlloc = pAlloc;
 #if BAUMA_DEBUG
-	bauma_assert(pDataType != NULL);
+	bauma_ccal_assert(pDataType != NULL);
 	pSelf->pDataType = pDataType;
 #endif
 }
 
 BAUMA_CCAL_DEF void bauma_Vector_destruct(bauma_Vector *pSelf) {
-	bauma_assert(pSelf != NULL);
+	bauma_ccal_assert(pSelf != NULL);
 	if (pSelf->pDestructor) {
 		char *p = ((char*)pSelf->d.pData) + (pSelf->size * pSelf->elementSize);
 		size_t i = pSelf->size;
@@ -593,8 +782,8 @@ BAUMA_CCAL_DEF void bauma_Vector_destruct(bauma_Vector *pSelf) {
 BAUMA_CCAL_DEF void bauma_Vector_reserve(bauma_Vector *pSelf, size_t num) {
 	size_t newCap;
 	size_t realNewCap;
-	bauma_assert(pSelf != NULL);
-	bauma_assert(pSelf->pAlloc != NULL);
+	bauma_ccal_assert(pSelf != NULL);
+	bauma_ccal_assert(pSelf->pAlloc != NULL);
 	if ((pSelf->size + num) <= (pSelf->capacity)) {
 		return;
 	}
@@ -617,8 +806,8 @@ BAUMA_CCAL_DEF void BAUMA_DEBUG_SUFFIX(bauma_Vector_append_impl)(
 	BAUMA_DEBUG_OPT_PARAM(const char* pDataType)
 ) {
 	char* p;
-	bauma_assert(pSelf != NULL);
-	bauma_assert(strcmp(pDataType, pSelf->pDataType) == 0);
+	bauma_ccal_assert(pSelf != NULL);
+	bauma_ccal_assert(strcmp(pDataType, pSelf->pDataType) == 0);
 	bauma_Vector_reserve(pSelf, 1u);
 	p = ((char*)pSelf->d.pData) + (pSelf->size * pSelf->elementSize);
 	memcpy(p, pElem, pSelf->elementSize);
@@ -628,11 +817,11 @@ BAUMA_CCAL_DEF void BAUMA_DEBUG_SUFFIX(bauma_Vector_append_impl)(
 #if BAUMA_DEBUG
 
 BAUMA_CCAL_DEF void *bauma_Vector_at_impl_D(bauma_Vector *pSelf, size_t index, size_t elementSize, const char *pDataType) {
-	bauma_assert(pSelf != NULL);
-	bauma_assert(pSelf->pDataType != NULL);
-	bauma_assert(pSelf->elementSize == elementSize);
-	bauma_assert(strcmp(pDataType, pSelf->pDataType) == 0);
-	bauma_assert(index < pSelf->size);
+	bauma_ccal_assert(pSelf != NULL);
+	bauma_ccal_assert(pSelf->pDataType != NULL);
+	bauma_ccal_assert(pSelf->elementSize == elementSize);
+	bauma_ccal_assert(strcmp(pDataType, pSelf->pDataType) == 0);
+	bauma_ccal_assert(index < pSelf->size);
 	return ((char*)pSelf->d.pData) + (index * elementSize);
 }
 
@@ -641,14 +830,87 @@ BAUMA_CCAL_DEF void *bauma_Vector_at_impl_D(bauma_Vector *pSelf, size_t index, s
 BAUMA_CCAL_DEF void bauma_Vector_callForEach(bauma_Vector *pSelf, bauma_pForEachHandler pFunc, void *pOptUserData) {
 	size_t i;
 	char *p;
-	bauma_assert(pSelf != NULL);
-	bauma_assert(pFunc != NULL);
+	bauma_ccal_assert(pSelf != NULL);
+	bauma_ccal_assert(pFunc != NULL);
 	p = (char*)pSelf->d.pData;
 	for (i=0; i<pSelf->size; ++i) {
 		(*pFunc)(p, pOptUserData);
 		p += pSelf->elementSize;
 	}
 }
+
+typedef union bauma_HashMapBucketHdrSize_ {
+	bauma_HashMapBucketHdr_ h;
+	bauma_maxalign_t a;
+} bauma_HashMapBucketHdrSize_;
+
+#define BAUMA_HASHMAP_BUCKET_HDR_SIZE sizeof(bauma_HashMapBucketHdrSize_)
+
+BAUMA_CCAL_DEF void BAUMA_DEBUG_SUFFIX(bauma_HashMap_construct_impl)(
+	bauma_HashMap *pSelf,
+	size_t keySize,
+	size_t valueSize,
+	bauma_pDestructor pKeyDestructor,
+	bauma_pDestructor pValueDestructor,
+	bauma_pHashFunction pKeyHasher,
+	bauma_pEqualsFunction pKeyEquals,
+	bauma_IMemAllocator *pAlloc
+	BAUMA_DEBUG_OPT_PARAM(const char* pKeyDataType)
+	BAUMA_DEBUG_OPT_PARAM(const char* pValueDataType)
+) {
+	bauma_ccal_assert(pSelf != NULL);
+	bauma_ccal_assert(keySize > 0);
+	bauma_ccal_assert(valueSize > 0);
+	bauma_ccal_assert(pKeyHasher != NULL);
+	bauma_ccal_assert(pKeyEquals != NULL);
+	bauma_ccal_assert(pAlloc != NULL);
+	pSelf->pBuckets = NULL;
+	pSelf->numOfBuckets = 0;
+	pSelf->size = 0;
+	pSelf->keySize = keySize;
+	pSelf->valueSize = valueSize;
+	/* data structure stored in the buckets: dynamic array of [hashCode, key, value] */
+	pSelf->keyOffset = bauma_memgap(sizeof(size_t) /* hash code */, pSelf->keySize);
+	pSelf->valueOffset = bauma_memgap(pSelf->keyOffset + pSelf->keySize, pSelf->valueSize);
+	pSelf->hashKeyValueStructSize = bauma_memgap(pSelf->valueOffset + pSelf->valueSize, sizeof(size_t) /* next hashCode */);
+	pSelf->pKeyDestructor = pKeyDestructor;
+	pSelf->pValueDestructor = pValueDestructor;
+	pSelf->pKeyHash = pKeyHasher;
+	pSelf->pKeyEquals = pKeyEquals;
+	pSelf->pAlloc = pAlloc;
+#if BAUMA_DEBUG
+	pSelf->pKeyDataType = pKeyDataType;
+	pSelf->pValueDataType = pValueDataType;
+#endif
+}
+
+BAUMA_CCAL_DEF void bauma_HashMap_destruct(bauma_HashMap *pSelf) {
+	size_t i;
+	bauma_ccal_assert(pSelf != NULL);
+	i = pSelf->size;
+	while(i-- > 0) {
+		bauma_HashMapBucketHdr_* pHdr;
+		char* pPayload;
+		size_t j;
+		pHdr = pSelf->pBuckets[i];
+		pPayload = ((char*)pHdr) + BAUMA_HASHMAP_BUCKET_HDR_SIZE;
+		if ((pSelf->pKeyDestructor != NULL) || (pSelf->pValueDestructor != NULL)) {
+			j = pHdr->size;
+			while(j-- > 0) {
+				char* p = pPayload + (j * pSelf->hashKeyValueStructSize);
+				if (pSelf->pKeyDestructor != NULL) {
+					(*pSelf->pKeyDestructor)(p + pSelf->keyOffset);
+				}
+				if (pSelf->pValueDestructor != NULL) {
+					(*pSelf->pValueDestructor)(p + pSelf->valueOffset);
+				}
+			}
+		}
+		(*pSelf->pAlloc->pRealloc)(pSelf->pAlloc, pHdr, 0, NULL); /* free bucket */
+	}
+	(*pSelf->pAlloc->pRealloc)(pSelf->pAlloc, pSelf->pBuckets, 0, NULL); /* free list of buckets */
+}
+
 
 /*
   An empty StringBuilder shouldn't need to allocate memory; on the other hand,
@@ -661,8 +923,8 @@ static const char BAUMA_NULLSTR_[1] = {'\0'};
 #define BAUMA_NULLSTR ((char*)BAUMA_NULLSTR_)
 
 BAUMA_CCAL_DEF void bauma_StringBuilder_construct_ext(bauma_StringBuilder *pSelf, bauma_IMemAllocator *pAlloc) {
-	bauma_assert(pSelf != NULL);
-	bauma_assert(pAlloc != NULL);
+	bauma_ccal_assert(pSelf != NULL);
+	bauma_ccal_assert(pAlloc != NULL);
 	pSelf->pStr = BAUMA_NULLSTR;
 	pSelf->size = 0;
 	pSelf->capacity = 0;
@@ -670,8 +932,8 @@ BAUMA_CCAL_DEF void bauma_StringBuilder_construct_ext(bauma_StringBuilder *pSelf
 }
 
 BAUMA_CCAL_DEF void bauma_StringBuilder_destruct(bauma_StringBuilder *pSelf) {
-	bauma_assert(pSelf != NULL);
-	bauma_assert(pSelf->pAlloc != NULL);
+	bauma_ccal_assert(pSelf != NULL);
+	bauma_ccal_assert(pSelf->pAlloc != NULL);
 	if (pSelf->pStr != BAUMA_NULLSTR) {
 		(*pSelf->pAlloc->pRealloc)(pSelf->pAlloc, pSelf->pStr, 0, NULL);
 	}
@@ -682,10 +944,10 @@ BAUMA_CCAL_DEF void bauma_StringBuilder_destruct(bauma_StringBuilder *pSelf) {
 
 BAUMA_CCAL_DEF char *bauma_StringBuilder_release(bauma_StringBuilder *pSelf) {
 	char *p;
-	bauma_assert(pSelf != NULL);
-	bauma_assert(pSelf->pStr != NULL);
-	bauma_assert(pSelf->pStr[pSelf->size] == '\0');
-	bauma_assert(pSelf->pAlloc != NULL);
+	bauma_ccal_assert(pSelf != NULL);
+	bauma_ccal_assert(pSelf->pStr != NULL);
+	bauma_ccal_assert(pSelf->pStr[pSelf->size] == '\0');
+	bauma_ccal_assert(pSelf->pAlloc != NULL);
 	if (pSelf->pStr == BAUMA_NULLSTR) {
 		/* Give client always something on the heap */
 		p = (*pSelf->pAlloc->pRealloc)(pSelf->pAlloc, NULL, 1u, NULL);
@@ -703,8 +965,8 @@ BAUMA_CCAL_DEF char *bauma_StringBuilder_release(bauma_StringBuilder *pSelf) {
 BAUMA_CCAL_DEF void bauma_StringBuilder_reserve(bauma_StringBuilder *pSelf, size_t num) {
 	size_t newCap;
 	size_t realNewCap;
-	bauma_assert(pSelf != NULL);
-	bauma_assert(pSelf->pAlloc != NULL);
+	bauma_ccal_assert(pSelf != NULL);
+	bauma_ccal_assert(pSelf->pAlloc != NULL);
 	if ((pSelf->size + num) <= (pSelf->capacity)) {
 		return;
 	}
@@ -717,7 +979,7 @@ BAUMA_CCAL_DEF void bauma_StringBuilder_reserve(bauma_StringBuilder *pSelf, size
 	while((pSelf->size + num) > newCap) {
 		newCap *= BAUMA_CAPACITY_GROWTH;
 	}
-	bauma_assert(pSelf->pAlloc != NULL);
+	bauma_ccal_assert(pSelf->pAlloc != NULL);
 	if (pSelf->pStr == BAUMA_NULLSTR) {
 		pSelf->pStr = (*pSelf->pAlloc->pRealloc)(pSelf->pAlloc, NULL, newCap + 1u, &realNewCap);
 		pSelf->pStr[0] = '\0';
@@ -731,8 +993,8 @@ BAUMA_CCAL_DEF void bauma_StringBuilder_reserve(bauma_StringBuilder *pSelf, size
 BAUMA_CCAL_DEF void bauma_StringBuilder_appendGeneric(bauma_StringBuilder *pSelf, size_t capacityIncrease, const char *pFmt, ...) {
 	va_list ap;
 	int numPrinted;
-	bauma_assert(pSelf != NULL);
-	bauma_assert(capacityIncrease > 0);
+	bauma_ccal_assert(pSelf != NULL);
+	bauma_ccal_assert(capacityIncrease > 0);
 	bauma_StringBuilder_reserve(pSelf, capacityIncrease);
 	++capacityIncrease; /* reserve aways allocates one byte more */
 	va_start(ap, pFmt);
@@ -745,7 +1007,7 @@ BAUMA_CCAL_DEF void bauma_StringBuilder_appendGeneric(bauma_StringBuilder *pSelf
 	if (numPrinted < 0) {
 		bauma_exit_err("vs(n)printf returned negative value in bauma_StringBuilder_appendGeneric");
 	}
-	bauma_assert(numPrinted < capacityIncrease);
+	bauma_ccal_assert(numPrinted < capacityIncrease);
 	if ((size_t)numPrinted >= capacityIncrease) {
 		bauma_exit_err("Too small capacityIncrease in bauma_StringBuilder_appendGeneric, memory may be corrupted");
 	}
@@ -754,8 +1016,8 @@ BAUMA_CCAL_DEF void bauma_StringBuilder_appendGeneric(bauma_StringBuilder *pSelf
 
 BAUMA_CCAL_DEF void bauma_StringBuilder_appendStr(bauma_StringBuilder *pSelf, const char *p) {
 	size_t l;
-	bauma_assert(pSelf != NULL);
-	bauma_assert(p != NULL);
+	bauma_ccal_assert(pSelf != NULL);
+	bauma_ccal_assert(p != NULL);
 	l = strlen(p);
 	bauma_StringBuilder_reserve(pSelf, l);
 	memcpy(pSelf->pStr + pSelf->size, p, l + 1u);
@@ -763,8 +1025,8 @@ BAUMA_CCAL_DEF void bauma_StringBuilder_appendStr(bauma_StringBuilder *pSelf, co
 }
 
 BAUMA_CCAL_DEF void bauma_StringBuilder_appendStrWithLen(bauma_StringBuilder *pSelf, const char *p, size_t len) {
-	bauma_assert(pSelf != NULL);
-	bauma_assert(p != NULL);
+	bauma_ccal_assert(pSelf != NULL);
+	bauma_ccal_assert(p != NULL);
 	bauma_StringBuilder_reserve(pSelf, len);
 	memcpy(pSelf->pStr + pSelf->size, p, len);
 	pSelf->size += len;
@@ -775,7 +1037,7 @@ BAUMA_CCAL_DEF void bauma_StringBuilder_appendStrWithLen(bauma_StringBuilder *pS
 BAUMA_CCAL_DEF void bauma_StringBuilder_appendChar(bauma_StringBuilder *pSelf, int c, size_t count) {
 	size_t i;
 	char* p;
-	bauma_assert(pSelf != NULL);
+	bauma_ccal_assert(pSelf != NULL);
 	bauma_StringBuilder_reserve(pSelf, count);
 	p = pSelf->pStr + pSelf->size;
 	for (i=0; i<count; ++i) {
@@ -809,7 +1071,7 @@ BAUMA_CCAL_DEF void bauma_StringBuilder_appendBool(bauma_StringBuilder *pSelf, b
 BAUMA_CCAL_DEF void bauma_StringBuilder_appendCodePointUtf8(bauma_StringBuilder *pSelf, unsigned long codePoint) {
 	unsigned char c[4];
 	size_t l;
-	bauma_assert(codePoint <= 0x10FFFF);
+	bauma_ccal_assert(codePoint <= 0x10FFFF);
 	if (codePoint <= 0x7F) {
 		c[0] = (unsigned char)(codePoint);
 		l = 1u;
@@ -839,7 +1101,7 @@ BAUMA_CCAL_DEF void bauma_StringBuilder_appendCodePointUtf8(bauma_StringBuilder 
 }
 
 BAUMA_CCAL_DEF void bauma_StringBuilder_clear(bauma_StringBuilder *pSelf) {
-	bauma_assert(pSelf != NULL);
+	bauma_ccal_assert(pSelf != NULL);
 	if (pSelf->capacity > 0) {
 		pSelf->pStr[0] = '\0';
 		pSelf->size = 0;
@@ -849,7 +1111,7 @@ BAUMA_CCAL_DEF void bauma_StringBuilder_clear(bauma_StringBuilder *pSelf) {
 
 BAUMA_CCAL_DEF int bauma_InputStreamFromMemory_getChar(bauma_IInputStream *pSelf_) {
 	bauma_InputStreamFromMemory *pSelf;
-	bauma_assert(pSelf_ != NULL);
+	bauma_ccal_assert(pSelf_ != NULL);
 	pSelf = (bauma_InputStreamFromMemory*)pSelf_;
 	if (pSelf->size > 0) {
 		int result = *pSelf->pMem;
@@ -863,7 +1125,7 @@ BAUMA_CCAL_DEF int bauma_InputStreamFromMemory_getChar(bauma_IInputStream *pSelf
 BAUMA_CCAL_DEF size_t bauma_InputStreamFromMemory_get(bauma_IInputStream *pSelf_, char* pBuf, size_t bufSize) {
 	size_t num;
 	bauma_InputStreamFromMemory *pSelf;
-	bauma_assert(pSelf_ != NULL);
+	bauma_ccal_assert(pSelf_ != NULL);
 	pSelf = (bauma_InputStreamFromMemory*)pSelf_;
 	num = bauma_min(pSelf->size, bufSize);
 	memcpy(pBuf, pSelf->pMem, num);
@@ -874,7 +1136,7 @@ BAUMA_CCAL_DEF size_t bauma_InputStreamFromMemory_get(bauma_IInputStream *pSelf_
 
 BAUMA_CCAL_DEF void bauma_InputStreamFromMemory_unget(bauma_IInputStream *pSelf_) {
 	bauma_InputStreamFromMemory *pSelf;
-	bauma_assert(pSelf_ != NULL);
+	bauma_ccal_assert(pSelf_ != NULL);
 	pSelf = (bauma_InputStreamFromMemory*)pSelf_;
 	--pSelf->pMem;
 	++pSelf->size;
@@ -882,7 +1144,7 @@ BAUMA_CCAL_DEF void bauma_InputStreamFromMemory_unget(bauma_IInputStream *pSelf_
 }
 
 BAUMA_CCAL_DEF void bauma_InputStreamFromMemory_construct(bauma_InputStreamFromMemory *pSelf, const void *pData, size_t size) {
-	bauma_assert(pSelf != NULL);
+	bauma_ccal_assert(pSelf != NULL);
 	pSelf->base.pGetChar = &bauma_InputStreamFromMemory_getChar;
 	pSelf->base.pGet = &bauma_InputStreamFromMemory_get;
 	pSelf->base.pUnget = &bauma_InputStreamFromMemory_unget;
@@ -1187,6 +1449,12 @@ void test_stringBuilder_appendBool(void) {
 	bauma_StringBuilder_destruct(&sb);
 }
 
+void test_hashMap_constructDestruct(void) {
+	bauma_HashMap h;
+	bauma_HashMap_construct(&h, char*, char*, &bauma_memblock_destructor, &bauma_memblock_destructor, &bauma_strHasher, &bauma_strEquals);
+	bauma_HashMap_destruct(&h);
+}
+
 #ifdef __cplusplus
 	} /* extern "C" */
 #endif
@@ -1212,6 +1480,7 @@ int main(int argc, char *argv[]) {
 	BAUMA_TEST(test_stringBuilder_appendUnsigned);
 	BAUMA_TEST(test_stringBuilder_appendDouble);
 	BAUMA_TEST(test_stringBuilder_appendBool);
+	BAUMA_TEST(test_hashMap_constructDestruct);
 
 	printf("All tests passed.\n");
 	fflush(stdout);

@@ -786,7 +786,7 @@ BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_get(bauma_NsonNode *pNode, const char 
 			for (i=0; i<bauma_Vector_getSize(&pNode->value.v); ++i) {
 				pSubNode = *bauma_Vector_at(&pNode->value.v, i, bauma_NsonNode*);
 				if (pSubNode->type != BAUMA_NSON_NODE_TYPE_STRING) return NULL;
-				bauma_assert(pSubNode->value.p != NULL);
+				bauma_nson_assert(pSubNode->value.p != NULL);
 				if (strlen(pSubNode->value.p) != num) continue;
 				if (memcmp(pSubNode->value.p, pPath, num) == 0) {
 					bauma_nson_assert(pSubNode->pObjectValue != NULL);

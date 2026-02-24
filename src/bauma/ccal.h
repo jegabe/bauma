@@ -450,7 +450,6 @@ typedef struct bauma_HashMap {
 #endif
 } bauma_HashMap;
 
-
 BAUMA_CCAL_DEF void BAUMA_DEBUG_SUFFIX(bauma_HashMap_construct_impl)(
 	bauma_HashMap *pSelf,
 	size_t keySize,
@@ -494,6 +493,37 @@ BAUMA_CCAL_DEF void BAUMA_DEBUG_SUFFIX(bauma_HashMap_construct_impl)(
 
 BAUMA_CCAL_DEF void bauma_HashMap_destruct(bauma_HashMap *pSelf);
 
+#define bauma_HashMap_getSize(pSelf) ((const size_t)((pSelf)->size))
+
+BAUMA_CCAL_DEF bauma_bool_t BAUMA_DEBUG_SUFFIX(bauma_HashMap_put_impl)(
+	bauma_HashMap *pSelf,
+	void *pKey,
+	void *pValue
+	BAUMA_DEBUG_OPT_PARAM(const char* pKeyDataType)
+	BAUMA_DEBUG_OPT_PARAM(const char* pValueDataType)
+);
+
+#define bauma_HashMap_put(pSelf, pKey, pValue, keyType, valueType) \
+	BAUMA_DEBUG_SUFFIX(bauma_HashMap_put_impl)(pSelf, \
+						   pKey, \
+						   pValue \
+						   BAUMA_DEBUG_OPT_PARAM(#keyType) \
+						   BAUMA_DEBUG_OPT_PARAM(#valueType))
+
+BAUMA_CCAL_DEF void* BAUMA_DEBUG_SUFFIX(bauma_HashMap_get_impl)(
+	bauma_HashMap *pSelf,
+	const void *pKey
+	BAUMA_DEBUG_OPT_PARAM(const char* pKeyDataType)
+	BAUMA_DEBUG_OPT_PARAM(const char* pValueDataType)
+);
+
+#define bauma_HashMap_get(pSelf, pKey, keyType, valueType) \
+	((valueType*)BAUMA_DEBUG_SUFFIX(bauma_HashMap_get_impl)(pSelf, \
+	                                                        pKey \
+	                                                        BAUMA_DEBUG_OPT_PARAM(#keyType) \
+	                                                        BAUMA_DEBUG_OPT_PARAM(#valueType)))
+
+BAUMA_CCAL_DEF void bauma_HashMap_clear(bauma_HashMap* pSelf);
 
 typedef struct bauma_StringBuilder {
 	char* pStr;
@@ -584,6 +614,9 @@ BAUMA_CCAL_DEF size_t bauma_alignof(size_t dataTypeSize) {
 		dataTypeSize |= dataTypeSize >> 16;
 #if SIZE_MAX > 0xFFFFFFFF
 		dataTypeSize |= dataTypeSize >> 32;
+#endif
+#if SIZE_MAX > 0xFFFFFFFFFFFFFFFF
+		dataTypeSize |= dataTypeSize >> 64;
 #endif
 		++dataTypeSize;		
 		bauma_ccal_assert(bauma_is_power_of_two(dataTypeSize));
@@ -887,30 +920,192 @@ BAUMA_CCAL_DEF void BAUMA_DEBUG_SUFFIX(bauma_HashMap_construct_impl)(
 BAUMA_CCAL_DEF void bauma_HashMap_destruct(bauma_HashMap *pSelf) {
 	size_t i;
 	bauma_ccal_assert(pSelf != NULL);
-	i = pSelf->size;
-	while(i-- > 0) {
+	bauma_HashMap_clear(pSelf);
+	for(i=0; i<pSelf->numOfBuckets; ++i) {
 		bauma_HashMapBucketHdr_* pHdr;
-		char* pPayload;
-		size_t j;
 		pHdr = pSelf->pBuckets[i];
-		pPayload = ((char*)pHdr) + BAUMA_HASHMAP_BUCKET_HDR_SIZE;
+		if (pHdr == NULL) continue;
+		(*pSelf->pAlloc->pRealloc)(pSelf->pAlloc, pHdr, 0, NULL);
+	}
+	(*pSelf->pAlloc->pRealloc)(pSelf->pAlloc, pSelf->pBuckets, 0, NULL);
+#if BAUMA_DEBUG
+	memset(pSelf, 0xFF, sizeof(*pSelf));
+#endif
+}
+
+BAUMA_CCAL_DEF void bauma_HashMap_clear(bauma_HashMap* pSelf) {
+	size_t i;
+	bauma_ccal_assert(pSelf != NULL);
+	for(i=0; i<pSelf->numOfBuckets; ++i) {
+		bauma_HashMapBucketHdr_* pHdr;
+		pHdr = pSelf->pBuckets[i];
+		if (pHdr == NULL) continue;
 		if ((pSelf->pKeyDestructor != NULL) || (pSelf->pValueDestructor != NULL)) {
-			j = pHdr->size;
-			while(j-- > 0) {
-				char* p = pPayload + (j * pSelf->hashKeyValueStructSize);
+			char* p;
+			size_t j;
+			p = ((char*)pHdr) + BAUMA_HASHMAP_BUCKET_HDR_SIZE;
+			for (j=0; j<pHdr->size; ++j) {
 				if (pSelf->pKeyDestructor != NULL) {
 					(*pSelf->pKeyDestructor)(p + pSelf->keyOffset);
 				}
 				if (pSelf->pValueDestructor != NULL) {
 					(*pSelf->pValueDestructor)(p + pSelf->valueOffset);
 				}
+				p += pSelf->hashKeyValueStructSize;
 			}
 		}
-		(*pSelf->pAlloc->pRealloc)(pSelf->pAlloc, pHdr, 0, NULL); /* free bucket */
+		pHdr->size = 0;
 	}
-	(*pSelf->pAlloc->pRealloc)(pSelf->pAlloc, pSelf->pBuckets, 0, NULL); /* free list of buckets */
+	pSelf->size = 0;
 }
 
+#define BAUMA_HASHMAP_BUCKET_SIZE 8u
+
+BAUMA_CCAL_DEF void bauma_HashMap_reserve(bauma_HashMap *pSelf, size_t num) {
+	size_t newNumOfBuckets;
+	size_t realSize;
+	size_t i;
+	bauma_HashMapBucketHdr_ **pNewBuckets;
+	bauma_ccal_assert(pSelf != NULL);
+	if ((pSelf->size + num) <= (pSelf->numOfBuckets * BAUMA_HASHMAP_BUCKET_SIZE)) return;
+	newNumOfBuckets = (pSelf->numOfBuckets == 0) ? BAUMA_INITIAL_CAPACITY : pSelf->numOfBuckets;
+	while((pSelf->size + num) > (newNumOfBuckets * BAUMA_HASHMAP_BUCKET_SIZE)) {
+		newNumOfBuckets *= BAUMA_CAPACITY_GROWTH;
+	}
+	pNewBuckets = (bauma_HashMapBucketHdr_**)(*pSelf->pAlloc->pRealloc)(pSelf->pAlloc, NULL, newNumOfBuckets * sizeof(bauma_HashMapBucketHdr_*), &realSize);
+	newNumOfBuckets = realSize / sizeof(bauma_HashMapBucketHdr_*);
+	memset(pNewBuckets, 0, newNumOfBuckets * sizeof(bauma_HashMapBucketHdr_*));
+	for (i=0; i<pSelf->numOfBuckets; ++i) {
+		bauma_HashMapBucketHdr_ *pBucket;
+		char *p;
+		size_t j;
+		pBucket = pSelf->pBuckets[i];
+		if (pBucket == NULL) continue;
+		p = ((char*)pBucket) + BAUMA_HASHMAP_BUCKET_HDR_SIZE;
+		for (j=0; j<pBucket->size; ++j) {
+			size_t bucketIdx;
+			bauma_HashMapBucketHdr_ *pNewBucket;
+			size_t hashCode = *(size_t*)p;
+			char *q;
+			bucketIdx = hashCode % newNumOfBuckets;
+			pNewBucket = pNewBuckets[bucketIdx];
+			if ((pNewBucket == NULL) || (pNewBucket->size >= pNewBucket->capacity)) {
+				bauma_bool_t wasNull = (pNewBucket == NULL);
+				size_t newBucketCapacity = wasNull ? BAUMA_INITIAL_CAPACITY : (pNewBucket->capacity * BAUMA_CAPACITY_GROWTH);
+				pNewBucket = (bauma_HashMapBucketHdr_*)(pSelf->pAlloc->pRealloc)(pSelf->pAlloc, pNewBucket, BAUMA_HASHMAP_BUCKET_HDR_SIZE + (newBucketCapacity * pSelf->hashKeyValueStructSize), &realSize);
+				realSize -= BAUMA_HASHMAP_BUCKET_HDR_SIZE;
+				realSize /= pSelf->hashKeyValueStructSize;
+				if (wasNull) pNewBucket->size = 0;
+				pNewBucket->capacity = realSize;
+				pNewBuckets[bucketIdx] = pNewBucket;
+			}
+			q = ((char*)pNewBucket) + BAUMA_HASHMAP_BUCKET_HDR_SIZE + (pNewBucket->size * pSelf->hashKeyValueStructSize);
+			memcpy(q, p, pSelf->hashKeyValueStructSize);
+			++pNewBucket->size;
+			p += pSelf->hashKeyValueStructSize;
+		}
+		(*pSelf->pAlloc->pRealloc)(pSelf->pAlloc, pBucket, 0, NULL);
+	}
+	(*pSelf->pAlloc->pRealloc)(pSelf->pAlloc, pSelf->pBuckets, 0, NULL);
+	pSelf->pBuckets = pNewBuckets;
+	pSelf->numOfBuckets = newNumOfBuckets;
+}
+
+BAUMA_CCAL_DEF bauma_bool_t BAUMA_DEBUG_SUFFIX(bauma_HashMap_put_impl)(
+	bauma_HashMap *pSelf,
+	void *pKey,
+	void *pValue
+	BAUMA_DEBUG_OPT_PARAM(const char* pKeyDataType)
+	BAUMA_DEBUG_OPT_PARAM(const char* pValueDataType)
+) {
+	size_t hashCode;
+	size_t bucketIdx;
+	bauma_HashMapBucketHdr_ *pBucket;
+	char *p;
+	size_t i;
+	size_t realSize;
+	bauma_ccal_assert(pSelf != NULL);
+	bauma_ccal_assert(pKey != NULL);
+	bauma_ccal_assert(pValue != NULL);
+#if BAUMA_DEBUG
+	bauma_ccal_assert(strcmp(pKeyDataType, pSelf->pKeyDataType) == 0);
+	bauma_ccal_assert(strcmp(pValueDataType, pSelf->pValueDataType) == 0);
+#endif
+	bauma_HashMap_reserve(pSelf, 1u);
+	hashCode = (*pSelf->pKeyHash)(pKey);
+	bucketIdx = hashCode % pSelf->numOfBuckets;
+	pBucket = pSelf->pBuckets[bucketIdx];
+	if (pBucket == NULL) {
+		pBucket = (bauma_HashMapBucketHdr_*)(pSelf->pAlloc->pRealloc)(pSelf->pAlloc, NULL, BAUMA_HASHMAP_BUCKET_HDR_SIZE + (BAUMA_INITIAL_CAPACITY * pSelf->hashKeyValueStructSize), &realSize);
+		realSize -= BAUMA_HASHMAP_BUCKET_HDR_SIZE;
+		realSize /= pSelf->hashKeyValueStructSize;
+		pBucket->size = 0;
+		pBucket->capacity = realSize;
+		pSelf->pBuckets[bucketIdx] = pBucket;
+	}
+	p = ((char*)pBucket) + BAUMA_HASHMAP_BUCKET_HDR_SIZE;
+	for (i = 0; i < pBucket->size; ++i) {
+		if ((*(size_t*)p == hashCode) &&
+		    (*pSelf->pKeyEquals)(p + pSelf->keyOffset, pKey)) {
+			/* Key already exists, update value */
+			if (pSelf->pKeyDestructor != NULL) {
+				(*pSelf->pKeyDestructor)(pKey);
+			}
+			if (pSelf->pValueDestructor != NULL) {
+				(*pSelf->pValueDestructor)(p + pSelf->valueOffset);
+			}
+			memcpy(p + pSelf->valueOffset, pValue, pSelf->valueSize);
+			return BAUMA_FALSE;
+		}
+		p += pSelf->hashKeyValueStructSize;
+	}
+	if (pBucket->size >= pBucket->capacity) {
+		size_t newCapacity = pBucket->capacity * BAUMA_CAPACITY_GROWTH;
+		pBucket = (bauma_HashMapBucketHdr_*)(pSelf->pAlloc->pRealloc)(pSelf->pAlloc, pBucket, BAUMA_HASHMAP_BUCKET_HDR_SIZE + (newCapacity * pSelf->hashKeyValueStructSize), &realSize);
+		realSize -= BAUMA_HASHMAP_BUCKET_HDR_SIZE;
+		realSize /= pSelf->hashKeyValueStructSize;
+		pBucket->capacity = realSize;
+		pSelf->pBuckets[bucketIdx] = pBucket;
+	}
+	p = ((char*)pBucket) + BAUMA_HASHMAP_BUCKET_HDR_SIZE + (pBucket->size * pSelf->hashKeyValueStructSize);
+	*(size_t*)p = hashCode;
+	memcpy(p + pSelf->keyOffset, pKey, pSelf->keySize);
+	memcpy(p + pSelf->valueOffset, pValue, pSelf->valueSize);
+	++pBucket->size;
+	++pSelf->size;
+	return BAUMA_TRUE;
+}
+		
+BAUMA_CCAL_DEF void* BAUMA_DEBUG_SUFFIX(bauma_HashMap_get_impl)(
+	bauma_HashMap *pSelf,
+	const void *pKey
+	BAUMA_DEBUG_OPT_PARAM(const char* pKeyDataType)
+	BAUMA_DEBUG_OPT_PARAM(const char* pValueDataType)
+) {
+	size_t hashCode;
+	bauma_HashMapBucketHdr_ *pBucket;
+	char *p;
+	size_t i;
+	bauma_ccal_assert(pSelf != NULL);
+#if BAUMA_DEBUG
+	bauma_ccal_assert(strcmp(pKeyDataType, pSelf->pKeyDataType) == 0);
+	bauma_ccal_assert(strcmp(pValueDataType, pSelf->pValueDataType) == 0);
+#endif
+	if (pSelf->numOfBuckets == 0) return NULL;
+	hashCode = (*pSelf->pKeyHash)(pKey);
+	pBucket = pSelf->pBuckets[hashCode % pSelf->numOfBuckets];
+	if (pBucket == NULL) return NULL;
+	p = ((char*)pBucket) + BAUMA_HASHMAP_BUCKET_HDR_SIZE;
+	for (i=0; i<pBucket->size; ++i) {
+		
+		if ((*(size_t*)p == hashCode) &&
+		    (*pSelf->pKeyEquals)(p + pSelf->keyOffset, pKey)) {
+			return p + pSelf->valueOffset;
+		}
+		p += pSelf->hashKeyValueStructSize;
+	}
+	return NULL;
+}
 
 /*
   An empty StringBuilder shouldn't need to allocate memory; on the other hand,
@@ -1312,7 +1507,7 @@ void test_vector_callForEach(void) {
 void test_stringBuilder_construct(void) {
 	bauma_StringBuilder sb;
 	bauma_StringBuilder_construct(&sb);
-	BAUMA_EXPECT(sb.pStr = BAUMA_NULLSTR);
+	BAUMA_EXPECT(sb.pStr == BAUMA_NULLSTR);
 	BAUMA_EXPECT(sb.size == 0);
 	BAUMA_EXPECT(sb.capacity == 0);
 	BAUMA_EXPECT(sb.pAlloc = bauma_getDefaultMemAllocator());
@@ -1328,7 +1523,7 @@ void test_stringBuilder_release(void) {
 	BAUMA_EXPECT(strcmp(p, "Hello") == 0);
 	bauma_free(p);
 	/* State after release() should be same as after construction */
-	BAUMA_EXPECT(sb.pStr = BAUMA_NULLSTR);
+	BAUMA_EXPECT(sb.pStr == BAUMA_NULLSTR);
 	BAUMA_EXPECT(sb.size == 0);
 	BAUMA_EXPECT(sb.capacity == 0);
 	BAUMA_EXPECT(sb.pAlloc = bauma_getDefaultMemAllocator());
@@ -1455,6 +1650,68 @@ void test_hashMap_constructDestruct(void) {
 	bauma_HashMap_destruct(&h);
 }
 
+void test_hashMap_putGet(void) {
+	bauma_HashMap h;
+	char *pKey;
+	char *pValue;
+	const char** ppFoundValue;
+	bauma_bool_t isNewValue;
+	bauma_HashMap_construct(&h, char*, char*, &bauma_memblock_destructor, &bauma_memblock_destructor, &bauma_strHasher, &bauma_strEquals);
+	pKey = bauma_strdup("Hello");
+	pValue = bauma_strdup("Hallo");
+	isNewValue = bauma_HashMap_put(&h, &pKey, &pValue, char*, char*);
+	BAUMA_EXPECT(isNewValue);
+	pKey = bauma_strdup("Goodbye");
+	pValue = bauma_strdup("Auf Wiedersehen");
+	isNewValue = bauma_HashMap_put(&h, &pKey, &pValue, char*, char*);
+	BAUMA_EXPECT(isNewValue);
+	pKey = bauma_strdup("Hello");
+	pValue = bauma_strdup("NewValue");
+	isNewValue = bauma_HashMap_put(&h, &pKey, &pValue, char*, char*);
+	BAUMA_EXPECT(!isNewValue);
+	pKey = (char*)"Hello";
+	ppFoundValue = bauma_HashMap_get(&h, &pKey, char*, char*);
+	BAUMA_EXPECT(ppFoundValue != NULL);
+	BAUMA_EXPECT(strcmp(*ppFoundValue, "NewValue") == 0);
+	pKey = (char*)"Goodbye";
+	ppFoundValue = bauma_HashMap_get(&h, &pKey, char*, char*);
+	BAUMA_EXPECT(ppFoundValue != NULL);
+	BAUMA_EXPECT(strcmp(*ppFoundValue, "Auf Wiedersehen") == 0);
+	pKey = (char*)"Something else";
+	ppFoundValue = bauma_HashMap_get(&h, &pKey, char*, char*);
+	BAUMA_EXPECT(ppFoundValue == NULL);
+	bauma_HashMap_destruct(&h);
+}
+
+static size_t test_intHasher(const void* p) {
+	return (size_t)(*(const int*)p);
+}
+
+static bauma_bool_t test_intEquals(const void* pLhs, const void* pRhs) {
+	return (*(const int*)pLhs) == (*(const int*)pRhs);
+}
+
+void test_hashMap_manyElements(void) {
+	bauma_HashMap h;
+	int key, value, *pFoundValue;
+	size_t i;
+	size_t num = 10000;
+	bauma_HashMap_construct(&h, int, int, NULL, NULL, &test_intHasher, &test_intEquals);
+	for (i=0; i<num; ++i) {
+		key = (int)i;
+		value = (int)(i);
+		bauma_HashMap_put(&h, &key, &value, int, int);
+	}
+	BAUMA_EXPECT(bauma_HashMap_getSize(&h) == num);
+	for (i=0; i<num; ++i) {
+		key = (int)i;
+		pFoundValue = bauma_HashMap_get(&h, &key, int, int);
+		BAUMA_EXPECT(pFoundValue != NULL);
+		BAUMA_EXPECT(*pFoundValue == (int)i);
+	}
+	bauma_HashMap_destruct(&h);
+}
+
 #ifdef __cplusplus
 	} /* extern "C" */
 #endif
@@ -1481,6 +1738,8 @@ int main(int argc, char *argv[]) {
 	BAUMA_TEST(test_stringBuilder_appendDouble);
 	BAUMA_TEST(test_stringBuilder_appendBool);
 	BAUMA_TEST(test_hashMap_constructDestruct);
+	BAUMA_TEST(test_hashMap_putGet);
+	BAUMA_TEST(test_hashMap_manyElements);
 
 	printf("All tests passed.\n");
 	fflush(stdout);

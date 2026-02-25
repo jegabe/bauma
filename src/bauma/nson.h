@@ -765,7 +765,7 @@ BAUMA_NSON_DEF bauma_NsonNode *bauma_nson_get(bauma_NsonNode *pNode, const char 
 			idx = strtoul(tmp, NULL, 10);
 #endif
 			if (errno != 0) return NULL;
-			if (idx > SIZE_MAX) return NULL;
+			if (idx > ((size_t)-1)) return NULL;
 			if (pNode->type != BAUMA_NSON_NODE_TYPE_ARRAY) return NULL;
 			if (idx > bauma_Vector_getSize(&pNode->value.v)) return NULL;
 			pNode = *bauma_Vector_at(&pNode->value.v, (size_t)idx, bauma_NsonNode*);

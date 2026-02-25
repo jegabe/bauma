@@ -121,46 +121,32 @@ containg the function definitions, which can be linked afterwards.
 #else /* older compiler */
 	/* This is a guess but usually those types reflect
 		the maximum */
-	typedef ptrdiff_t bauma_intmax_t;
-	typedef size_t bauma_uintmax_t;
-	#if SIZE_MAX == UINT_MAX
-		#define BAUMA_INTMAX_PREFIX ""
-		#define BAUMA_INTMAX_MIN INT_MIN
-		#define BAUMA_INTMAX_MAX INT_MAX
-		#define BAUMA_UINTMAX_MAX UINT_MAX
-	#elif SIZE_MAX == ULONG_MAX
-		#define BAUMA_INTMAX_PREFIX "l"
-		#define BAUMA_INTMAX_MIN LONG_MIN
-		#define BAUMA_INTMAX_MAX LONG_MAX
-		#define BAUMA_UINTMAX_MAX ULONG_MAX
-	#elif defined(ULLONG_MAX) && (SIZE_MAX == ULLONG_MAX)
-		#define BAUMA_INTMAX_PREFIX "ll"
-		#define BAUMA_INTMAX_MIN LLONG_MIN
-		#define BAUMA_INTMAX_MAX LLONG_MAX
-		#define BAUMA_UINTMAX_MAX ULLONG_MAX
-	#else
-		#error "Can't detect printf prefix for bauma_(u)intmax_t"
-	#endif
-	#if SIZE_MAX > 0xFFFFFFFFFFFFFFFF
+	typedef long bauma_intmax_t;
+	typedef unsigned long bauma_uintmax_t;
+	#define BAUMA_INTMAX_PREFIX "l"
+	#define BAUMA_INTMAX_MIN LONG_MIN
+	#define BAUMA_INTMAX_MAX LONG_MAX
+	#define BAUMA_UINTMAX_MAX ULONG_MAX
+	#if ULONG_MAX > 0xFFFFFFFFFFFFFFFF
 		#error "Can't handle UINTMAX_MAX greater than 64 bits, please fix"
-	#elif SIZE_MAX >= 0xFFFFFFFFFFFFFFFF
+	#elif ULONG_MAX >= 0xFFFFFFFFFFFFFFFF
 		#define BAUMA_UINTMAX_MAX_DECIMAL_LENGTH 20u
-	#elif SIZE_MAX >= 0xFFFFFFFF
+	#elif ULONG_MAX >= 0xFFFFFFFF
 		#define BAUMA_UINTMAX_MAX_DECIMAL_LENGTH 11u
 	#endif
 #endif
 
 #ifdef __cplusplus
 	#if BAUMA_MODERN_C /* C++11 or newer */
-		typedef maxalign_t bauma_maxalign_t;
+		typedef max_align_t bauma_max_align_t;
 	#else
-		typedef double bauma_maxalign_t;
+		typedef double bauma_max_align_t;
 	#endif
 #else /* C */
 	#if (__STDC_VERSION__ >= 201112L)
-		typedef maxalign_t bauma_maxalign_t;
+		typedef max_align_t bauma_max_align_t;
 	#else
-		typedef double bauma_maxalign_t;
+		typedef double bauma_max_align_t;
 	#endif
 #endif
 
@@ -310,16 +296,6 @@ BAUMA_CCAL_DEF char *bauma_strdupn_ext(const char* p, size_t n, bauma_IMemAlloca
 
 BAUMA_CCAL_DEF void *bauma_memmem(const void *pHayStack, size_t hayStackSize, const void *pNeedle, size_t needleSize);
 
-typedef struct bauma_StrWithLen {
-	const char *p;
-	size_t l;
-} bauma_StrWithLen;
-
-BAUMA_CCAL_DEF void bauma_StrWithLen_destruct(bauma_StrWithLen *p);
-BAUMA_CCAL_DEF size_t bauma_StrWithLen_hash(const void *p);
-BAUMA_CCAL_DEF bauma_bool_t bauma_StrWithLen_equals(const void *pLhs, const void *pRhs);
-
-
 typedef union bauma_VectorDataPtr_ {
 /* Used by the implementation: */
 	void               *pData;
@@ -426,6 +402,10 @@ BAUMA_CCAL_DEF void BAUMA_DEBUG_SUFFIX(bauma_Vector_append_impl)(
 		pElement = ((dataType*)(((char*)(pElement)) + (pSelf)->elementSize)))
 
 #define bauma_Vector_getSize(pSelf) ((const size_t)((pSelf)->size))
+
+#define bauma_Vector_getCapacity(pSelf) ((const size_t)((pSelf)->capacity))
+
+#define bauma_Vector_getAlloc(pSelf) ((bauma_IMemAllocator* const)((pSelf)->pAlloc))
 
 BAUMA_CCAL_DEF void bauma_Vector_callForEach(bauma_Vector *pSelf, bauma_pForEachHandler pFunc, void *pOptUserData);
 
@@ -551,20 +531,6 @@ BAUMA_CCAL_DEF void bauma_StringBuilder_appendBool(bauma_StringBuilder *pSelf, b
 BAUMA_CCAL_DEF void bauma_StringBuilder_appendCodePointUtf8(bauma_StringBuilder *pSelf, unsigned long codePoint);
 BAUMA_CCAL_DEF void bauma_StringBuilder_clear(bauma_StringBuilder *pSelf);
 
-typedef struct bauma_IInputStream {
-	int (*pGetChar)(struct bauma_IInputStream *pSelf);
-	size_t (*pGet)(struct bauma_IInputStream *pSelf, char* pBuf, size_t bufSize);
-	void (*pUnget)(struct bauma_IInputStream *pSelf);
-} bauma_IInputStream;
-
-typedef struct bauma_InputStreamFromMemory {
-	bauma_IInputStream base;
-	const unsigned char *pMem;
-	size_t size;
-} bauma_InputStreamFromMemory;
-
-BAUMA_CCAL_DEF void bauma_InputStreamFromMemory_construct(bauma_InputStreamFromMemory *pSelf, const void *pData, size_t size);
-
 #ifdef __cplusplus
 	} /* extern "C" */
 #endif
@@ -593,7 +559,7 @@ BAUMA_CCAL_DEF void bauma_InputStreamFromMemory_construct(bauma_InputStreamFromM
 
 typedef struct bauma_AlignFinder_ {
 	char c;
-	bauma_maxalign_t a;
+	bauma_max_align_t a;
 } bauma_AlignFinder_;
 
 #define BAUMA_MAX_ALIGNMENT offsetof(bauma_AlignFinder_, a)
@@ -657,6 +623,7 @@ BAUMA_CCAL_DEF void *bauma_defaultMemAllocator_realloc(bauma_IMemAllocator *pSel
 	bauma_custom_dynmem_handler(pOld, newSize, pOptRealSize);
 #else
 	void *p;
+	(void)pSelf;
 	if (pOptRealSize != NULL) {
 		*pOptRealSize = 0;
 	}
@@ -774,33 +741,6 @@ BAUMA_CCAL_DEF void *bauma_memmem(const void *pHayStack, size_t hayStackSize, co
     return NULL;
 }
 
-BAUMA_CCAL_DEF void bauma_StrWithLen_destruct(bauma_StrWithLen *p) {
-	bauma_ccal_assert(p != NULL);
-	bauma_free((void*)(p->p));
-}
-
-BAUMA_CCAL_DEF size_t bauma_StrWithLen_hash(const void *p) {
-	const bauma_StrWithLen *pStr = (const bauma_StrWithLen*)p;
-	size_t result = 0;
-	size_t i;
-	bauma_ccal_assert(p != NULL);
-	for (i=0; i<pStr->l; ++i) {
-		result = (31u * result) + (size_t)((unsigned char)pStr->p[i]);
-	}
-	return result;
-}
-
-BAUMA_CCAL_DEF bauma_bool_t bauma_StrWithLen_equals(const void *pLhs, const void *pRhs) {
-	const bauma_StrWithLen *pLhsStr = (const bauma_StrWithLen*)pLhs;
-	const bauma_StrWithLen *pRhsStr = (const bauma_StrWithLen*)pRhs;
-	bauma_ccal_assert(pLhs != NULL);
-	bauma_ccal_assert(pRhs != NULL);
-	if (pLhsStr->l != pRhsStr->l) {
-		return BAUMA_FALSE;
-	}
-	return (memcmp(pLhsStr->p, pRhsStr->p, pLhsStr->l) == 0);
-}
-
 BAUMA_CCAL_DEF void BAUMA_DEBUG_SUFFIX(bauma_Vector_construct_impl)(
 	bauma_Vector *pSelf,
 	size_t elemSize, 
@@ -907,7 +847,7 @@ struct bauma_HashMapBucketHdr_ {
 
 typedef union bauma_HashMapBucketHdrSize_ {
 	bauma_HashMapBucketHdr_ h;
-	bauma_maxalign_t a;
+	bauma_max_align_t a;
 } bauma_HashMapBucketHdrSize_;
 
 #define BAUMA_HASHMAP_BUCKET_HDR_SIZE sizeof(bauma_HashMapBucketHdrSize_)
@@ -1235,7 +1175,7 @@ BAUMA_CCAL_DEF void bauma_StringBuilder_appendGeneric(bauma_StringBuilder *pSelf
 	if (numPrinted < 0) {
 		bauma_exit_err("vs(n)printf returned negative value in bauma_StringBuilder_appendGeneric");
 	}
-	bauma_ccal_assert(numPrinted < capacityIncrease);
+	bauma_ccal_assert((size_t)numPrinted < capacityIncrease);
 	if ((size_t)numPrinted >= capacityIncrease) {
 		bauma_exit_err("Too small capacityIncrease in bauma_StringBuilder_appendGeneric, memory may be corrupted");
 	}
@@ -1336,48 +1276,6 @@ BAUMA_CCAL_DEF void bauma_StringBuilder_clear(bauma_StringBuilder *pSelf) {
 	}
 
 }
-
-BAUMA_CCAL_DEF int bauma_InputStreamFromMemory_getChar(bauma_IInputStream *pSelf_) {
-	bauma_InputStreamFromMemory *pSelf;
-	bauma_ccal_assert(pSelf_ != NULL);
-	pSelf = (bauma_InputStreamFromMemory*)pSelf_;
-	if (pSelf->size > 0) {
-		int result = *pSelf->pMem;
-		++pSelf->pMem;
-		--pSelf->size;
-		return result;
-	}
-	return -1;
-}
-
-BAUMA_CCAL_DEF size_t bauma_InputStreamFromMemory_get(bauma_IInputStream *pSelf_, char* pBuf, size_t bufSize) {
-	size_t num;
-	bauma_InputStreamFromMemory *pSelf;
-	bauma_ccal_assert(pSelf_ != NULL);
-	pSelf = (bauma_InputStreamFromMemory*)pSelf_;
-	num = bauma_min(pSelf->size, bufSize);
-	memcpy(pBuf, pSelf->pMem, num);
-	pSelf->pMem += num;
-	pSelf->size -= num;
-	return num;
-}
-
-BAUMA_CCAL_DEF void bauma_InputStreamFromMemory_unget(bauma_IInputStream *pSelf_) {
-	bauma_InputStreamFromMemory *pSelf;
-	bauma_ccal_assert(pSelf_ != NULL);
-	pSelf = (bauma_InputStreamFromMemory*)pSelf_;
-	--pSelf->pMem;
-	++pSelf->size;
-
-}
-
-BAUMA_CCAL_DEF void bauma_InputStreamFromMemory_construct(bauma_InputStreamFromMemory *pSelf, const void *pData, size_t size) {
-	bauma_ccal_assert(pSelf != NULL);
-	pSelf->base.pGetChar = &bauma_InputStreamFromMemory_getChar;
-	pSelf->base.pGet = &bauma_InputStreamFromMemory_get;
-	pSelf->base.pUnget = &bauma_InputStreamFromMemory_unget;
-}
-
 
 #ifdef __cplusplus
 	} /* extern "C" */

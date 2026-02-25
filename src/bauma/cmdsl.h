@@ -42,12 +42,33 @@ The syntax is:
   - "%(" is replaced with "("
   - "%)" is replaced with ")"
   - "%," is replaced with ","
-  - "%" followed by any white-space character means skipping all of the whitespace until a non-whitespace
-        character is reached. 
+  - "%" followed by any white-space character skips all of the whitespace until a non-whitespace
+        character is reached.
+  - "%*" starts a comment, ignoring everything until "*%" is reached, similarly to C-style comments.
+    Comment nesting is supported, so "%* ... %* ... *% ... *%" is a valid comment with another comment inside.
+  - "%/" starts a comment until the end of the line, similarly to C++-style comments.
 
-Example: "%get(CC) -c -o %get(OBJ) %get(SRC)" could be a template for a compiler command line, where CC, OBJ and SRC are variables
+Simple example: "%get(CC) -c -o %get(OBJ) %get(SRC)" could be a template for a compiler command line, where CC, OBJ and SRC are variables
 that are pre-set using bauma_cmdsl_setVariable().
 
+When the "%" sign isn't the ideal choice, it can be replaced by calling the extended constructor with another one,
+such as the dollar or at-sign.
+
+More complex example:
+
+%set(MYVAR,MYVALUE)% %set(MYVAR2,MYVALUE2)%/ Sets the variable to the value. THe % followed by whitespace skips that whitespace in the output
+%mySpecialFunction(%get(MYVAR),%get(MYVAR2),%,)%/ Calls a custom function with the variable values as parameters
+%/ The "%," is replaced by comma, so the 3rd parameter to mySpecialFunction is actually a comma.
+
+The built-in functions are:
+
+- %set(VAR_NAME,VALUE): Sets a variable to a value, returns an empty string
+- %get(VAR_NAME): Returns the value of a variable, or an empty string if the variable isn't set yet
+- %push(VAR_NAME): Pushes the current value of a variable to an internal stack, returns an empty string. Not-defined variables are pushed as empty string.
+- %pop(VAR_NAME): Pops the last value of a variable from the internal stack and sets the variable to that value, returns an empty string.
+- %call(FUNCTION,PARAM1,PARAM2,...): Calls a custom function with the given parameters, returns the result of that function.
+  This enables calling function whose name is calclulated at run-time or by a variable. So, this is also possible:
+  %call(%get(MYVAR),PARAM1,PARAM2,...) which calls whatever function name is stored inside MYVAR.
 */
 #include <bauma/ccal.h>
 

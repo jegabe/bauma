@@ -196,19 +196,14 @@ such as "static inline" or "declspec(dllimport)"
 #define bauma_min(a, b) ((a) < (b) ? (a) : (b))
 #define bauma_max(a, b) ((a) < (b) ? (a) : (b))
 
-typedef struct bauma_StrWithLen {
-	const char *p;
-	size_t l;
-} bauma_StrWithLen;
-
 typedef struct bauma_IMemAllocator bauma_IMemAllocator;
 
 struct bauma_IMemAllocator {
-  void (*pDestroy)(bauma_IMemAllocator *pSelf);
-  void *(*pRealloc)(bauma_IMemAllocator *pSelf,
-                    void *pOld,
-                    size_t newSsize,
-                    size_t *pOptRealSize);
+	void (*pDestroy)(bauma_IMemAllocator *pSelf);
+	void *(*pRealloc)(bauma_IMemAllocator *pSelf,
+	                  void *pOld,
+	                  size_t newSsize,
+	                  size_t *pOptRealSize);
 };
 
 extern const bauma_IMemAllocator bauma_defaultMemAllocator_;
@@ -314,6 +309,16 @@ BAUMA_CCAL_DEF char *bauma_strdupn_ext(const char* p, size_t n, bauma_IMemAlloca
 #define bauma_strdupn(p, l) bauma_strdupn_ext(p, l, bauma_getDefaultMemAllocator())
 
 BAUMA_CCAL_DEF void *bauma_memmem(const void *pHayStack, size_t hayStackSize, const void *pNeedle, size_t needleSize);
+
+typedef struct bauma_StrWithLen {
+	const char *p;
+	size_t l;
+} bauma_StrWithLen;
+
+BAUMA_CCAL_DEF void bauma_StrWithLen_destruct(bauma_StrWithLen *p);
+BAUMA_CCAL_DEF size_t bauma_StrWithLen_hash(const void *p);
+BAUMA_CCAL_DEF bauma_bool_t bauma_StrWithLen_equals(const void *pLhs, const void *pRhs);
+
 
 typedef union bauma_VectorDataPtr_ {
 /* Used by the implementation: */
@@ -769,6 +774,32 @@ BAUMA_CCAL_DEF void *bauma_memmem(const void *pHayStack, size_t hayStackSize, co
     return NULL;
 }
 
+BAUMA_CCAL_DEF void bauma_StrWithLen_destruct(bauma_StrWithLen *p) {
+	bauma_ccal_assert(p != NULL);
+	bauma_free((void*)(p->p));
+}
+
+BAUMA_CCAL_DEF size_t bauma_StrWithLen_hash(const void *p) {
+	const bauma_StrWithLen *pStr = (const bauma_StrWithLen*)p;
+	size_t result = 0;
+	size_t i;
+	bauma_ccal_assert(p != NULL);
+	for (i=0; i<pStr->l; ++i) {
+		result = (31u * result) + (size_t)((unsigned char)pStr->p[i]);
+	}
+	return result;
+}
+
+BAUMA_CCAL_DEF bauma_bool_t bauma_StrWithLen_equals(const void *pLhs, const void *pRhs) {
+	const bauma_StrWithLen *pLhsStr = (const bauma_StrWithLen*)pLhs;
+	const bauma_StrWithLen *pRhsStr = (const bauma_StrWithLen*)pRhs;
+	bauma_ccal_assert(pLhs != NULL);
+	bauma_ccal_assert(pRhs != NULL);
+	if (pLhsStr->l != pRhsStr->l) {
+		return BAUMA_FALSE;
+	}
+	return (memcmp(pLhsStr->p, pRhsStr->p, pLhsStr->l) == 0);
+}
 
 BAUMA_CCAL_DEF void BAUMA_DEBUG_SUFFIX(bauma_Vector_construct_impl)(
 	bauma_Vector *pSelf,

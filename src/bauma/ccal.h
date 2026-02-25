@@ -424,11 +424,7 @@ BAUMA_CCAL_DEF void BAUMA_DEBUG_SUFFIX(bauma_Vector_append_impl)(
 
 BAUMA_CCAL_DEF void bauma_Vector_callForEach(bauma_Vector *pSelf, bauma_pForEachHandler pFunc, void *pOptUserData);
 
-typedef struct bauma_HashMapBucketHdr_ {
-	size_t size;
-	size_t capacity;
-	/* followed by dynamically allocated array of [hashCode, key, value], [hashCode, key, value], ... */
-} bauma_HashMapBucketHdr_;
+typedef struct bauma_HashMapBucketHdr_ bauma_HashMapBucketHdr_;
 
 typedef struct bauma_HashMap {
 	bauma_HashMapBucketHdr_   **pBuckets;
@@ -872,6 +868,12 @@ BAUMA_CCAL_DEF void bauma_Vector_callForEach(bauma_Vector *pSelf, bauma_pForEach
 	}
 }
 
+struct bauma_HashMapBucketHdr_ {
+	size_t size;
+	size_t capacity;
+	/* followed by dynamically allocated array of [hashCode, key, value], [hashCode, key, value], ... */
+};
+
 typedef union bauma_HashMapBucketHdrSize_ {
 	bauma_HashMapBucketHdr_ h;
 	bauma_maxalign_t a;
@@ -991,7 +993,7 @@ BAUMA_CCAL_DEF void bauma_HashMap_reserve(bauma_HashMap *pSelf, size_t num) {
 			pNewBucket = pNewBuckets[bucketIdx];
 			if ((pNewBucket == NULL) || (pNewBucket->size >= pNewBucket->capacity)) {
 				bauma_bool_t wasNull = (pNewBucket == NULL);
-				size_t newBucketCapacity = wasNull ? BAUMA_INITIAL_CAPACITY : (pNewBucket->capacity * BAUMA_CAPACITY_GROWTH);
+				size_t newBucketCapacity = wasNull ? BAUMA_HASHMAP_BUCKET_SIZE : (pNewBucket->capacity * BAUMA_CAPACITY_GROWTH);
 				pNewBucket = (bauma_HashMapBucketHdr_*)(pSelf->pAlloc->pRealloc)(pSelf->pAlloc, pNewBucket, BAUMA_HASHMAP_BUCKET_HDR_SIZE + (newBucketCapacity * pSelf->hashKeyValueStructSize), &realSize);
 				realSize -= BAUMA_HASHMAP_BUCKET_HDR_SIZE;
 				realSize /= pSelf->hashKeyValueStructSize;
@@ -1036,7 +1038,7 @@ BAUMA_CCAL_DEF bauma_bool_t BAUMA_DEBUG_SUFFIX(bauma_HashMap_put_impl)(
 	bucketIdx = hashCode % pSelf->numOfBuckets;
 	pBucket = pSelf->pBuckets[bucketIdx];
 	if (pBucket == NULL) {
-		pBucket = (bauma_HashMapBucketHdr_*)(pSelf->pAlloc->pRealloc)(pSelf->pAlloc, NULL, BAUMA_HASHMAP_BUCKET_HDR_SIZE + (BAUMA_INITIAL_CAPACITY * pSelf->hashKeyValueStructSize), &realSize);
+		pBucket = (bauma_HashMapBucketHdr_*)(pSelf->pAlloc->pRealloc)(pSelf->pAlloc, NULL, BAUMA_HASHMAP_BUCKET_HDR_SIZE + (BAUMA_HASHMAP_BUCKET_SIZE * pSelf->hashKeyValueStructSize), &realSize);
 		realSize -= BAUMA_HASHMAP_BUCKET_HDR_SIZE;
 		realSize /= pSelf->hashKeyValueStructSize;
 		pBucket->size = 0;

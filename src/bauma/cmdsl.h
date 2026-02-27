@@ -410,11 +410,10 @@ BAUMA_CMDSL_DEF bauma_bool_t bauma_cmdsl_isValidIdentifier(const char* pStr, siz
 	size_t i;
 	char c;
 	if (len == 0) return BAUMA_FALSE;
-	c = *pStr;
+	c = *pStr++;
 	if (!(((c >= 'A') && (c <= 'Z')) || ((c >= 'a') && (c <= 'z')) || (c == '_'))) return BAUMA_FALSE;
-	++pStr;
 	for (i=1; i<len; ++i) {
-		c = *pStr;
+		c = *pStr++;
 		if (!(((c >= 'A') && (c <= 'Z')) || ((c >= 'a') && (c <= 'z')) || ((c >= '0') && (c <= '9')) || (c == '_'))) return BAUMA_FALSE;
 	}
 	return BAUMA_TRUE;

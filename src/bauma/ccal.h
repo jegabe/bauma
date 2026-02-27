@@ -144,7 +144,12 @@ containg the function definitions, which can be linked afterwards.
 	#endif
 #else /* C */
 	#if (__STDC_VERSION__ >= 201112L)
-		typedef max_align_t bauma_max_align_t;
+		#ifdef _MSC_VER
+			/* Visual Studio misses that */
+			typedef double bauma_max_align_t;
+		#else
+			typedef max_align_t bauma_max_align_t;
+		#endif
 	#else
 		typedef double bauma_max_align_t;
 	#endif
@@ -1199,7 +1204,6 @@ BAUMA_CCAL_DEF void bauma_StringBuilder_appendStrWithLen(bauma_StringBuilder *pS
 	memcpy(pSelf->pStr + pSelf->size, p, len);
 	pSelf->size += len;
 	pSelf->pStr[pSelf->size] = '\0';
-
 }
 
 BAUMA_CCAL_DEF void bauma_StringBuilder_appendChar(bauma_StringBuilder *pSelf, int c, size_t count) {

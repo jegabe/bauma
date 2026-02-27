@@ -144,6 +144,7 @@ BAUMA_CMDSL_DEF bauma_bool_t bauma_cmdsl_parseStr_ext(bauma_Cmdsl *pSelf, const 
 #ifdef BAUMA_CMDSL_IMPLEMENTATION
 
 #include <string.h>
+#include <ctype.h>
 
 #ifdef bauma_cmdsl_custom_assert
 	#define bauma_cmdsl_assert(x) bauma_cmdsl_custom_assert(x)
@@ -502,6 +503,14 @@ BAUMA_CMDSL_DEF bauma_bool_t bauam_cmdsl_isNonFunctionCallEscape(bauma_Cmdsl *pS
 
 BAUMA_CMDSL_DEF bauma_ICmdslNode *bauma_cmdsl_parseElement(bauma_Cmdsl *pSelf, bauma_cmdsl_ParseSource* pStr, bauma_StringBuilder *pErrFormatter, bauma_bool_t insideFunction);
 
+static char CMDSL_ERR_AT_OFFSET[] = "Err at offset ";
+
+BAUMA_CMDSL_DEF void bauma_cmdsl_printErrAtOffs(bauma_StringBuilder *pErrFormatter, bauma_cmdsl_ParseSource* pStr, const char *pMsg) {
+	bauma_StringBuilder_appendStr(pErrFormatter, CMDSL_ERR_AT_OFFSET);
+	bauma_StringBuilder_appendUnsigned(pErrFormatter, (size_t)(pStr->pStr - pStr->pBegin));
+	bauma_StringBuilder_appendStr(pErrFormatter, ": ");
+	bauma_StringBuilder_appendStr(pErrFormatter, pMsg);
+}
 
 BAUMA_CMDSL_DEF bauma_ICmdslNode *bauma_cmdsl_parseText(bauma_Cmdsl *pSelf, bauma_cmdsl_ParseSource* pStr, bauma_StringBuilder *pErrFormatter, bauma_bool_t insideFunction) {
 	bauma_StringBuilder b;
@@ -521,9 +530,7 @@ BAUMA_CMDSL_DEF bauma_ICmdslNode *bauma_cmdsl_parseText(bauma_Cmdsl *pSelf, baum
 		{
 			if (pStr->len < 2u) {
 				if (pErrFormatter != NULL) {
-					bauma_StringBuilder_appendStr(pErrFormatter, "Err at offset ");
-					bauma_StringBuilder_appendUnsigned(pErrFormatter, (size_t)(pStr->pStr - pStr->pBegin));
-					bauma_StringBuilder_appendStr(pErrFormatter, ": Found escape sequence but string is at end");
+					bauma_cmdsl_printErrAtOffs(pErrFormatter, pStr, "Found escape sequence but string is at end");
 				}
 				goto err;
 			}
@@ -543,7 +550,7 @@ BAUMA_CMDSL_DEF bauma_ICmdslNode *bauma_cmdsl_parseText(bauma_Cmdsl *pSelf, baum
 				}
 			}
 			else if (c == '*') {
-				size_t nestCnt = 0;
+				size_t nestCnt = 1u;
 				/* %* comment */
 				while(pStr->len >= 2) {
 					if ((pStr->pStr[0] == pSelf->escapeChar) && (pStr->pStr[1] == '*')) {
@@ -555,9 +562,7 @@ BAUMA_CMDSL_DEF bauma_ICmdslNode *bauma_cmdsl_parseText(bauma_Cmdsl *pSelf, baum
 					else if ((pStr->pStr[0] == '*') && (pStr->pStr[1] == pSelf->escapeChar)) {
 						if (nestCnt == 0) {
 							if (pErrFormatter != NULL) {
-								bauma_StringBuilder_appendStr(pErrFormatter, "Err at offset ");
-								bauma_StringBuilder_appendUnsigned(pErrFormatter, (size_t)(pStr->pStr - pStr->pBegin));
-								bauma_StringBuilder_appendStr(pErrFormatter, ": Found superfluous comment end sequence");
+								bauma_cmdsl_printErrAtOffs(pErrFormatter, pStr, "Found superfluous comment end sequence");
 							}
 							goto err;
 						}
@@ -579,7 +584,7 @@ BAUMA_CMDSL_DEF bauma_ICmdslNode *bauma_cmdsl_parseText(bauma_Cmdsl *pSelf, baum
 						/* newline detected */
 						++pStr->pStr;
 						--pStr->len;
-						if ((c == '\r') && (pStr->len > 0) && (pStr->pStr[1] == '\n')) {
+						if ((c == '\r') && (pStr->len > 0) && (pStr->pStr[0] == '\n')) {
 							/* CRLF madness */
 							++pStr->pStr;
 							--pStr->len;
@@ -613,9 +618,7 @@ BAUMA_CMDSL_DEF bauma_ICmdslNode *bauma_cmdsl_parseFunctionCall(bauma_Cmdsl *pSe
 	bauma_CmdslNodeFunctionCall* pFuncCall;
 	if ((pStr->len == 0) || (*pStr->pStr != pSelf->escapeChar)) {
 		if (pErrFormatter != NULL) {
-			bauma_StringBuilder_appendStr(pErrFormatter, "Error while parsing function call at offset ");
-			bauma_StringBuilder_appendUnsigned(pErrFormatter, (size_t)(pStr->pStr - pStr->pBegin));
-			bauma_StringBuilder_appendStr(pErrFormatter, ": reached end");
+			bauma_cmdsl_printErrAtOffs(pErrFormatter, pStr, "reached end while parsing function call");
 		}
 		return NULL;
 	}
@@ -624,18 +627,14 @@ BAUMA_CMDSL_DEF bauma_ICmdslNode *bauma_cmdsl_parseFunctionCall(bauma_Cmdsl *pSe
 	p = memchr(pStr->pStr, '(', pStr->len);
 	if (p == NULL) {
 		if (pErrFormatter != NULL) {
-			bauma_StringBuilder_appendStr(pErrFormatter, "Error while parsing function call at offset ");
-			bauma_StringBuilder_appendUnsigned(pErrFormatter, (size_t)(pStr->pStr - pStr->pBegin));
-			bauma_StringBuilder_appendStr(pErrFormatter, ": '(' not found.");
+			bauma_cmdsl_printErrAtOffs(pErrFormatter, pStr, "'(' not found");
 		}
 		return NULL;
 	}
 	n = (size_t)(p - pStr->pStr); /* length of function name */
 	if (n == 0) {
 		if (pErrFormatter != NULL) {
-			bauma_StringBuilder_appendStr(pErrFormatter, "Error while parsing function call at offset ");
-			bauma_StringBuilder_appendUnsigned(pErrFormatter, (size_t)(pStr->pStr - pStr->pBegin));
-			bauma_StringBuilder_appendStr(pErrFormatter, ": Function with zero name not allowed");
+			bauma_cmdsl_printErrAtOffs(pErrFormatter, pStr, "Function with zero name not allowed");
 		}
 		return NULL;
 	}
@@ -644,22 +643,16 @@ BAUMA_CMDSL_DEF bauma_ICmdslNode *bauma_cmdsl_parseFunctionCall(bauma_Cmdsl *pSe
 	funcName.pAlloc = NULL;
 	if (!bauma_cmdsl_isValidIdentifier(funcName.p, funcName.l)) {
 		if (pErrFormatter != NULL) {
-			bauma_StringBuilder_appendStr(pErrFormatter, "Error while parsing function call at offset ");
-			bauma_StringBuilder_appendUnsigned(pErrFormatter, (size_t)(pStr->pStr - pStr->pBegin));
-			bauma_StringBuilder_appendStr(pErrFormatter, ": '");
+			bauma_cmdsl_printErrAtOffs(pErrFormatter, pStr, "Invalid function name: ");
 			bauma_StringBuilder_appendStrWithLen(pErrFormatter, funcName.p, funcName.l);
-			bauma_StringBuilder_appendStr(pErrFormatter, "' is not a valid function name");
 		}
 		return NULL;
 	}
 	pFunc = bauma_HashMap_get(&pSelf->functions, &funcName, bauma_cmdsl_StrWithLen, bauma_cmdsl_FunctionWithUserData);
 	if (pFunc == NULL) {
 		if (pErrFormatter != NULL) {
-			bauma_StringBuilder_appendStr(pErrFormatter, "Error while parsing function call at offset ");
-			bauma_StringBuilder_appendUnsigned(pErrFormatter, (size_t)(pStr->pStr - pStr->pBegin));
-			bauma_StringBuilder_appendStr(pErrFormatter, ": Function with name '");
+			bauma_cmdsl_printErrAtOffs(pErrFormatter, pStr, "Function not found: ");
 			bauma_StringBuilder_appendStrWithLen(pErrFormatter, funcName.p, funcName.l);
-			bauma_StringBuilder_appendStr(pErrFormatter, "' not registered");
 		}
 		return NULL;
 	}
@@ -669,9 +662,7 @@ BAUMA_CMDSL_DEF bauma_ICmdslNode *bauma_cmdsl_parseFunctionCall(bauma_Cmdsl *pSe
 	if (pStr->len == 0) {
 		/* Not even a closing ')' found */
 		if (pErrFormatter != NULL) {
-			bauma_StringBuilder_appendStr(pErrFormatter, "Error while parsing function call at offset ");
-			bauma_StringBuilder_appendUnsigned(pErrFormatter, (size_t)(pStr->pStr - pStr->pBegin));
-			bauma_StringBuilder_appendStr(pErrFormatter, ": reached end while parsing parameters");
+			bauma_cmdsl_printErrAtOffs(pErrFormatter, pStr, "reached end while parsing parameters");
 		}
 		return NULL;
 	}
@@ -700,9 +691,7 @@ BAUMA_CMDSL_DEF bauma_ICmdslNode *bauma_cmdsl_parseFunctionCall(bauma_Cmdsl *pSe
 		bauma_Vector_append(&pFuncCall->args, bauma_CmdslNodeAndAlloc, &arg);
 		if (pStr->len == 0) {
 			if (pErrFormatter != NULL) {
-				bauma_StringBuilder_appendStr(pErrFormatter, "Error while parsing function call at offset ");
-				bauma_StringBuilder_appendUnsigned(pErrFormatter, (size_t)(pStr->pStr - pStr->pBegin));
-				bauma_StringBuilder_appendStr(pErrFormatter, ": reached end before ')'");
+				bauma_cmdsl_printErrAtOffs(pErrFormatter, pStr, "reached end while before ')'");
 			}
 			goto err;
 		}
@@ -723,9 +712,7 @@ out:
 BAUMA_CMDSL_DEF bauma_ICmdslNode *bauma_cmdsl_parseElement(bauma_Cmdsl *pSelf, bauma_cmdsl_ParseSource* pStr, bauma_StringBuilder *pErrFormatter, bauma_bool_t insideFunction) {
 	if (pStr->len == 0) {
 		if (pErrFormatter != NULL) {
-			bauma_StringBuilder_appendStr(pErrFormatter, "Error while parsing element at offset ");
-			bauma_StringBuilder_appendUnsigned(pErrFormatter, (size_t)(pStr->pStr - pStr->pBegin));
-			bauma_StringBuilder_appendStr(pErrFormatter, ": reached end");
+			bauma_cmdsl_printErrAtOffs(pErrFormatter, pStr, "reached end while parsing element");
 		}
 		return NULL;
 	}
@@ -883,10 +870,13 @@ void test_parseEscapes(void) {
 	bauma_StringBuilder b;
 	bauma_StringBuilder_construct(&b);
 	bauma_cmdsl_construct(&cmdsl);
-	BAUMA_EXPECT(bauma_cmdsl_parseStr(&cmdsl, "%%"));
+	BAUMA_EXPECT(bauma_cmdsl_parseStr(&cmdsl,
+		"%% %( %) %, % \t \n %* comment %* nested comment *% still in comment *% %/ line comment\n"
+		"%/ other line comment\r\nx"
+	));
 	BAUMA_EXPECT(cmdsl.pRootNode != NULL);
 	(*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl);
-	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&b), "%") == 0);
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&b), "% ( ) ,  x") == 0);
 	bauma_StringBuilder_destruct(&b);
 	bauma_cmdsl_destruct(&cmdsl);
 }

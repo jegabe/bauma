@@ -125,10 +125,14 @@ BAUMA_CMDSL_DEF void bauma_cmdsl_construct_ext(bauma_Cmdsl *pSelf, char escapeCh
 
 BAUMA_CMDSL_DEF void bauma_cmdsl_destruct(bauma_Cmdsl *pSelf);
 
-BAUMA_CMDSL_DEF bauma_bool_t bauma_cmdsl_setFunction(bauma_Cmdsl *pSelf, const char *pFuncName, bauma_cmdsl_FunctionWithUserData* p);
+BAUMA_CMDSL_DEF bauma_bool_t bauma_cmdsl_addFunction(bauma_Cmdsl *pSelf, const char *pFuncName, bauma_cmdsl_FunctionWithUserData* p);
 
 BAUMA_CMDSL_DEF bauma_bool_t bauma_cmdsl_setVariable(bauma_Cmdsl *pSelf, const char *pVarName, const char *pValue);
+BAUMA_CMDSL_DEF bauma_bool_t bauma_cmdsl_setVariable_ext(bauma_Cmdsl *pSelf, const char *pVarName, size_t nameLen, const char *pValue, size_t valueLen);
+
+
 BAUMA_CMDSL_DEF const char *bauma_cmdsl_getVariable(bauma_Cmdsl *pSelf, const char *pVarName);
+BAUMA_CMDSL_DEF const bauma_StringBuilder *bauma_cmdsl_getVariable_ext(bauma_Cmdsl *pSelf, const char *pVarName, size_t nameLen);
 
 BAUMA_CMDSL_DEF bauma_bool_t bauma_cmdsl_parseMem_ext(bauma_Cmdsl *pSelf, const void *pMem, size_t memSize, bauma_StringBuilder *pErrFormatter);
 #define bauma_cmdsl_parseMem(pSelf, pMem, memSize) bauma_cmdsl_parseMem_ext((pSelf), (pMem), (memSize), NULL)
@@ -158,11 +162,45 @@ BAUMA_CMDSL_DEF bauma_bool_t bauma_cmdsl_parseStr_ext(bauma_Cmdsl *pSelf, const 
 	extern "C" {
 #endif
 
+#define BAUMA_CMDSL_MAX_NUM_PARAMS 8u
+
 typedef struct bauma_cmdsl_ParseSource {
 	const char *pBegin; /* for error reporting to calculate error offset */
 	const char *pStr; /* incremented while parsing */
 	size_t len; /* decremented while parsing */
 } bauma_cmdsl_ParseSource;
+
+/*
+typedef bauma_bool_t (*bauma_cmdsl_pFunction)(bauma_StringBuilder *pDst, bauma_Cmdsl* pCmdsl, void *pUserData, const bauma_cmdsl_StrWithLen* pParams, size_t numOfParams);
+*/
+
+BAUMA_CMDSL_DEF bauma_bool_t bauma_cmdsl_funcSet(bauma_StringBuilder *pDst, bauma_Cmdsl* pCmdsl, void *pUserData, const bauma_cmdsl_StrWithLen* pParams, size_t numOfParams) {
+	(void)pUserData;
+	if (numOfParams != 2) {
+		bauma_StringBuilder_clear(pDst);
+		bauma_StringBuilder_appendStr(pDst, "Wrong number of parameters for function %set(), expected 2 but got ");
+		bauma_StringBuilder_appendUnsigned(pDst, numOfParams);
+		return BAUMA_FALSE;
+	}
+	bauma_cmdsl_setVariable_ext(pCmdsl, pParams[0].p, pParams[0].l, pParams[1].p, pParams[1].l);
+	return BAUMA_TRUE;
+}
+
+BAUMA_CMDSL_DEF bauma_bool_t bauma_cmdsl_funcGet(bauma_StringBuilder *pDst, bauma_Cmdsl* pCmdsl, void *pUserData, const bauma_cmdsl_StrWithLen* pParams, size_t numOfParams) {
+	(void)pUserData;
+	const bauma_StringBuilder *pValue;
+	if (numOfParams != 1) {
+		bauma_StringBuilder_clear(pDst);
+		bauma_StringBuilder_appendStr(pDst, "Wrong number of parameters for function %get(), expected 1 but got ");
+		bauma_StringBuilder_appendUnsigned(pDst, numOfParams);
+		return BAUMA_FALSE;
+	}
+	pValue = bauma_cmdsl_getVariable_ext(pCmdsl, pParams[0].p, pParams[0].l);
+	if (pValue != NULL) {
+		bauma_StringBuilder_appendStrWithLen(pDst, bauma_StringBuilder_getStr(pValue), bauma_StringBuilder_getSize(pValue));
+	}
+	return BAUMA_TRUE;
+}
 
 BAUMA_CMDSL_DEF void bauma_cmdsl_StrWithLen_destruct(bauma_cmdsl_StrWithLen *p) {
 	(*p->pAlloc->pRealloc)(p->pAlloc, (void*)p->p, 0, NULL);
@@ -304,10 +342,19 @@ BAUMA_CMDSL_DEF void bauma_cmdsl_NodeFunctionCall_destruct(bauma_CmdslNodeFuncti
 
 BAUMA_CMDSL_DEF bauma_bool_t bauma_cmdsl_NodeFunctionCall_eval(void *pSelf_, bauma_StringBuilder *pDst, bauma_Cmdsl* pCmdsl) {
 	bauma_CmdslNodeFunctionCall *pSelf = (bauma_CmdslNodeFunctionCall*)pSelf_;
+	bauma_FunctionWithUserData *pFunc;
+	bauma_cmdsl_StrWithLen params[BAUMA_CMDSL_MAX_NUM_PARAMS];
 	bauma_cmdsl_assert(pSelf != NULL);
 	bauma_cmdsl_assert(pDst != NULL);
 	bauma_cmdsl_assert(pCmdsl != NULL);
 	bauma_cmdsl_assert(pSelf->pFunc != NULL);
+	pFunc = pSelf->pFunc;
+	(*pFunc->pFunc)(pDst, pCmdsl, pFunc->pUserData, TODO hier weitermachen);	
+
+
+/*
+typedef bauma_bool_t (*bauma_cmdsl_pFunction)(bauma_StringBuilder *pDst, bauma_Cmdsl* pCmdsl, void *pUserData, const bauma_cmdsl_StrWithLen* pParams, size_t numOfParams);
+*/
 	return BAUMA_FALSE;
 }
 
@@ -380,6 +427,7 @@ BAUMA_CMDSL_DEF void bauma_cmdsl_FunctionWithUserData_destruct(bauma_cmdsl_Funct
 }
 
 BAUMA_CMDSL_DEF void bauma_cmdsl_construct_ext(bauma_Cmdsl *pSelf, char escapeChar, bauma_IMemAllocator *pAlloc) {
+	bauma_cmdsl_FunctionWithUserData fu;
 	bauma_cmdsl_assert(pSelf != NULL);
 	bauma_cmdsl_assert(pAlloc != NULL);
 	pSelf->escapeChar = escapeChar;
@@ -392,6 +440,15 @@ BAUMA_CMDSL_DEF void bauma_cmdsl_construct_ext(bauma_Cmdsl *pSelf, char escapeCh
 	bauma_Vector_construct_ext(&pSelf->pushedVariables, bauma_cmdsl_VarNameAndValue, (bauma_pDestructor)&bauma_cmdsl_VarNameAndValue_destruct, pAlloc);
 	pSelf->pRootNode = NULL;
 	pSelf->pAlloc = pAlloc;
+	/* add built-in functions */
+	fu.pFunc = &bauma_cmdsl_funcSet;
+	fu.pUserData = NULL;
+	fu.pUserDataDtor = NULL;
+	bauma_cmdsl_addFunction(pSelf, "set", &fu);
+	fu.pFunc = &bauma_cmdsl_funcGet;
+	fu.pUserData = NULL;
+	fu.pUserDataDtor = NULL;
+	bauma_cmdsl_addFunction(pSelf, "get", &fu);
 }
 
 BAUMA_CMDSL_DEF void bauma_cmdsl_destruct(bauma_Cmdsl *pSelf) {
@@ -420,35 +477,43 @@ BAUMA_CMDSL_DEF bauma_bool_t bauma_cmdsl_isValidIdentifier(const char* pStr, siz
 	return BAUMA_TRUE;
 }
 
-BAUMA_CMDSL_DEF bauma_bool_t bauma_cmdsl_setFunction(bauma_Cmdsl *pSelf, const char *pFuncName, bauma_cmdsl_FunctionWithUserData* p) {
+BAUMA_CMDSL_DEF bauma_bool_t bauma_cmdsl_addFunction(bauma_Cmdsl *pSelf, const char *pFuncName, bauma_cmdsl_FunctionWithUserData* p) {
 	size_t funcNameLen;
+	bauma_cmdsl_FunctionWithUserData *pExistingFunc;
 	bauma_cmdsl_assert(pSelf != NULL);
 	bauma_cmdsl_assert(pFuncName != NULL);
 	bauma_cmdsl_assert(p != NULL);
+	bauma_cmdsl_assert(p->pFunc != NULL);
 	bauma_cmdsl_StrWithLen key;
 	funcNameLen = strlen(pFuncName);
 	if (!bauma_cmdsl_isValidIdentifier(pFuncName, funcNameLen)) {
 		return BAUMA_FALSE;
 	}
-	key.p = bauma_strdupn(pFuncName, funcNameLen);
+	/* for look-up, no dyn. allocation is needed */
+	key.p = pFuncName;
 	key.l = funcNameLen;
+	key.pAlloc = NULL;
+	pExistingFunc = bauma_HashMap_get(&pSelf->functions, &key, bauma_cmdsl_StrWithLen, bauma_cmdsl_FunctionWithUserData);
+	if (pExistingFunc != NULL) {
+		/* function already exists */
+		return BAUMA_FALSE;
+	}
+	/* to put into map, dyn. allocate so string isn't lost */
+	key.p = bauma_strdupn_ext(pFuncName, funcNameLen, pSelf->pAlloc);
 	key.pAlloc = pSelf->pAlloc;
-	bauma_HashMap_put(&pSelf->functions, &key, p, bauma_StrWithLen, bauma_cmdsl_FunctionWithUserData);
+	bauma_HashMap_put(&pSelf->functions, &key, p, bauma_cmdsl_StrWithLen, bauma_cmdsl_FunctionWithUserData);
 	return BAUMA_TRUE;
 }
 
-BAUMA_CMDSL_DEF bauma_bool_t bauma_cmdsl_setVariable(bauma_Cmdsl *pSelf, const char *pVarName, const char *pValue) {
-	size_t nameLen, valueLen;
+BAUMA_CMDSL_DEF bauma_bool_t bauma_cmdsl_setVariable_ext(bauma_Cmdsl *pSelf, const char *pVarName, size_t nameLen, const char *pValue, size_t valueLen) {
 	bauma_StringBuilder *pFoundValue;
 	bauma_StringBuilder newContent;
 	bauma_cmdsl_assert(pSelf != NULL);
 	bauma_cmdsl_assert(pVarName != NULL);
 	bauma_cmdsl_assert(pValue != NULL);
-	nameLen = strlen(pVarName);
 	if (!bauma_cmdsl_isValidIdentifier(pVarName, nameLen)) {
 		return BAUMA_FALSE;
 	}
-	valueLen = strlen(pValue);
 	bauma_cmdsl_StrWithLen varName;
 	/* For look-up, varName doesn't need heap allocation (will be faster)*/
 	varName.p = pVarName;
@@ -470,22 +535,32 @@ BAUMA_CMDSL_DEF bauma_bool_t bauma_cmdsl_setVariable(bauma_Cmdsl *pSelf, const c
 	return BAUMA_TRUE;
 }
 
-BAUMA_CMDSL_DEF const char *bauma_cmdsl_getVariable(bauma_Cmdsl *pSelf, const char *pVarName) {
-	size_t nameLen;
-	bauma_StringBuilder *pFoundValue;
+BAUMA_CMDSL_DEF bauma_bool_t bauma_cmdsl_setVariable(bauma_Cmdsl *pSelf, const char *pVarName, const char *pValue) {
 	bauma_cmdsl_assert(pSelf != NULL);
 	bauma_cmdsl_assert(pVarName != NULL);
-	nameLen = strlen(pVarName);
+	bauma_cmdsl_assert(pValue != NULL);
+	return bauma_cmdsl_setVariable_ext(pSelf, pVarName, strlen(pVarName), pValue, strlen(pValue));
+}
+
+BAUMA_CMDSL_DEF const char *bauma_cmdsl_getVariable(bauma_Cmdsl *pSelf, const char *pVarName) {
+	const bauma_StringBuilder *pValue;
+	bauma_cmdsl_assert(pSelf != NULL);
+	bauma_cmdsl_assert(pVarName != NULL);
+	pValue = bauma_cmdsl_getVariable_ext(pSelf, pVarName, strlen(pVarName));
+	if (pValue != NULL) {
+		return bauma_StringBuilder_getStr(pValue);
+	}
+	return "";
+}
+
+BAUMA_CMDSL_DEF const bauma_StringBuilder *bauma_cmdsl_getVariable_ext(bauma_Cmdsl *pSelf, const char *pVarName, size_t nameLen) {
 	bauma_cmdsl_StrWithLen varName;
 	varName.p = pVarName;
 	varName.l = nameLen;
 	varName.pAlloc = NULL;
-	pFoundValue = bauma_HashMap_get(&pSelf->variables, &varName, bauma_cmdsl_StrWithLen, bauma_StringBuilder);
-	if (pFoundValue != NULL) {
-		return bauma_StringBuilder_getStr(pFoundValue);
-	}
-	return "";
+	return bauma_HashMap_get(&pSelf->variables, &varName, bauma_cmdsl_StrWithLen, bauma_StringBuilder);
 }
+
 
 BAUMA_CMDSL_DEF bauma_bool_t bauam_cmdsl_isNonFunctionCallEscape(bauma_Cmdsl *pSelf, bauma_cmdsl_ParseSource* pStr) {
 	char c;
@@ -826,7 +901,7 @@ void bauma_test_exit_fail(const char *exp, const char *file, int line) {
 void test_construct(void) {
 	bauma_Cmdsl cmdsl;
 	bauma_cmdsl_construct(&cmdsl);
-	BAUMA_EXPECT(bauma_HashMap_getSize(&cmdsl.functions) == 0);
+	BAUMA_EXPECT(bauma_HashMap_getSize(&cmdsl.functions) > 0);
 	BAUMA_EXPECT(bauma_HashMap_getSize(&cmdsl.variables) == 0);
 	BAUMA_EXPECT(bauma_Vector_getSize(&cmdsl.pushedVariables) == 0);
 	BAUMA_EXPECT(cmdsl.pRootNode == NULL);
@@ -881,6 +956,19 @@ void test_parseEscapes(void) {
 	bauma_cmdsl_destruct(&cmdsl);
 }
 
+void test_setGet(void) {
+	bauma_Cmdsl cmdsl;
+	bauma_StringBuilder b;
+	bauma_StringBuilder_construct(&b);
+	bauma_cmdsl_construct(&cmdsl);
+	bauma_cmdsl_setVariable(&cmdsl, "Y", "42");
+	BAUMA_EXPECT(bauma_cmdsl_parseStr(&cmdsl, "%set(X,4711)%get(X) %get(Y)"));
+	(*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl);
+	BAUMA_EXPECT(strcmp(bauma_StringBuilder_getStr(&b), "4711 42") == 0);
+	bauma_StringBuilder_destruct(&b);
+	bauma_cmdsl_destruct(&cmdsl);
+}
+
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -893,6 +981,7 @@ int main(int argc, char *argv[]) {
 	BAUMA_TEST(test_setGetVariable);
 	BAUMA_TEST(test_parseSimpleText);
 	BAUMA_TEST(test_parseEscapes);
+	BAUMA_TEST(test_setGet);
 
 	printf("All tests passed.\n");
 	fflush(stdout);

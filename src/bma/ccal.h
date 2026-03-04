@@ -194,18 +194,25 @@ typedef struct bma_IMemAlloc {
 	               size_t *pOptRealSz);
 } bma_IMemAlloc;
 
-#define bma_alloc(pAlloc, datatype) \
-	((datatype*)((*(pAlloc)->pRllc)(pAlloc, NULL, sizeof(datatype), NULL)))
-
-#define bma_free(pAlloc, p) \
-	((void)((*(pAlloc)->pRllc)(pAlloc, p, 0, NULL)))
-
-#define bma_realloc(pAlloc, pOld, newSz) \
-	((*(pAlloc)->pRllc)(pAlloc, pOld, newSz, NULL))
-
 extern const bma_IMemAlloc bma_dfltMemAlloc;
+
 #define bma_getDfltMemAlloc() \
 	((bma_IMemAlloc* const)&bma_dfltMemAlloc)
+
+#define bma_alloc_ext(pAlloc, datatype) \
+	((datatype*)((*(pAlloc)->pRllc)(pAlloc, NULL, sizeof(datatype), NULL)))
+
+#define bma_alloc(datatype) bma_alloc_ext(bma_getDfltMemAlloc(), datatype)
+
+#define bma_free_ext(pAlloc, p) \
+	((void)((*(pAlloc)->pRllc)(pAlloc, p, 0, NULL)))
+
+#define bma_free(p) bma_free_ext(bma_getDfltMemAlloc(), p)
+
+#define bma_realloc_ext(pAlloc, pOld, newSz) \
+	((*(pAlloc)->pRllc)(pAlloc, pOld, newSz, NULL))
+
+#define bma_realloc(pOld, newSz) bma_realloc_ext(bma_getDfltMemAlloc(), pOld, newSz)
 
 
 typedef void (*bma_dtor_t)(void *p, bma_IMemAlloc *pOptAlloc);
@@ -216,7 +223,7 @@ typedef size_t (*bma_hash_t)(const void *pKey);
 
 typedef bma_bool_t (*bma_eq_t)(const void *pLhs, const void *pRhs);
 
-/*! \brief Prints error message to stderr and calls exit(1) to terminate the application */
+/*! \brief Prints error message to stderr and calls abort() to terminate the application */
 BMA_DEF void bma_exit_err(const char *msg);
 
 /*!
@@ -225,7 +232,7 @@ For char, this will return 1 and so on. The maximum possible value is
 the alignment of bma_memalign_t. The return value is guaranteed to
 be a power of two.
  */
-BMA_DEF size_t bma_alignof(size_t dataTypeSize);
+BMA_DEF size_t bma_alignof(size_t typeSz);
 
 /*!
 Does run-time structure alignment (insert gaps where needed) to fit a new data type
@@ -501,8 +508,8 @@ BMA_DEF void bma_StrBldr_clear(bma_StrBldr *pSelf);
 
 #include <string.h> /* for all kind of memory and string things */
 #include <stdarg.h> /* for variadic functions */
-#ifdef bma_ccal_custom_assert
-	#define bma_assert(x) bma_ccal_custom_assert(x)
+#ifdef bma_ccal_cstm_assert
+	#define bma_assert(x) bma_ccal_cstm_assert(x)
 #else
 	#include <assert.h>
 	#define bma_assert(x) assert(x)
@@ -519,39 +526,39 @@ BMA_DEF void bma_StrBldr_clear(bma_StrBldr *pSelf);
 	extern "C" {
 #endif
 
-typedef struct bma_AlignFinder_ {
+typedef struct bma_AlgnFindr_ {
 	char c;
 	bma_max_align_t a;
-} bma_AlignFinder_;
+} bma_AlgnFindr_;
 
-#define BMA_MAX_ALIGNMENT offsetof(bma_AlignFinder_, a)
+#define BMA_MAX_ALGNMT offsetof(bma_AlgnFindr_, a)
 
 BMA_DEF bma_bool_t bma_ispow2(size_t value) {
 	return (bma_bool_t)((value > 0) && !(value & (value - 1)));
 }
 
-BMA_DEF size_t bma_alignof(size_t dataTypeSize) {
-	bma_assert(bma_ispow2(BMA_MAX_ALIGNMENT));
-	bma_assert(dataTypeSize > 0);
-	if (dataTypeSize < BMA_MAX_ALIGNMENT) {
+BMA_DEF size_t bma_alignof(size_t typeSz) {
+	bma_assert(bma_ispow2(BMA_MAX_ALGNMT));
+	bma_assert(typeSz > 0);
+	if (typeSz < BMA_MAX_ALGNMT) {
 		/* next-power-of-two bit twiddling */
-		--dataTypeSize;
-		dataTypeSize |= dataTypeSize >> 1;
-		dataTypeSize |= dataTypeSize >> 2;
-		dataTypeSize |= dataTypeSize >> 4;
-		dataTypeSize |= dataTypeSize >> 8;
-		dataTypeSize |= dataTypeSize >> 16;
+		--typeSz;
+		typeSz |= typeSz >> 1;
+		typeSz |= typeSz >> 2;
+		typeSz |= typeSz >> 4;
+		typeSz |= typeSz >> 8;
+		typeSz |= typeSz >> 16;
 #if SIZE_MAX > 0xFFFFFFFF
-		dataTypeSize |= dataTypeSize >> 32;
+		typeSz |= typeSz >> 32;
 #endif
 #if SIZE_MAX > 0xFFFFFFFFFFFFFFFF
-		dataTypeSize |= dataTypeSize >> 64;
+		typeSz |= typeSz >> 64;
 #endif
-		++dataTypeSize;		
-		bma_assert(bma_ispow2(dataTypeSize));
-		return dataTypeSize;
+		++typeSz;		
+		bma_assert(bma_ispow2(typeSz));
+		return typeSz;
 	}
-	return BMA_MAX_ALIGNMENT;
+	return BMA_MAX_ALGNMT;
 }
 
 BMA_DEF size_t bma_memgap(size_t offset, size_t followingTypeSize) {
@@ -622,7 +629,7 @@ BMA_DEF void bma_memblck_dtor(void* ppMemBlock, bma_IMemAlloc *pAlloc) {
 	bma_assert(ppMemBlock != NULL);
 	bma_assert(pAlloc != NULL);
 	void* pMemBlock = *(void**)ppMemBlock;
-	bma_free(pAlloc, pMemBlock);
+	bma_free_ext(pAlloc, pMemBlock);
 }
 
 BMA_DEF size_t bma_strhash(const void *ppStr) {
@@ -647,7 +654,6 @@ BMA_DEF bma_bool_t bma_streq(const void* ppLhs, const void *ppRhs) {
 	pRhs = *(const char**)ppRhs;
 	return (strcmp(pLhs, pRhs) == 0);
 }
-
 
 BMA_DEF char* bma_strdup_ext(const char* p, bma_IMemAlloc *pAlloc) {
 	size_t l;
@@ -879,7 +885,7 @@ BMA_DEF void bma_HshMp_clear(bma_HshMp* pSelf) {
 	pSelf->size = 0;
 }
 
-#define BMA_HASHMAP_BUCKET_SIZE 8u
+#define BMA_HSHMP_BCKT_CNT 8u
 
 BMA_DEF void bma_HshMp_reserve(bma_HshMp *pSelf, size_t num) {
 	size_t newNumOfBuckets;
@@ -887,9 +893,9 @@ BMA_DEF void bma_HshMp_reserve(bma_HshMp *pSelf, size_t num) {
 	size_t i;
 	bma_HshMpBcktHdr_ **pNewBuckets;
 	bma_assert(pSelf != NULL);
-	if ((pSelf->size + num) <= (pSelf->numBckts * BMA_HASHMAP_BUCKET_SIZE)) return;
+	if ((pSelf->size + num) <= (pSelf->numBckts * BMA_HSHMP_BCKT_CNT)) return;
 	newNumOfBuckets = (pSelf->numBckts == 0) ? BMA_INIT_CAP : pSelf->numBckts;
-	while((pSelf->size + num) > (newNumOfBuckets * BMA_HASHMAP_BUCKET_SIZE)) {
+	while((pSelf->size + num) > (newNumOfBuckets * BMA_HSHMP_BCKT_CNT)) {
 		newNumOfBuckets = bma_cap_incr(newNumOfBuckets);
 	}
 	pNewBuckets = (bma_HshMpBcktHdr_**)(*pSelf->pAlloc->pRllc)(pSelf->pAlloc, NULL, newNumOfBuckets * sizeof(bma_HshMpBcktHdr_*), &realSize);
@@ -911,7 +917,7 @@ BMA_DEF void bma_HshMp_reserve(bma_HshMp *pSelf, size_t num) {
 			pNewBucket = pNewBuckets[bucketIdx];
 			if ((pNewBucket == NULL) || (pNewBucket->size >= pNewBucket->cap)) {
 				bma_bool_t wasNull = (pNewBucket == NULL);
-				size_t newBucketCapacity = wasNull ? BMA_HASHMAP_BUCKET_SIZE : bma_cap_incr(pNewBucket->cap);
+				size_t newBucketCapacity = wasNull ? BMA_HSHMP_BCKT_CNT : bma_cap_incr(pNewBucket->cap);
 				pNewBucket = (bma_HshMpBcktHdr_*)(pSelf->pAlloc->pRllc)(pSelf->pAlloc, pNewBucket, BMA_HSHMP_BCKT_HDR_SZ + (newBucketCapacity * pSelf->bcktSz), &realSize);
 				realSize -= BMA_HSHMP_BCKT_HDR_SZ;
 				realSize /= pSelf->bcktSz;
@@ -956,7 +962,7 @@ BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_HshMp_put_impl)(
 	bucketIdx = hashCode % pSelf->numBckts;
 	pBucket = pSelf->pBckts[bucketIdx];
 	if (pBucket == NULL) {
-		pBucket = (bma_HshMpBcktHdr_*)(pSelf->pAlloc->pRllc)(pSelf->pAlloc, NULL, BMA_HSHMP_BCKT_HDR_SZ + (BMA_HASHMAP_BUCKET_SIZE * pSelf->bcktSz), &realSize);
+		pBucket = (bma_HshMpBcktHdr_*)(pSelf->pAlloc->pRllc)(pSelf->pAlloc, NULL, BMA_HSHMP_BCKT_HDR_SZ + (BMA_HSHMP_BCKT_CNT * pSelf->bcktSz), &realSize);
 		realSize -= BMA_HSHMP_BCKT_HDR_SZ;
 		realSize /= pSelf->bcktSz;
 		pBucket->size = 0;
@@ -1265,7 +1271,7 @@ void test_strdup(void) {
 	p = bma_strdup("Hello");
 	BMA_EXPECT(p != NULL);
 	BMA_EXPECT(strcmp(p, "Hello") == 0);
-	bma_free(bma_getDfltMemAlloc(), p);
+	bma_free(p);
 }
 
 typedef struct Ints {
@@ -1365,7 +1371,7 @@ void test_stringBuilder_construct(void) {
 	BMA_EXPECT(sb.size == 0);
 	BMA_EXPECT(sb.cap == 0);
 	BMA_EXPECT(sb.pAlloc = bma_getDfltMemAlloc());
-	bma_StrBldr_dtor(&sb);
+	bma_StrBldr_dtor(&sb, NULL);
 }
 
 void test_stringBuilder_release(void) {
@@ -1375,19 +1381,19 @@ void test_stringBuilder_release(void) {
 	bma_StrBldr_appndStr(&sb, "Hello");
 	p = bma_StrBldr_rlse(&sb);
 	BMA_EXPECT(strcmp(p, "Hello") == 0);
-	bma_free(bma_getDfltMemAlloc(), p);
+	bma_free(p);
 	/* State after release() should be same as after construction */
 	BMA_EXPECT(sb.pStr == BMA_NULLSTR);
 	BMA_EXPECT(sb.size == 0);
 	BMA_EXPECT(sb.cap == 0);
 	BMA_EXPECT(sb.pAlloc = bma_getDfltMemAlloc());
-	bma_StrBldr_dtor(&sb);
+	bma_StrBldr_dtor(&sb, NULL);
 	/* Release of empty string should heap-allocate: */
 	bma_StrBldr_ctor(&sb);
 	p = bma_StrBldr_rlse(&sb);
-	bma_StrBldr_dtor(&sb);
+	bma_StrBldr_dtor(&sb, NULL);
 	BMA_EXPECT(strcmp(p, "") == 0);
-	bma_free(bma_getDfltMemAlloc(), p);
+	bma_free(p);
 }
 
 void test_stringBuilder_reserve(void) {
@@ -1401,7 +1407,7 @@ void test_stringBuilder_reserve(void) {
 	BMA_EXPECT(sb.pStr[0] == '\0');
 	BMA_EXPECT(sb.size == 0);
 	BMA_EXPECT(sb.cap == BMA_INIT_CAP);
-	bma_StrBldr_dtor(&sb);
+	bma_StrBldr_dtor(&sb, NULL);
 }
 
 void test_stringBuilder_appendGeneric(void) {
@@ -1409,7 +1415,7 @@ void test_stringBuilder_appendGeneric(void) {
 	bma_StrBldr_ctor(&sb);
 	bma_StrBldr_appndGnrc(&sb, 3u, "%d", 123);
 	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&sb), "123") == 0);
-	bma_StrBldr_dtor(&sb);
+	bma_StrBldr_dtor(&sb, NULL);
 }
 
 void test_stringBuilder_appendStr(void) {
@@ -1417,7 +1423,7 @@ void test_stringBuilder_appendStr(void) {
 	bma_StrBldr_ctor(&sb);
 	bma_StrBldr_appndStr(&sb, "Hello");
 	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&sb), "Hello") == 0);
-	bma_StrBldr_dtor(&sb);
+	bma_StrBldr_dtor(&sb, NULL);
 }
 
 void test_stringBuilder_appendStrWithLen(void) {
@@ -1425,7 +1431,7 @@ void test_stringBuilder_appendStrWithLen(void) {
 	bma_StrBldr_ctor(&sb);
 	bma_StrBldr_appndStrN(&sb, "Hello", 3u);
 	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&sb), "Hel") == 0);
-	bma_StrBldr_dtor(&sb);
+	bma_StrBldr_dtor(&sb, NULL);
 }
 
 void test_stringBuilder_appendChar(void) {
@@ -1433,7 +1439,7 @@ void test_stringBuilder_appendChar(void) {
 	bma_StrBldr_ctor(&sb);
 	bma_StrBldr_appndChr(&sb, 'A', 3u);
 	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&sb), "AAA") == 0);
-	bma_StrBldr_dtor(&sb);
+	bma_StrBldr_dtor(&sb, NULL);
 }
 
 void test_stringBuilder_appendSigned(void) {
@@ -1444,19 +1450,19 @@ void test_stringBuilder_appendSigned(void) {
 	bma_StrBldr_ctor(&sb);
 	bma_StrBldr_appndSgnd(&sb, BMA_INTMAX_MIN);
 	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&sb), cmp) == 0);
-	bma_StrBldr_dtor(&sb);
+	bma_StrBldr_dtor(&sb, NULL);
 	/* 0 */
 	bma_StrBldr_ctor(&sb);
 	bma_StrBldr_appndSgnd(&sb, 0);
 	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&sb), "0") == 0);
-	bma_StrBldr_dtor(&sb);
+	bma_StrBldr_dtor(&sb, NULL);
 	/* max */
 	memset(cmp, 0, sizeof(cmp));
 	sprintf(cmp, "%" BMA_INTMAX_PRFX "d", BMA_INTMAX_MAX);
 	bma_StrBldr_ctor(&sb);
 	bma_StrBldr_appndSgnd(&sb, BMA_INTMAX_MAX);
 	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&sb), cmp) == 0);
-	bma_StrBldr_dtor(&sb);
+	bma_StrBldr_dtor(&sb, NULL);
 }
 
 void test_stringBuilder_appendUnsigned(void) {
@@ -1466,13 +1472,13 @@ void test_stringBuilder_appendUnsigned(void) {
 	bma_StrBldr_ctor(&sb);
 	bma_StrBldr_appndUnsgnd(&sb, 0);
 	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&sb), "0") == 0);
-	bma_StrBldr_dtor(&sb);
+	bma_StrBldr_dtor(&sb, NULL);
 	/* max */
 	sprintf(cmp, "%" BMA_INTMAX_PRFX "u", BMA_UINTMAX_MAX);
 	bma_StrBldr_ctor(&sb);
 	bma_StrBldr_appndUnsgnd(&sb, BMA_UINTMAX_MAX);
 	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&sb), cmp) == 0);
-	bma_StrBldr_dtor(&sb);
+	bma_StrBldr_dtor(&sb, NULL);
 }
 
 void test_stringBuilder_appendDouble(void) {
@@ -1483,7 +1489,7 @@ void test_stringBuilder_appendDouble(void) {
 	bma_StrBldr_appndDbl(&sb, DBL_MAX);
 	bma_StrBldr_appndDbl(&sb, -DBL_MIN);
 	bma_StrBldr_appndDbl(&sb, DBL_MIN);
-	bma_StrBldr_dtor(&sb);
+	bma_StrBldr_dtor(&sb, NULL);
 }
 
 void test_stringBuilder_appendBool(void) {
@@ -1491,11 +1497,11 @@ void test_stringBuilder_appendBool(void) {
 	bma_StrBldr_ctor(&sb);
 	bma_StrBldr_appndBool(&sb, BMA_TRUE);
 	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&sb), "true") == 0);
-	bma_StrBldr_dtor(&sb);
+	bma_StrBldr_dtor(&sb, NULL);
 	bma_StrBldr_ctor(&sb);
 	bma_StrBldr_appndBool(&sb, BMA_FALSE);
 	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&sb), "false") == 0);
-	bma_StrBldr_dtor(&sb);
+	bma_StrBldr_dtor(&sb, NULL);
 }
 
 void test_hashMap_constructDestruct(void) {

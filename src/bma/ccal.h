@@ -114,9 +114,9 @@ containg the function definitions, which can be linked afterwards.
 	#if UINTMAX_MAX > 0xFFFFFFFFFFFFFFFF
 		#error "Can't handle UINTMAX_MAX greater than 64 bits, please fix"
 	#elif UINTMAX_MAX >= 0xFFFFFFFFFFFFFFFF
-		#define BMA_UINTMAX_MAX_DECIMAL_LENGTH 20u
+		#define BMA_UINTMAX_MAX_DEC_LEN 20u
 	#elif UINTMAX_MAX >= 0xFFFFFFFF
-		#define BMA_UINTMAX_MAX_DECIMAL_LENGTH 11u
+		#define BMA_UINTMAX_MAX_DEC_LEN 11u
 	#endif
 #else /* older compiler */
 	/* This is a guess but usually those types reflect
@@ -130,9 +130,9 @@ containg the function definitions, which can be linked afterwards.
 	#if ULONG_MAX > 0xFFFFFFFFFFFFFFFF
 		#error "Can't handle UINTMAX_MAX greater than 64 bits, please fix"
 	#elif ULONG_MAX >= 0xFFFFFFFFFFFFFFFF
-		#define BMA_UINTMAX_MAX_DECIMAL_LENGTH 20u
+		#define BMA_UINTMAX_MAX_DEC_LEN 20u
 	#elif ULONG_MAX >= 0xFFFFFFFF
-		#define BMA_UINTMAX_MAX_DECIMAL_LENGTH 11u
+		#define BMA_UINTMAX_MAX_DEC_LEN 11u
 	#endif
 #endif
 
@@ -199,20 +199,23 @@ extern const bma_IMemAlloc bma_dfltMemAlloc;
 #define bma_getDfltMemAlloc() \
 	((bma_IMemAlloc* const)&bma_dfltMemAlloc)
 
-#define bma_alloc_ext(pAlloc, datatype) \
+#define bma_malloc_ext(pAlloc, datatype) \
 	((datatype*)((*(pAlloc)->pRllc)(pAlloc, NULL, sizeof(datatype), NULL)))
 
-#define bma_alloc(datatype) bma_alloc_ext(bma_getDfltMemAlloc(), datatype)
+#define bma_malloc(datatype) bma_malloc_ext(bma_getDfltMemAlloc(), datatype)
 
 #define bma_free_ext(pAlloc, p) \
 	((void)((*(pAlloc)->pRllc)(pAlloc, p, 0, NULL)))
 
 #define bma_free(p) bma_free_ext(bma_getDfltMemAlloc(), p)
 
-#define bma_realloc_ext(pAlloc, pOld, newSz) \
-	((*(pAlloc)->pRllc)(pAlloc, pOld, newSz, NULL))
+BMA_DEF void *bma_realloc_impl(bma_IMemAlloc *pAlloc, void *pOld, size_t typeSize, size_t newCnt, size_t *pOptRealNewCnt);
 
-#define bma_realloc(pOld, newSz) bma_realloc_ext(bma_getDfltMemAlloc(), pOld, newSz)
+#define bma_realloc_ext(pAlloc, type, pOld, newCnt, pRealNewCnt) \
+	(type*)bma_realloc_impl((pAlloc), (void*)(pOld), sizeof(type), (newCnt), (pRealNewCnt))
+
+#define bma_realloc(pOld, type, newCnt) \
+	(type*)bma_realloc_impl(bma_getDfltMemAlloc(), (void*)(pOld), sizeof(type), (newCnt), NULL)
 
 
 typedef void (*bma_dtor_t)(void *p, bma_IMemAlloc *pOptAlloc);
@@ -298,6 +301,28 @@ BMA_DEF char *bma_strndup_ext(const char* p, size_t n, bma_IMemAlloc *pAlloc);
 
 BMA_DEF void *bma_memmem(const void *pHayStack, size_t hayStackSize, const void *pNeedle, size_t needleSize);
 
+/*!
+\brief A string that knows its length and isn't necessarily
+null terminated. Useful for hash map keys where null terminated strings
+are too limiting.
+Initializing is so simple that no specific ctor is provided, but
+a dtor for usage inside of containers and hash/compare algos
+for usage as hash map key
+*/
+typedef struct bma_StrN {
+	char *p;
+	size_t len;
+} bma_StrN;
+
+BMA_DEF size_t bma_StrN_hash(const bma_StrN *pSelf);
+BMA_DEF bma_bool_t bma_StrN_eq(const bma_StrN *pLhs, const bma_StrN *pRhs);
+
+/*
+  Pre-requisite for using this: member "p" is heap-allocad with same pAlloc
+*/
+BMA_DEF void bmam_StrN_dtor(bma_StrN *pSelf, bma_IMemAlloc *pAlloc);
+
+
 typedef struct bma_Vec {
 	void           *pData;
 	size_t         elemSz;
@@ -306,7 +331,7 @@ typedef struct bma_Vec {
 	bma_dtor_t     pElemDtor;
 	bma_IMemAlloc  *pAlloc;
 #if BMA_DBG
-	const char     *pDtTp;
+	const char     *pType;
 #endif
 } bma_Vec;
 
@@ -323,7 +348,7 @@ BMA_DEF void BMA_DBG_SFFX(bma_Vec_ctor_impl)(
 	size_t elemSize, 
 	bma_dtor_t pElemDtor,
 	bma_IMemAlloc *pAlloc
-	BMA_DBG_OPT_PARAM(const char* pDtTp)
+	BMA_DBG_OPT_PARAM(const char* pType)
 );
 
 #define bma_Vec_ctor_ext(pSelf, type, pElemDtor, pAlloc) \
@@ -351,7 +376,7 @@ BMA_DEF void bma_Vec_rsrv(bma_Vec *pSelf, size_t num);
 BMA_DEF void BMA_DBG_SFFX(bma_Vec_appnd_impl)(
 	bma_Vec *pSelf,
 	void *pElem
-	BMA_DBG_OPT_PARAM(const char* pDtTp)
+	BMA_DBG_OPT_PARAM(const char* pType)
 );
 
 #define bma_Vec_appnd(pSelf, type, pElem) \
@@ -362,7 +387,7 @@ BMA_DEF void BMA_DBG_SFFX(bma_Vec_appnd_impl)(
 	)
 
 #if BMA_DBG
-	BMA_DEF void *bma_Vec_at_impl_D(bma_Vec *pSelf, size_t index, size_t elemSz, const char *pDtTp);
+	BMA_DEF void *bma_Vec_at_impl_D(bma_Vec *pSelf, size_t index, size_t elemSz, const char *pType);
 	#define bma_Vec_at(pSelf, index, type) \
 		((type*)bma_Vec_at_impl_D(pSelf, index, sizeof(type), #type))
 #else
@@ -526,6 +551,15 @@ BMA_DEF void bma_StrBldr_clear(bma_StrBldr *pSelf);
 	extern "C" {
 #endif
 
+BMA_DEF void *bma_realloc_impl(bma_IMemAlloc *pAlloc, void *pOld, size_t typeSize, size_t newCnt, size_t *pOptRealNewCnt) {
+	size_t realSize = 0;
+	void *pNew;
+	bma_assert(pAlloc != NULL);
+	pNew = (*pAlloc->pRllc)(pAlloc, pOld, typeSize * newCnt, &realSize);
+	if (pOptRealNewCnt != NULL) *pOptRealNewCnt = realSize / typeSize;
+	return pNew;
+}
+
 typedef struct bma_AlgnFindr_ {
 	char c;
 	bma_max_align_t a;
@@ -677,27 +711,58 @@ BMA_DEF char* bma_strndup_ext(const char* p, size_t n, bma_IMemAlloc *pAlloc) {
 }
 
 BMA_DEF void *bma_memmem(const void *pHayStack, size_t hayStackSize, const void *pNeedle, size_t needleSize) {
-    const unsigned char *h = (const unsigned char *)pHayStack;
-    const unsigned char *n = (const unsigned char *)pNeedle;
-    const unsigned char *p = h;
-    const unsigned char *end = h + hayStackSize - needleSize + 1;
-    if (needleSize == 0) return (void *)h;
-    if (needleSize > hayStackSize) return NULL;
-    while ((p = memchr(p, n[0], end - p)) != NULL) {
-        if (memcmp(p, n, needleSize) == 0) {
-            return (void *)p;
-        }
-        ++p;
-    }
-    return NULL;
+	const unsigned char *h = (const unsigned char *)pHayStack;
+	const unsigned char *n = (const unsigned char *)pNeedle;
+	const unsigned char *p = h;
+	const unsigned char *end = h + hayStackSize - needleSize + 1;
+	if (needleSize == 0) return (void *)h;
+	if (needleSize > hayStackSize) return NULL;
+	while ((p = memchr(p, n[0], end - p)) != NULL) {
+		if (memcmp(p, n, needleSize) == 0) {
+			return (void *)p;
+		}
+		++p;
+	}
+	return NULL;
 }
 
+BMA_DEF size_t bma_StrN_hash(const bma_StrN *pSelf) {
+	size_t result = 0;
+	size_t i;
+	size_t len;
+	const char* p;
+	bma_assert(pSelf != NULL);
+	p = pSelf->p;
+	len = pSelf->len;
+	bma_assert(p != 0);
+	for (i=0; i<len; ++i) {
+		result = (31u * result) + (size_t)((unsigned char)*p);
+		++p;
+	}
+	return result;
+}
+
+BMA_DEF bma_bool_t bma_StrN_eq(const bma_StrN *pLhs, const bma_StrN *pRhs) {
+	bma_assert(pLhs != NULL);
+	bma_assert(pRhs != NULL);
+	return (pLhs->len == pRhs->len) && (memcmp(pLhs->p, pRhs->p, pLhs->len) == 0);
+}
+
+/*
+  Pre-requisite for using this: member "p" is heap-allocad with same pAlloc
+*/
+BMA_DEF void bmam_StrN_dtor(bma_StrN *pSelf, bma_IMemAlloc *pAlloc) {
+	bma_assert(pSelf != NULL);
+	bma_assert(pAlloc != NULL);
+	bma_free_ext(pAlloc, pSelf->p);
+}
+		
 BMA_DEF void BMA_DBG_SFFX(bma_Vec_ctor_impl)(
 	bma_Vec *pSelf,
 	size_t elemSize, 
 	bma_dtor_t pElemDtor,
 	bma_IMemAlloc *pAlloc
-	BMA_DBG_OPT_PARAM(const char* pDtTp)
+	BMA_DBG_OPT_PARAM(const char* pType)
 ) {
 	bma_assert(pSelf != NULL);
 	bma_assert(elemSize > 0);
@@ -709,8 +774,8 @@ BMA_DEF void BMA_DBG_SFFX(bma_Vec_ctor_impl)(
 	pSelf->pElemDtor = pElemDtor;
 	pSelf->pAlloc = pAlloc;
 #if BMA_DBG
-	bma_assert(pDtTp != NULL);
-	pSelf->pDtTp = pDtTp;
+	bma_assert(pType != NULL);
+	pSelf->pType = pType;
 #endif
 }
 
@@ -725,7 +790,7 @@ BMA_DEF void bma_Vec_dtor(bma_Vec *pSelf, bma_IMemAlloc *pAlloc) {
 			(*pSelf->pElemDtor)(p, pSelf->pAlloc);
 		}
 	}
-	(*pSelf->pAlloc->pRllc)(pSelf->pAlloc, pSelf->pData, 0, NULL);
+	bma_free_ext(pSelf->pAlloc, pSelf->pData);
 #if BMA_DBG
 	memset(pSelf, 0xFF, sizeof(*pSelf));
 #endif
@@ -733,7 +798,6 @@ BMA_DEF void bma_Vec_dtor(bma_Vec *pSelf, bma_IMemAlloc *pAlloc) {
 
 BMA_DEF void bma_Vec_rsrv(bma_Vec *pSelf, size_t num) {
 	size_t newCap;
-	size_t realNewCap;
 	bma_assert(pSelf != NULL);
 	bma_assert(pSelf->pAlloc != NULL);
 	if ((pSelf->size + num) <= (pSelf->cap)) {
@@ -748,18 +812,17 @@ BMA_DEF void bma_Vec_rsrv(bma_Vec *pSelf, size_t num) {
 	while((pSelf->size + num) > newCap) {
 		newCap = bma_cap_incr(newCap);
 	}
-	pSelf->pData = (*pSelf->pAlloc->pRllc)(pSelf->pAlloc, pSelf->pData, newCap * pSelf->elemSz, &realNewCap);
-	pSelf->cap = realNewCap / pSelf->elemSz;
+	pSelf->pData = bma_realloc_impl(pSelf->pAlloc, pSelf->pData, pSelf->elemSz, newCap, &pSelf->cap);
 }
 
 BMA_DEF void BMA_DBG_SFFX(bma_Vec_appnd_impl)(
 	bma_Vec *pSelf,
 	void *pElem
-	BMA_DBG_OPT_PARAM(const char* pDtTp)
+	BMA_DBG_OPT_PARAM(const char* pType)
 ) {
 	char* p;
 	bma_assert(pSelf != NULL);
-	bma_assert(strcmp(pDtTp, pSelf->pDtTp) == 0);
+	bma_assert(strcmp(pType, pSelf->pType) == 0);
 	bma_Vec_rsrv(pSelf, 1u);
 	p = ((char*)pSelf->pData) + (pSelf->size * pSelf->elemSz);
 	memcpy(p, pElem, pSelf->elemSz);
@@ -768,11 +831,11 @@ BMA_DEF void BMA_DBG_SFFX(bma_Vec_appnd_impl)(
 
 #if BMA_DBG
 
-BMA_DEF void *bma_Vec_at_impl_D(bma_Vec *pSelf, size_t index, size_t elemSz, const char *pDtTp) {
+BMA_DEF void *bma_Vec_at_impl_D(bma_Vec *pSelf, size_t index, size_t elemSz, const char *pType) {
 	bma_assert(pSelf != NULL);
-	bma_assert(pSelf->pDtTp != NULL);
+	bma_assert(pSelf->pType != NULL);
 	bma_assert(pSelf->elemSz == elemSz);
-	bma_assert(strcmp(pDtTp, pSelf->pDtTp) == 0);
+	bma_assert(strcmp(pType, pSelf->pType) == 0);
 	bma_assert(index < pSelf->size);
 	return ((char*)pSelf->pData) + (index * elemSz);
 }
@@ -853,7 +916,7 @@ BMA_DEF void bma_HshMp_dtor(bma_HshMp *pSelf, bma_IMemAlloc *pAlloc) {
 		if (pHdr == NULL) continue;
 		(*pSelf->pAlloc->pRllc)(pSelf->pAlloc, pHdr, 0, NULL);
 	}
-	(*pSelf->pAlloc->pRllc)(pSelf->pAlloc, pSelf->pBckts, 0, NULL);
+	bma_free_ext(pSelf->pAlloc, pSelf->pBckts);
 #if BMA_DBG
 	memset(pSelf, 0xFF, sizeof(*pSelf));
 #endif
@@ -930,9 +993,9 @@ BMA_DEF void bma_HshMp_reserve(bma_HshMp *pSelf, size_t num) {
 			++pNewBucket->size;
 			p += pSelf->bcktSz;
 		}
-		(*pSelf->pAlloc->pRllc)(pSelf->pAlloc, pBucket, 0, NULL);
+		bma_free_ext(pSelf->pAlloc, pBucket);
 	}
-	(*pSelf->pAlloc->pRllc)(pSelf->pAlloc, pSelf->pBckts, 0, NULL);
+	bma_free_ext(pSelf->pAlloc, pSelf->pBckts);
 	pSelf->pBckts = pNewBuckets;
 	pSelf->numBckts = newNumOfBuckets;
 }
@@ -1057,7 +1120,7 @@ BMA_DEF void bma_StrBldr_dtor(bma_StrBldr *pSelf, bma_IMemAlloc *pAlloc) {
 	(void)pAlloc; /* strbldr has its own */
 	bma_assert(pSelf->pAlloc != NULL);
 	if (pSelf->pStr != BMA_NULLSTR) {
-		(*pSelf->pAlloc->pRllc)(pSelf->pAlloc, pSelf->pStr, 0, NULL);
+		bma_free_ext(pSelf->pAlloc, pSelf->pStr);
 	}
 #if BMA_DBG
 	memset(pSelf, 0xFF, sizeof(*pSelf));
@@ -1169,11 +1232,11 @@ BMA_DEF void bma_StrBldr_appndChr(bma_StrBldr *pSelf, int c, size_t count) {
 }
 
 BMA_DEF void bma_StrBldr_appndSgnd(bma_StrBldr *pSelf, bma_intmax_t i) {
-	bma_StrBldr_appndGnrc(pSelf, BMA_UINTMAX_MAX_DECIMAL_LENGTH, "%" BMA_INTMAX_PRFX "d", i);
+	bma_StrBldr_appndGnrc(pSelf, BMA_UINTMAX_MAX_DEC_LEN, "%" BMA_INTMAX_PRFX "d", i);
 }
 
 BMA_DEF void bma_StrBldr_appndUnsgnd(bma_StrBldr *pSelf, bma_uintmax_t i) {
-	bma_StrBldr_appndGnrc(pSelf, BMA_UINTMAX_MAX_DECIMAL_LENGTH, "%" BMA_INTMAX_PRFX "u", i);
+	bma_StrBldr_appndGnrc(pSelf, BMA_UINTMAX_MAX_DEC_LEN, "%" BMA_INTMAX_PRFX "u", i);
 }
 
 BMA_DEF void bma_StrBldr_appndDbl(bma_StrBldr *pSelf, double d) {
@@ -1294,7 +1357,7 @@ void test_vector_construct(void) {
 	BMA_EXPECT(v.pElemDtor == (bma_dtor_t)&test_dummy_int_destruct);
 	BMA_EXPECT(v.pAlloc == bma_getDfltMemAlloc());
 #if BMA_DBG
-	BMA_EXPECT(strcmp(v.pDtTp, "int") == 0);
+	BMA_EXPECT(strcmp(v.pType, "int") == 0);
 #endif
 	bma_Vec_dtor(&v, NULL);
 }
@@ -1444,7 +1507,7 @@ void test_stringBuilder_appendChar(void) {
 
 void test_stringBuilder_appendSigned(void) {
 	bma_StrBldr sb;
-	char cmp[BMA_UINTMAX_MAX_DECIMAL_LENGTH + 1u] = {0};
+	char cmp[BMA_UINTMAX_MAX_DEC_LEN + 1u] = {0};
 	/* min */
 	sprintf(cmp, "%" BMA_INTMAX_PRFX "d", BMA_INTMAX_MIN);
 	bma_StrBldr_ctor(&sb);
@@ -1467,7 +1530,7 @@ void test_stringBuilder_appendSigned(void) {
 
 void test_stringBuilder_appendUnsigned(void) {
 	bma_StrBldr sb;
-	char cmp[BMA_UINTMAX_MAX_DECIMAL_LENGTH + 1u] = {0};
+	char cmp[BMA_UINTMAX_MAX_DEC_LEN + 1u] = {0};
 	/* 0 */
 	bma_StrBldr_ctor(&sb);
 	bma_StrBldr_appndUnsgnd(&sb, 0);

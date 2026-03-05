@@ -70,7 +70,7 @@ The built-in functions are:
   This enables calling function whose name is calclulated at run-time or by a variable. So, this is also possible:
   %call(%get(MYVAR),PARAM1,PARAM2,...) which calls whatever function name is stored inside MYVAR.
 */
-#include <bauma/ccal.h>
+#include <bma/ccal.h>
 
 #ifdef __cplusplus
 	extern "C" {

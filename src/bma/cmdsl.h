@@ -567,8 +567,7 @@ BMA_DEF bma_ICmdslNode *bma_cmdsl_parseText(bma_Cmdsl *pSelf, bma_cmdsl_ParseSrc
 		if (c != pSelf->escapeChar) {
 			bma_StrBldr_appndChr(&b, (unsigned char)*pStr->pStr, 1u);
 		}
-		else
-		{
+		else {
 			if (pStr->len < 2u) {
 				if (pErrFormatter != NULL) {
 					bma_cmdsl_printErrAtOffs(pErrFormatter, pStr, "Found escape sequence but string is at end");
@@ -635,6 +634,12 @@ BMA_DEF bma_ICmdslNode *bma_cmdsl_parseText(bma_Cmdsl *pSelf, bma_cmdsl_ParseSrc
 					++pStr->pStr;
 					--pStr->len;
 				}
+			}
+			else {
+				/* must be function call -> stop */
+				pStr->pStr -= 2u;
+				pStr->len += 2u;
+				break;
 			}
 			continue;
 		}

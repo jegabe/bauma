@@ -200,14 +200,14 @@ extern const bma_IMemAlloc bma_dfltMemAlloc;
 	((bma_IMemAlloc* const)&bma_dfltMemAlloc)
 
 #define bma_malloc_ext(pAlloc, datatype) \
-	((datatype*)((*(pAlloc)->pRllc)(pAlloc, NULL, sizeof(datatype), NULL)))
+	((datatype*)((*(pAlloc)->pRllc)((pAlloc), NULL, sizeof(datatype), NULL)))
 
 #define bma_malloc(datatype) bma_malloc_ext(bma_getDfltMemAlloc(), datatype)
 
 #define bma_free_ext(pAlloc, p) \
-	((void)((*(pAlloc)->pRllc)(pAlloc, p, 0, NULL)))
+	((void)((*(pAlloc)->pRllc)(pAlloc, (p), 0, NULL)))
 
-#define bma_free(p) bma_free_ext(bma_getDfltMemAlloc(), p)
+#define bma_free(p) bma_free_ext(bma_getDfltMemAlloc(), (p))
 
 BMA_DEF void *bma_realloc_impl(bma_IMemAlloc *pAlloc, void *pOld, size_t typeSize, size_t newCnt, size_t *pOptRealNewCnt);
 
@@ -320,7 +320,7 @@ BMA_DEF bma_bool_t bma_StrN_eq(const bma_StrN *pLhs, const bma_StrN *pRhs);
 /*
   Pre-requisite for using this: member "p" is heap-allocad with same pAlloc
 */
-BMA_DEF void bmam_StrN_dtor(bma_StrN *pSelf, bma_IMemAlloc *pAlloc);
+BMA_DEF void bma_StrN_dtor(bma_StrN *pSelf, bma_IMemAlloc *pAlloc);
 
 
 typedef struct bma_Vec {
@@ -751,7 +751,7 @@ BMA_DEF bma_bool_t bma_StrN_eq(const bma_StrN *pLhs, const bma_StrN *pRhs) {
 /*
   Pre-requisite for using this: member "p" is heap-allocad with same pAlloc
 */
-BMA_DEF void bmam_StrN_dtor(bma_StrN *pSelf, bma_IMemAlloc *pAlloc) {
+BMA_DEF void bma_StrN_dtor(bma_StrN *pSelf, bma_IMemAlloc *pAlloc) {
 	bma_assert(pSelf != NULL);
 	bma_assert(pAlloc != NULL);
 	bma_free_ext(pAlloc, pSelf->p);

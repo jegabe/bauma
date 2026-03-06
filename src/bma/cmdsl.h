@@ -313,8 +313,8 @@ BMA_DEF bma_bool_t bma_cmdsl_NodeFunctionCall_eval(void *pSelf_, bma_StrBldr *pD
 	for (i=0; i<nargs; ++i) {
 		/* evaluate arguments */
 		bma_ICmdslNode *pArgNode = *bma_Vec_at(&pSelf->args, i, bma_ICmdslNode*);
-		bma_StrBldr *pArgStrBldr = bma_Vec_at(&tmpStrBldrs, i, bma_StrBldr);
-		if (!(*pArgNode->pEval)(pArgNode, pArgStrBldr, pCmdsl)) {
+		bma_StrBldr *pArg = bma_Vec_at(&tmpStrBldrs, i, bma_StrBldr);
+		if (!(*pArgNode->pEval)(pArgNode, pArg, pCmdsl)) {
 			result = BMA_FALSE;
 			goto cleanup;
 		}

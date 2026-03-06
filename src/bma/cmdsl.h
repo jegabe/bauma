@@ -194,6 +194,28 @@ BMA_DEF bma_bool_t bma_cmdsl_funcGet(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void 
 	return BMA_TRUE;
 }
 
+BMA_DEF bma_bool_t bma_cmdsl_funcCall(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void *pUserData, const bma_StrBldr* pParams, size_t numOfParams) {
+	(void)pUserData;
+	bma_StrN funcName;
+	bma_CmdslFuncWthUsrData *pFunc;
+	if (numOfParams < 1) {
+		bma_StrBldr_clear(pDst);
+		bma_StrBldr_appndStr(pDst, "Function %call() needs at least one param, the name of the func to call");
+		return BMA_FALSE;
+	}
+	funcName.p = bma_StrBldr_getStr(&pParams[0]);
+	funcName.len = bma_StrBldr_getSz(&pParams[0]);
+	pFunc = bma_HshMp_get(&pCmdsl->functions, &funcName, bma_StrN, bma_CmdslFuncWthUsrData);
+	if (pFunc == NULL) {
+		bma_StrBldr_clear(pDst);
+		bma_StrBldr_appndStr(pDst, "In function %call(): Function '");
+		bma_StrBldr_appndStrN(pDst, funcName.p, funcName.len);
+		bma_StrBldr_appndStr(pDst, "' not found");
+		return BMA_FALSE;
+	}
+	return (*pFunc->pFunc)(pDst, pCmdsl, pFunc->pUserData, &pParams[1], numOfParams - 1);
+}
+
 BMA_DEF void bma_CmdslVar_dtor(bma_CmdslVar *pSelf, bma_IMemAlloc *pAlloc) {
 	bma_assert(pSelf != NULL);
 	bma_assert(pAlloc != NULL);
@@ -213,7 +235,7 @@ BMA_DEF void bma_CmdslNodePtr_dtor(bma_ICmdslNode **ppSelf, bma_IMemAlloc *pAllo
 	(*pSelf->pDestruct)(pSelf, pAlloc);
 	bma_free_ext(pAlloc, pSelf);
 #if BMA_DBG
-	memset(pSelf, 0xFF, sizeof(*pSelf));
+	memset(ppSelf, 0xFF, sizeof(*ppSelf));
 #endif
 }
 
@@ -416,6 +438,10 @@ BMA_DEF void bma_Cmdsl_ctor_ext(bma_Cmdsl *pSelf, char escapeChar, bma_IMemAlloc
 	fu.pUserData = NULL;
 	fu.pUserDataDtor = NULL;
 	bma_Cmdsl_addFunc(pSelf, "get", &fu);
+	fu.pFunc = &bma_cmdsl_funcCall;
+	fu.pUserData = NULL;
+	fu.pUserDataDtor = NULL;
+	bma_Cmdsl_addFunc(pSelf, "call", &fu);
 }
 
 BMA_DEF void bma_Cmdsl_dtor(bma_Cmdsl *pSelf, bma_IMemAlloc *pAlloc) {
@@ -975,6 +1001,18 @@ void test_setGet(void) {
 	bma_Cmdsl_dtor(&cmdsl, NULL);
 }
 
+void test_call(void) {
+	bma_Cmdsl cmdsl;
+	bma_StrBldr b;
+	bma_StrBldr_ctor(&b);
+	bma_Cmdsl_ctor(&cmdsl);
+	bma_Cmdsl_setVar(&cmdsl, "Y", "42");
+	BMA_EXPECT(bma_Cmdsl_parseStr(&cmdsl, "A%call(get,Y)B"));
+	(*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl);
+	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&b), "A42B") == 0);
+	bma_StrBldr_dtor(&b, NULL);
+	bma_Cmdsl_dtor(&cmdsl, NULL);
+}
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -988,6 +1026,7 @@ int main(int argc, char *argv[]) {
 	BMA_TEST(test_parseSimpleText);
 	BMA_TEST(test_parseEscapes);
 	BMA_TEST(test_setGet);
+	BMA_TEST(test_call);
 
 	printf("All tests passed.\n");
 	fflush(stdout);

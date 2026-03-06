@@ -97,12 +97,29 @@ BMA_DEF void bma_CmdslFuncWthUsrData_dtor(bma_CmdslFuncWthUsrData* pSelf, bma_IM
 
 typedef struct bma_ICmdslNode bma_ICmdslNode;
 
+/* Vector of bma_ICmdslNode* allocated on heap */
+typedef bma_Vec bma_CmdslNodePtrVec;
+#define bma_CmdslNodePtrVec_ctor(pSelf, pAlloc) bma_Vec_ctor_ext((pSelf), bma_ICmdslNode*, (bma_dtor_t)&bma_CmdslNodePtr_dtor, (pAlloc))
+#define bma_CmdslNodePtrVec_dtor bma_Vec_dtor
+#define bma_CmdslNodePtrVec_getSz bma_Vec_getSz
+#define bma_CmdslNodePtrVec_at(pSelf, i) bma_Vec_at((pSelf), (i), bma_ICmdslNode*)
+#define bma_CmdslNodePtrVec_appnd(pSelf, ppNode) bma_Vec_appnd((pSelf), bma_ICmdslNode*, (ppNode))
+#define bma_CmdslNodePtrVec_getSz bma_Vec_getSz
+
+/* Hash-map of functions by name */
+typedef bma_HshMp bma_CmdslFuncsMp;
+#define bma_CmdslFuncsMp_ctor(pSelf, pAlloc) bma_HshMp_ctor_ext((pSelf), bma_StrN, bma_CmdslFuncWthUsrData, (bma_dtor_t)&bma_StrN_dtor, &bma_CmdslFuncWthUsrData_dtor, &bma_StrN_hash, &bma_StrN_eq, (pAlloc))
+#define bma_CmdslFuncsMp_dtor bma_HshMp_dtor
+#define bma_CmdslFuncsMp_put(self, pKey, pValue) bma_HshMp_put((self), (pKey), (pValue), bma_StrN, bma_CmdslFuncWthUsrData)
+#define bma_CmdslFuncsMp_get(self, pKey) bma_HshMp_get((self), (pKey), bma_StrN, bma_CmdslFuncWthUsrData)
+#define bma_CmdslFuncsMp_getSz bma_HshMp_getSz
+
 struct bma_Cmdsl {
-	bma_HshMp functions;
-	bma_HshMp variables;
-	bma_Vec  pushedVariables;
-	bma_ICmdslNode *pRootNode;
-	bma_IMemAlloc *pAlloc;
+	bma_CmdslFuncsMp  functions;
+	bma_HshMp         variables;
+	bma_Vec           pushedVariables;
+	bma_ICmdslNode    *pRootNode;
+	bma_IMemAlloc     *pAlloc;
 	char escapeChar;
 };
 
@@ -142,6 +159,12 @@ BMA_DEF bma_bool_t bma_Cmdsl_parseStr_ext(bma_Cmdsl *pSelf, const char *pStr, bm
 #endif
 
 #define BMA_CMDSL_MAX_NUM_PARAMS 8u
+
+struct bma_ICmdslNode {
+	void (*pDestruct)(void* pSelf, bma_IMemAlloc *pAlloc);
+	bma_bool_t (*pEval)(void* pSelf, bma_StrBldr* pDst, bma_Cmdsl* pCmdsl);
+};
+
 
 typedef struct bma_cmdsl_ParseSrc {
 	const char *pBegin; /* for error reporting to calculate error offset */
@@ -191,11 +214,6 @@ BMA_DEF void bma_CmdslVar_dtor(bma_CmdslVar *pSelf, bma_IMemAlloc *pAlloc) {
 #endif
 }
 
-struct bma_ICmdslNode {
-	void (*pDestruct)(void* pSelf, bma_IMemAlloc *pAlloc);
-	bma_bool_t (*pEval)(void* pSelf, bma_StrBldr* pDst, bma_Cmdsl* pCmdsl);
-};
-		
 BMA_DEF void bma_CmdslNodePtr_dtor(bma_ICmdslNode **ppSelf, bma_IMemAlloc *pAlloc) {
 	bma_ICmdslNode* pSelf;
 	bma_assert(ppSelf != NULL);
@@ -274,14 +292,7 @@ BMA_DEF void bma_CmdslNodeEmpty_ctor(bma_CmdslNodeEmpty *pSelf) {
 	pSelf->base.pDestruct = (bma_dtor_t)&bma_CmdslNodeEmpty_dtor;
 	pSelf->base.pEval = &bma_CmdslNodeEmpty_eval;
 }
-
-typedef bma_Vec bma_CmdslNodePtrVec;
-#define bma_CmdslNodePtrVec_ctor(pSelf, pAlloc) bma_Vec_ctor_ext((pSelf), bma_ICmdslNode*, (bma_dtor_t)&bma_CmdslNodePtr_dtor, (pAlloc))
-#define bma_CmdslNodePtrVec_dtor bma_Vec_dtor
-#define bma_CmdslNodePtrVec_getSz bma_Vec_getSz
-#define bma_CmdslNodePtrVec_at(pSelf, i) bma_Vec_at((pSelf), (i), bma_ICmdslNode*)
-#define bma_CmdslNodePtrVec_appnd(pSelf, ppNode) bma_Vec_appnd((pSelf), bma_ICmdslNode*, (ppNode))
-
+		
 typedef struct bma_CmdslNodeFuncCall {
 	bma_ICmdslNode base;
 	bma_CmdslFuncWthUsrData *pFunc;
@@ -384,9 +395,7 @@ BMA_DEF void bma_Cmdsl_ctor_ext(bma_Cmdsl *pSelf, char escapeChar, bma_IMemAlloc
 	bma_assert(pSelf != NULL);
 	bma_assert(pAlloc != NULL);
 	pSelf->escapeChar = escapeChar;
-	bma_HshMp_ctor_ext(&pSelf->functions, bma_StrN, bma_CmdslFuncWthUsrData,
-	                            (bma_dtor_t)&bma_StrN_dtor, (bma_dtor_t)&bma_CmdslFuncWthUsrData_dtor,
-	                            &bma_StrN_hash, &bma_StrN_eq, pAlloc);
+	bma_CmdslFuncsMp_ctor(&pSelf->functions, pAlloc);
 	bma_HshMp_ctor_ext(&pSelf->variables, bma_StrN, bma_StrBldr,
 	                            (bma_dtor_t)&bma_StrN_dtor, (bma_dtor_t)&bma_StrBldr_dtor,
 	                            &bma_StrN_hash, &bma_StrN_eq, pAlloc);
@@ -412,7 +421,7 @@ BMA_DEF void bma_Cmdsl_dtor(bma_Cmdsl *pSelf, bma_IMemAlloc *pAlloc) {
 	}
 	bma_Vec_dtor(&pSelf->pushedVariables, NULL);
 	bma_HshMp_dtor(&pSelf->variables, NULL);
-	bma_HshMp_dtor(&pSelf->functions, NULL);
+	bma_CmdslFuncsMp_dtor(&pSelf->functions, NULL);
 #if BMA_DBG
 	memset(pSelf, 0xFF, sizeof(*pSelf));
 #endif
@@ -446,7 +455,7 @@ BMA_DEF bma_bool_t bma_Cmdsl_addFunc(bma_Cmdsl *pSelf, const char *pFuncName, bm
 	/* for look-up, no dyn. allocation is needed */
 	key.p = pFuncName;
 	key.len = funcNameLen;
-	pExistingFunc = bma_HshMp_get(&pSelf->functions, &key, bma_StrN, bma_CmdslFuncWthUsrData);
+	pExistingFunc = bma_CmdslFuncsMp_get(&pSelf->functions, &key);
 	if (pExistingFunc != NULL) {
 		/* function already exists */
 		return BMA_FALSE;
@@ -454,7 +463,7 @@ BMA_DEF bma_bool_t bma_Cmdsl_addFunc(bma_Cmdsl *pSelf, const char *pFuncName, bm
 	/* to put into map, dyn. allocate so string isn't lost */
 	key.p = bma_strndup_ext(pFuncName, funcNameLen, pSelf->pAlloc);
         /* len stays same */
-	bma_HshMp_put(&pSelf->functions, &key, p, bma_StrN, bma_CmdslFuncWthUsrData);
+	bma_CmdslFuncsMp_put(&pSelf->functions, &key, p);
 	return BMA_TRUE;
 }
 
@@ -672,7 +681,7 @@ BMA_DEF bma_ICmdslNode *bma_cmdsl_parseFunctionCall(bma_Cmdsl *pSelf, bma_cmdsl_
 		}
 		return NULL;
 	}
-	pFunc = bma_HshMp_get(&pSelf->functions, &funcName, bma_StrN, bma_CmdslFuncWthUsrData);
+	pFunc = bma_CmdslFuncsMp_get(&pSelf->functions, &funcName);
 	if (pFunc == NULL) {
 		if (pErrFormatter != NULL) {
 			bma_cmdsl_printErrAtOffs(pErrFormatter, pStr, "Function not found: ");
@@ -848,17 +857,17 @@ void bma_test_exit_fail(const char *exp, const char *file, int line) {
 
 void test_construct(void) {
 	bma_Cmdsl cmdsl;
-	bma_cmdsl_construct(&cmdsl);
-	BMA_EXPECT(bma_HshMp_getSize(&cmdsl.functions) > 0);
-	BMA_EXPECT(bma_HshMp_getSize(&cmdsl.variables) == 0);
-	BMA_EXPECT(bma_Vec_getSize(&cmdsl.pushedVariables) == 0);
+	bma_Cmdsl_ctor(&cmdsl);
+	BMA_EXPECT(bma_CmdslFuncsMp_getSz(&cmdsl.functions) > 0);
+	BMA_EXPECT(bma_HshMp_getSz(&cmdsl.variables) == 0);
+	BMA_EXPECT(bma_Vec_getSz(&cmdsl.pushedVariables) == 0);
 	BMA_EXPECT(cmdsl.pRootNode == NULL);
-	bma_Cmdsl_dtor(&cmdsl);
+	bma_Cmdsl_dtor(&cmdsl, NULL);
 }
 
 void test_setGetVariable(void) {
 	bma_Cmdsl cmdsl;
-	bma_cmdsl_construct(&cmdsl);
+	bma_Cmdsl_ctor(&cmdsl);
 	bma_Cmdsl_setVar(&cmdsl, "var1", "value1");
 	BMA_EXPECT(strcmp(bma_Cmdsl_getVar(&cmdsl, "var1"), "value1") == 0);
 	bma_Cmdsl_setVar(&cmdsl, "var1", "value2");
@@ -866,55 +875,55 @@ void test_setGetVariable(void) {
 	bma_Cmdsl_setVar(&cmdsl, "var2", "value3");
 	BMA_EXPECT(strcmp(bma_Cmdsl_getVar(&cmdsl, "var2"), "value3") == 0);
 	BMA_EXPECT(strcmp(bma_Cmdsl_getVar(&cmdsl, "Unknown"), "") == 0);
-	BMA_EXPECT(bma_HshMp_getSize(&cmdsl.variables) == 2u);
-	bma_Cmdsl_dtor(&cmdsl);
+	BMA_EXPECT(bma_HshMp_getSz(&cmdsl.variables) == 2u);
+	bma_Cmdsl_dtor(&cmdsl, NULL);
 }
 
 void test_parseSimpleText(void) {
 	bma_Cmdsl cmdsl;
 	bma_StrBldr b;
 	bma_StrBldr_ctor(&b);
-	bma_cmdsl_construct(&cmdsl);
-	BMA_EXPECT(bma_cmdsl_parseStr(&cmdsl, "ABC"));
+	bma_Cmdsl_ctor(&cmdsl);
+	BMA_EXPECT(bma_Cmdsl_parseStr(&cmdsl, "ABC"));
 	BMA_EXPECT(cmdsl.pRootNode != NULL);
 	(*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl);
 	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&b), "ABC") == 0);
 	bma_StrBldr_clear(&b);
-	BMA_EXPECT(bma_cmdsl_parseStr(&cmdsl, ","));
+	BMA_EXPECT(bma_Cmdsl_parseStr(&cmdsl, ","));
 	BMA_EXPECT(cmdsl.pRootNode != NULL);
 	(*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl);
 	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&b), ",") == 0);
-	bma_StrBldr_dtor(&b);
-	bma_Cmdsl_dtor(&cmdsl);
+	bma_StrBldr_dtor(&b, NULL);
+	bma_Cmdsl_dtor(&cmdsl, NULL);
 }
 
 void test_parseEscapes(void) {
 	bma_Cmdsl cmdsl;
 	bma_StrBldr b;
 	bma_StrBldr_ctor(&b);
-	bma_cmdsl_construct(&cmdsl);
-	BMA_EXPECT(bma_cmdsl_parseStr(&cmdsl,
+	bma_Cmdsl_ctor(&cmdsl);
+	BMA_EXPECT(bma_Cmdsl_parseStr(&cmdsl,
 		"%% %( %) %, % \t \n %* comment %* nested comment *% still in comment *% %/ line comment\n"
 		"%/ other line comment\r\nx"
 	));
 	BMA_EXPECT(cmdsl.pRootNode != NULL);
 	(*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl);
 	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&b), "% ( ) ,  x") == 0);
-	bma_StrBldr_dtor(&b);
-	bma_Cmdsl_dtor(&cmdsl);
+	bma_StrBldr_dtor(&b, NULL);
+	bma_Cmdsl_dtor(&cmdsl, NULL);
 }
 
 void test_setGet(void) {
 	bma_Cmdsl cmdsl;
 	bma_StrBldr b;
 	bma_StrBldr_ctor(&b);
-	bma_cmdsl_construct(&cmdsl);
+	bma_Cmdsl_ctor(&cmdsl);
 	bma_Cmdsl_setVar(&cmdsl, "Y", "42");
-	BMA_EXPECT(bma_cmdsl_parseStr(&cmdsl, "%set(X,4711)%get(X) %get(Y)"));
+	BMA_EXPECT(bma_Cmdsl_parseStr(&cmdsl, "%set(X,4711)%get(X) %get(Y)"));
 	(*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl);
 	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&b), "4711 42") == 0);
-	bma_StrBldr_dtor(&b);
-	bma_Cmdsl_dtor(&cmdsl);
+	bma_StrBldr_dtor(&b, NULL);
+	bma_Cmdsl_dtor(&cmdsl, NULL);
 }
 
 

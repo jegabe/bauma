@@ -390,18 +390,30 @@ BMA_DEF void BMA_DBG_SFFX(bma_Vec_appnd_impl)(
 	BMA_DEF void *bma_Vec_at_impl_D(bma_Vec *pSelf, size_t index, size_t elemSz, const char *pType);
 	#define bma_Vec_at(pSelf, index, type) \
 		((type*)bma_Vec_at_impl_D(pSelf, index, sizeof(type), #type))
+	BMA_DEF void *bma_Vec_getData_impl_D(bma_Vec *pSelf, const char *pType);
+	#define bma_Vec_getData(pSelf, type) \
+		((type*)bma_Vec_getData_impl_D(pSelf, #type))
 #else
 	#define bma_Vec_at(pSelf, index, type) \
 		((type*)(((char*)(pSelf)->pData) + (index * (pSelf)->elemSz)))
+	#define bma_Vec_getData(pSelf, type) \
+		((type*)(pSelf)->pData)
 #endif
 
 #define bma_Vec_getSz(pSelf) ((const size_t)((pSelf)->size))
-
 #define bma_Vec_getCap(pSelf) ((const size_t)((pSelf)->cap))
-
 #define bma_Vec_getAlloc(pSelf) ((bma_IMemAlloc* const)((pSelf)->pAlloc))
 
 BMA_DEF void bma_Vec_each(bma_Vec *pSelf, bma_each_t pFunc, void *pOptUsrDta);
+
+BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_Vec_rmv_impl)(bma_Vec *pSelf,
+                                                  size_t index,
+                                                  void *pOptRmvdElem
+                                                  BMA_DBG_OPT_PARAM(const char* pType));
+#define bma_Vec_rmv(pSelf, index, pOptRmvdElem, type) \
+	BMA_DBG_SFFX(bma_Vec_rmv_impl)(pSelf, index, pOptRmvdElem BMA_DBG_OPT_PARAM(#type))
+
+BMA_DEF void bma_Vec_clear(bma_Vec *pSelf);
 
 typedef struct bma_HshMpBcktHdr_ bma_HshMpBcktHdr_;
 
@@ -782,14 +794,7 @@ BMA_DEF void BMA_DBG_SFFX(bma_Vec_ctor_impl)(
 BMA_DEF void bma_Vec_dtor(bma_Vec *pSelf, bma_IMemAlloc *pAlloc) {
 	bma_assert(pSelf != NULL);
 	(void)pAlloc; /* vec has its own */
-	if (pSelf->pElemDtor) {
-		char *p = ((char*)pSelf->pData) + (pSelf->size * pSelf->elemSz);
-		size_t i = pSelf->size;
-		while(i-- > 0) {
-			p -= pSelf->elemSz;
-			(*pSelf->pElemDtor)(p, pSelf->pAlloc);
-		}
-	}
+	bma_Vec_clear(pSelf);
 	bma_free_ext(pSelf->pAlloc, pSelf->pData);
 #if BMA_DBG
 	memset(pSelf, 0xFF, sizeof(*pSelf));
@@ -840,9 +845,16 @@ BMA_DEF void *bma_Vec_at_impl_D(bma_Vec *pSelf, size_t index, size_t elemSz, con
 	return ((char*)pSelf->pData) + (index * elemSz);
 }
 
+BMA_DEF void *bma_Vec_getData_impl_D(bma_Vec *pSelf, const char *pType) {
+	bma_assert(pSelf != NULL);
+	bma_assert(pSelf->pType != NULL);
+	bma_assert(strcmp(pType, pSelf->pType) == 0);
+	return pSelf->pData;
+}
+
 #endif
 
-BMA_DEF void bma_Vec_callForEach(bma_Vec *pSelf, bma_each_t pFunc, void *pOptUsrDta) {
+BMA_DEF void bma_Vec_each(bma_Vec *pSelf, bma_each_t pFunc, void *pOptUsrDta) {
 	size_t i;
 	char *p;
 	bma_assert(pSelf != NULL);
@@ -853,6 +865,46 @@ BMA_DEF void bma_Vec_callForEach(bma_Vec *pSelf, bma_each_t pFunc, void *pOptUsr
 		p += pSelf->elemSz;
 	}
 }
+
+BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_Vec_rmv_impl)(bma_Vec *pSelf,
+                                                  size_t index,
+                                                  void *pOptRmvdElem
+                                                  BMA_DBG_OPT_PARAM(const char* pType)) {
+	bma_assert(pSelf != NULL);
+	bma_assert(strcmp(pType, pSelf->pType) == 0);
+	bma_assert(index < pSelf->size);
+	if (index >= pSelf->size) {
+		return BMA_FALSE;
+	}
+	char *pRmvd = ((char*)pSelf->pData) + (index * pSelf->elemSz);
+	if (pOptRmvdElem != NULL) {
+		memcpy(pOptRmvdElem, pRmvd, pSelf->elemSz);
+	}
+	else if (pSelf->pElemDtor != NULL) {
+		(*pSelf->pElemDtor)(pRmvd, pSelf->pAlloc);
+	}
+	if (index < (pSelf->size - 1)) {
+		char *pNext = pRmvd + pSelf->elemSz;
+		size_t bytesToMove = ((pSelf->size - 1 - index) * pSelf->elemSz);
+		memmove(pRmvd, pNext, bytesToMove);
+	}
+	--pSelf->size;
+	return BMA_TRUE;
+}
+
+BMA_DEF void bma_Vec_clear(bma_Vec *pSelf) {
+	bma_assert(pSelf != NULL);
+	if (pSelf->pElemDtor) {
+		char *p = ((char*)pSelf->pData) + (pSelf->size * pSelf->elemSz);
+		size_t i = pSelf->size;
+		while(i-- > 0) {
+			p -= pSelf->elemSz;
+			(*pSelf->pElemDtor)(p, pSelf->pAlloc);
+		}
+	}
+	pSelf->size = 0;
+}
+
 
 struct bma_HshMpBcktHdr_ {
 	size_t size;
@@ -1402,6 +1454,30 @@ void test_vector_of_strings(void) {
 	bma_Vec_dtor(&v, NULL);
 }
 
+void test_vector_rmv(void) {
+	bma_Vec v;
+	char *p;
+	bma_Vec_ctor(&v, char*, &bma_memblck_dtor);
+	p = bma_strdup("one");
+	bma_Vec_appnd(&v, char*, &p);
+	p = bma_strdup("two");
+	bma_Vec_appnd(&v, char*, &p);
+	p = bma_strdup("three");
+	bma_Vec_appnd(&v, char*, &p);
+	BMA_EXPECT(bma_Vec_getSz(&v) == 3u);
+	BMA_EXPECT(bma_Vec_rmv(&v, 0u, &p, char*));
+	BMA_EXPECT(strcmp(p, "one") == 0);
+	bma_free(p);
+	BMA_EXPECT(bma_Vec_getSz(&v) == 2u);
+	BMA_EXPECT(bma_Vec_rmv(&v, 1u, &p, char*));
+	BMA_EXPECT(strcmp(p, "three") == 0);
+	BMA_EXPECT(bma_Vec_getSz(&v) == 1u);
+	BMA_EXPECT(bma_Vec_rmv(&v, 0u, &p, char*));
+	BMA_EXPECT(strcmp(p, "two") == 0);
+	BMA_EXPECT(bma_Vec_getSz(&v) == 0u);
+	bma_Vec_dtor(&v, NULL);
+}
+
 void test_dummy_forEachCallBack(int* p, bma_Vec* pUserData) {
 	bma_Vec_appnd(pUserData, int, p);
 }
@@ -1418,7 +1494,7 @@ void test_vector_callForEach(void) {
 	bma_Vec_appnd(&v, int, &x);
 	x = 2;
 	bma_Vec_appnd(&v, int, &x);
-	bma_Vec_callForEach(&v, (bma_each_t)&test_dummy_forEachCallBack, &v2);
+	bma_Vec_each(&v, (bma_each_t)&test_dummy_forEachCallBack, &v2);
 	BMA_EXPECT(v2.size == 3);
 	BMA_EXPECT(*bma_Vec_at(&v2, 0, int) == 0);
 	BMA_EXPECT(*bma_Vec_at(&v2, 1, int) == 1);
@@ -1647,6 +1723,7 @@ int main(int argc, char *argv[]) {
 	BMA_TEST(test_vector_append);
 	BMA_TEST(test_vector_at);
 	BMA_TEST(test_vector_of_strings);
+	BMA_TEST(test_vector_rmv);
 	BMA_TEST(test_vector_callForEach);
 	BMA_TEST(test_stringBuilder_construct);
 	BMA_TEST(test_stringBuilder_release);

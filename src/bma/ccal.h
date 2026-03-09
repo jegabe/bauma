@@ -1395,8 +1395,9 @@ typedef struct Ints {
 	size_t cap;
 } Ints;
 
-void test_dummy_int_destruct(int* p) {
+void test_dummy_int_destruct(int* p, bma_IMemAlloc *pAlloc) {
 	(void)p;
+	(void)pAlloc;
 }
 
 void test_vector_construct(void) {

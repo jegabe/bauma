@@ -304,6 +304,7 @@ BMA_DEF bma_bool_t bma_cmdsl_funcPush(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void
 		bma_StrBldr_ctor_ext(pValue, pCmdsl->pAlloc);
 	}
 	else {
+		/* push of non-existing var is same as pushing empty-string var */
 		bma_StrBldr_ctor_ext(&pushedVar.value, pCmdsl->pAlloc);
 	}
 	bma_Vec_appnd(&pCmdsl->pushedVariables, bma_CmdslVar, &pushedVar);

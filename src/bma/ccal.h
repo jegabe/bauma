@@ -522,8 +522,8 @@ typedef struct bma_StrBldr {
 BMA_DEF void bma_StrBldr_ctor_ext(bma_StrBldr *pSelf, bma_IMemAlloc *pAlloc);
 #define bma_StrBldr_ctor(pSelf) bma_StrBldr_ctor_ext((pSelf), bma_getDfltMemAlloc())
 BMA_DEF void bma_StrBldr_dtor(bma_StrBldr *pSelf, bma_IMemAlloc *pAlloc);
-#define bma_StrBldr_getStr(pSelf) ((pSelf)->pStr)
-#define bma_StrBldr_getSz(pSelf) ((pSelf)->size)
+#define bma_StrBldr_getStr(pSelf) ((const char* const)((pSelf)->pStr))
+#define bma_StrBldr_getSz(pSelf) ((const size_t)((pSelf)->size))
 BMA_DEF char *bma_StrBldr_rlse(bma_StrBldr *pSelf);
 BMA_DEF void bma_StrBldr_rsrv(bma_StrBldr *pSelf, size_t num);
 BMA_DEF void bma_StrBldr_appndGnrc(bma_StrBldr *pSelf, size_t capIncrease, const char *pFmt, ...);

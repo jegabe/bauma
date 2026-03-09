@@ -172,9 +172,9 @@ BMA_DEF bma_bool_t bma_cmdsl_funcSet(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void 
 		return BMA_FALSE;
 	}
 	bma_Cmdsl_setVar_ext(pCmdsl, bma_StrBldr_getStr(&pParams[0]),
-                                     bma_StrBldr_getSz(&pParams[0]),
-                                     bma_StrBldr_getStr(&pParams[1]),
-                                     bma_StrBldr_getSz(&pParams[1]));
+	                     bma_StrBldr_getSz(&pParams[0]),
+	                     bma_StrBldr_getStr(&pParams[1]),
+	                     bma_StrBldr_getSz(&pParams[1]));
 	return BMA_TRUE;
 }
 
@@ -196,11 +196,19 @@ BMA_DEF bma_bool_t bma_cmdsl_funcGet(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void 
 
 BMA_DEF bma_bool_t bma_cmdsl_funcCall(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void *pUserData, const bma_StrBldr* pParams, size_t numOfParams) {
 	(void)pUserData;
+	bma_bool_t result;
 	bma_StrN funcName;
-	bma_CmdslFuncWthUsrData *pFunc;
-	if (numOfParams < 1) {
+	bma_CmdslFuncWthUsrData func, *pFunc;
+	const char *pArgs;
+	size_t argsLen;
+	size_t nArgs;
+	size_t i;
+	bma_Vec parsedArgs;
+	bma_StrBldr *pParsedArg;
+	if (numOfParams != 2u) {
 		bma_StrBldr_clear(pDst);
-		bma_StrBldr_appndStr(pDst, "Function %call() needs at least one param, the name of the func to call");
+		bma_StrBldr_appndStr(pDst, "Wrong number of parameters for function %call(), expected 2 but got ");
+		bma_StrBldr_appndUnsgnd(pDst, numOfParams);
 		return BMA_FALSE;
 	}
 	funcName.p = bma_StrBldr_getStr(&pParams[0]);
@@ -213,7 +221,65 @@ BMA_DEF bma_bool_t bma_cmdsl_funcCall(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void
 		bma_StrBldr_appndStr(pDst, "' not found");
 		return BMA_FALSE;
 	}
-	return (*pFunc->pFunc)(pDst, pCmdsl, pFunc->pUserData, &pParams[1], numOfParams - 1);
+	func = *pFunc;
+	/* count number of arguments */
+	pArgs = bma_StrBldr_getStr(&pParams[1]);
+	argsLen = bma_StrBldr_getSz(&pParams[1]);
+	nArgs = 0;
+	while(argsLen > 0) {
+		const char *p = (const char*)memchr(pArgs, ',', argsLen);
+		size_t offs;
+		bma_bool_t isEscaped = BMA_FALSE;
+		if (p == NULL) {
+			if (argsLen > 0) {
+				++nArgs;
+			}
+			break;
+		}
+		if ((p > pArgs) && (p[-1] == pCmdsl->escapeChar)) {
+			isEscaped = BMA_TRUE;
+		}
+		offs = (size_t)(p - pArgs) + 1u; /* +1 to skip comma */
+		pArgs += offs;
+		argsLen -= offs;
+		if (!isEscaped) {
+			++nArgs;
+		}
+	}
+	bma_Cmdsl_allcTmpStrBldrs(pCmdsl, nArgs, &parsedArgs);
+	/* parse arguments */
+	pArgs = bma_StrBldr_getStr(&pParams[1]);
+	argsLen = bma_StrBldr_getSz(&pParams[1]);
+	i = 0;
+	while(argsLen > 0) {
+		const char *p = (const char*)memchr(pArgs, ',', argsLen);
+		size_t offs;
+		size_t len;
+		bma_bool_t isEscaped = BMA_FALSE;
+		if (p == NULL) {
+			offs = argsLen;
+			len = argsLen;
+		}
+		else {
+			len = ((size_t)(p - pArgs));
+			offs = len + 1; /* incl. ',' */
+			if ((p > pArgs) && (p[-1] == pCmdsl->escapeChar)) {
+				isEscaped = BMA_TRUE;
+			}
+		}
+		if (!isEscaped) {
+			bma_assert(i < nArgs);
+			pParsedArg = bma_Vec_at(&parsedArgs, i, bma_StrBldr);
+			bma_assert(bma_StrBldr_getSz(pParsedArg) == 0);
+			bma_StrBldr_appndStrN(pParsedArg, pArgs, len);
+			++i;
+		}
+		pArgs += offs;
+		argsLen -= offs;
+	}
+	result = (func.pFunc)(pDst, pCmdsl, func.pUserData, bma_Vec_getData(&parsedArgs, bma_StrBldr), bma_Vec_getSz(&parsedArgs));
+	bma_Cmdsl_freeTmpStrBldrs(pCmdsl, &parsedArgs);
+	return result;
 }
 
 BMA_DEF void bma_CmdslVar_dtor(bma_CmdslVar *pSelf, bma_IMemAlloc *pAlloc) {
@@ -307,13 +373,14 @@ BMA_DEF void bma_CmdslNodeEmpty_ctor(bma_CmdslNodeEmpty *pSelf) {
 		
 typedef struct bma_CmdslNodeFuncCall {
 	bma_ICmdslNode base;
-	bma_CmdslFuncWthUsrData *pFunc;
+	bma_StrN name;
 	bma_Vec args;
 } bma_CmdslNodeFuncCall;
 
 BMA_DEF void bma_cmdsl_NodeFunctionCall_destruct(bma_CmdslNodeFuncCall *pSelf, bma_IMemAlloc *pAlloc) {
 	bma_assert(pSelf != NULL);
 	bma_Vec_dtor(&pSelf->args, NULL);
+	bma_StrN_dtor(&pSelf->name, pAlloc);
 #if BMA_DBG
 	memset(pSelf, 0xFF, sizeof(*pSelf));
 #endif
@@ -321,15 +388,22 @@ BMA_DEF void bma_cmdsl_NodeFunctionCall_destruct(bma_CmdslNodeFuncCall *pSelf, b
 
 BMA_DEF bma_bool_t bma_cmdsl_NodeFunctionCall_eval(void *pSelf_, bma_StrBldr *pDst, bma_Cmdsl* pCmdsl) {
 	bma_CmdslNodeFuncCall *pSelf = (bma_CmdslNodeFuncCall*)pSelf_;
-	bma_CmdslFuncWthUsrData *pFunc;
 	bma_Vec tmpStrBldrs;
 	size_t i, nargs;
+	bma_CmdslFuncWthUsrData *pFunc, func;
 	bma_bool_t result = BMA_TRUE;
 	bma_assert(pSelf != NULL);
 	bma_assert(pDst != NULL);
 	bma_assert(pCmdsl != NULL);
-	bma_assert(pSelf->pFunc != NULL);
-	pFunc = pSelf->pFunc;
+	pFunc = bma_HshMp_get(&pCmdsl->functions, &pSelf->name, bma_StrN, bma_CmdslFuncWthUsrData);
+	if (pFunc == NULL) {
+		bma_StrBldr_clear(pDst);
+		bma_StrBldr_appndStr(pDst, "Function '");
+		bma_StrBldr_appndStrN(pDst, pSelf->name.p, pSelf->name.len);
+		bma_StrBldr_appndStr(pDst, "' not found");
+		return BMA_FALSE;
+	}
+	func = *pFunc; /* Save state because map can get reallocated during function call */
 	nargs = bma_Vec_getSz(&pSelf->args);
 	bma_Cmdsl_allcTmpStrBldrs(pCmdsl, nargs, &tmpStrBldrs);
 	for (i=0; i<nargs; ++i) {
@@ -342,19 +416,20 @@ BMA_DEF bma_bool_t bma_cmdsl_NodeFunctionCall_eval(void *pSelf_, bma_StrBldr *pD
 		}
 	}
 	/* call function with args, results stored in pDst */
-	result = (*pFunc->pFunc)(pDst, pCmdsl, pFunc->pUserData, bma_Vec_getData(&tmpStrBldrs, bma_StrBldr), nargs);
+	result = (*func.pFunc)(pDst, pCmdsl, func.pUserData, bma_Vec_getData(&tmpStrBldrs, bma_StrBldr), nargs);
 cleanup:
 	bma_Cmdsl_freeTmpStrBldrs(pCmdsl, &tmpStrBldrs);
 	return result;
 }
 
-BMA_DEF void bma_cmdsl_NodeFunctionCall_construct(bma_CmdslNodeFuncCall *pSelf, bma_CmdslFuncWthUsrData *pFunc, bma_IMemAlloc *pAlloc) {
+BMA_DEF void bma_cmdsl_NodeFunctionCall_construct(bma_CmdslNodeFuncCall *pSelf, const bma_StrN *pName, bma_IMemAlloc *pAlloc) {
 	bma_assert(pSelf != NULL);
-	bma_assert(pFunc != NULL);
+	bma_assert(pName != NULL);
 	bma_assert(pAlloc != NULL);
 	pSelf->base.pDestruct = (bma_dtor_t)&bma_cmdsl_NodeFunctionCall_destruct;
 	pSelf->base.pEval = &bma_cmdsl_NodeFunctionCall_eval;
-	pSelf->pFunc = pFunc;
+	pSelf->name.p = bma_strndup_ext(pName->p, pName->len, pAlloc);
+	pSelf->name.len = pName->len;
 	bma_Vec_ctor_ext(&pSelf->args, bma_ICmdslNode*, (bma_dtor_t)&bma_CmdslNodePtr_dtor, pAlloc);
 }
 
@@ -686,7 +761,6 @@ BMA_DEF bma_ICmdslNode *bma_cmdsl_parseFunctionCall(bma_Cmdsl *pSelf, bma_cmdsl_
 	const char *p;
 	size_t n;
 	bma_StrN funcName;
-	bma_CmdslFuncWthUsrData* pFunc;
 	bma_CmdslNodeFuncCall* pFuncCall;
 	if ((pStr->len == 0) || (*pStr->pStr != pSelf->escapeChar)) {
 		if (pErrFormatter != NULL) {
@@ -696,7 +770,7 @@ BMA_DEF bma_ICmdslNode *bma_cmdsl_parseFunctionCall(bma_Cmdsl *pSelf, bma_cmdsl_
 	}
 	++pStr->pStr;
 	--pStr->len;
-	p = memchr(pStr->pStr, '(', pStr->len);
+	p = (const char*)memchr(pStr->pStr, '(', pStr->len);
 	if (p == NULL) {
 		if (pErrFormatter != NULL) {
 			bma_cmdsl_printErrAtOffs(pErrFormatter, pStr, "'(' not found");
@@ -719,14 +793,6 @@ BMA_DEF bma_ICmdslNode *bma_cmdsl_parseFunctionCall(bma_Cmdsl *pSelf, bma_cmdsl_
 		}
 		return NULL;
 	}
-	pFunc = bma_HshMp_get(&pSelf->functions, &funcName, bma_StrN, bma_CmdslFuncWthUsrData);
-	if (pFunc == NULL) {
-		if (pErrFormatter != NULL) {
-			bma_cmdsl_printErrAtOffs(pErrFormatter, pStr, "Function not found: ");
-			bma_StrBldr_appndStrN(pErrFormatter, funcName.p, funcName.len);
-		}
-		return NULL;
-	}
 	++n; /* jump after '(' */
 	pStr->pStr += n;
 	pStr->len -= n;
@@ -738,7 +804,7 @@ BMA_DEF bma_ICmdslNode *bma_cmdsl_parseFunctionCall(bma_Cmdsl *pSelf, bma_cmdsl_
 		return NULL;
 	}
 	pFuncCall = bma_malloc_ext(pSelf->pAlloc, bma_CmdslNodeFuncCall);
-	bma_cmdsl_NodeFunctionCall_construct(pFuncCall, pFunc, pSelf->pAlloc);
+	bma_cmdsl_NodeFunctionCall_construct(pFuncCall, &funcName, pSelf->pAlloc);
 	while(pStr->len > 0) {
 		bma_ICmdslNode* pArg;
 		char c = *pStr->pStr;

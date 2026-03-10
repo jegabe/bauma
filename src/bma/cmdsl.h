@@ -28,7 +28,7 @@ SOFTWARE.
 
 A minimalistic string template engine to generate command line arguments,
 e.g. to call compilers and other build stuff. Can also be used to generate any
-arbitrary string.
+arbitrary string, also multi-line strings.
 
 The syntax is:
 
@@ -42,11 +42,18 @@ The syntax is:
   - "%(" is replaced with "("
   - "%)" is replaced with ")"
   - "%," is replaced with ","
-  - "%" followed by any white-space character skips all of the whitespace until a non-whitespace
+  - "%" followed by any white-space character skips all whitespace until a non-whitespace
         character is reached.
+  - "%" followed by newline (LF) or carriage-return-newline (CR LF) suppresses the newline. This allows the template
+    to span multiple lines without having the newline in the output
   - "%*" starts a comment, ignoring everything until "*%" is reached, similarly to C-style comments.
     Comment nesting is supported, so "%* ... %* ... *% ... *%" is a valid comment with another comment inside.
   - "%/" starts a comment until the end of the line, similarly to C++-style comments.
+  - "%{" starts an escaped block where all characters are treated normally, until "}%" is reached. This can also
+    be nested, so "%{ ... %{ ... }% ... }%" is a valid escaped block with another escaped block (although the internal
+    one is treated as normal characters) inside.
+    This feature is useful when passing a template as a string to another function, where normally every escape would need duplication
+    (e.g. "%%get%(X%)%,%%get%(Y%)" can be understood easier when written as %{%get(X),%get(Y)}%
 
 Simple example: "%get(CC) -c -o %get(OBJ) %get(SRC)" could be a template for a compiler command line, where CC, OBJ and SRC are variables
 that are pre-set using bma_Cmdsl_setVar().
@@ -76,12 +83,12 @@ The built-in functions are:
 	extern "C" {
 #endif
 
-typedef struct bma_CmdslVar {
-	bma_StrN    name;
+typedef struct bma_CmdslPshedVar {
+	bma_StrBldr name;
 	bma_StrBldr value;
-} bma_CmdslVar;
+} bma_CmdslPshedVar;
 
-BMA_DEF void bma_CmdslVar_dtor(bma_CmdslVar *p, bma_IMemAlloc *pAlloc);
+BMA_DEF void bma_CmdslPshedVar_dtor(bma_CmdslPshedVar *p, bma_IMemAlloc *pAlloc);
 
 typedef struct bma_Cmdsl bma_Cmdsl;
 
@@ -130,6 +137,9 @@ BMA_DEF bma_bool_t bma_Cmdsl_parseStr_ext(bma_Cmdsl *pSelf, const char *pStr, bm
 
 BMA_DEF void bma_Cmdsl_allcTmpStrBldrs(bma_Cmdsl *pSelf, size_t num, bma_Vec *pOut);
 BMA_DEF void bma_Cmdsl_freeTmpStrBldrs(bma_Cmdsl *pSelf, bma_Vec *pTmpStrBldrs);
+
+BMA_DEF void bma_Cmdsl_allcTmpStrBldr(bma_Cmdsl *pSelf, bma_StrBldr *pOut);
+BMA_DEF void bma_Cmdsl_freeTmpStrBldr(bma_Cmdsl *pSelf, bma_StrBldr *pTmpStrBldr);
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -287,7 +297,7 @@ BMA_DEF bma_bool_t bma_cmdsl_funcPush(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void
 	const char* pVarName;
 	size_t varNameLen;
 	bma_StrBldr *pValue;
-	bma_CmdslVar pushedVar;
+	bma_CmdslPshedVar pushedVar;
 	if (numOfParams != 1u) {
 		bma_StrBldr_clear(pDst);
 		bma_StrBldr_appndStr(pDst, "Wrong number of parameters for function push(), expected 1 but got ");
@@ -296,9 +306,10 @@ BMA_DEF bma_bool_t bma_cmdsl_funcPush(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void
 	}
 	pVarName = bma_StrBldr_getStr(&pParams[0]);
 	varNameLen = bma_StrBldr_getSz(&pParams[0]);
+	bma_Cmdsl_allcTmpStrBldr(pCmdsl, &pushedVar.name);
+	bma_assert(bma_StrBldr_getSz(&pushedVar.name) == 0);
+	bma_StrBldr_appndStrN(&pushedVar.name, pVarName, varNameLen);
 	pValue = (bma_StrBldr*)bma_Cmdsl_getVar_ext(pCmdsl, pVarName, varNameLen);
-	pushedVar.name.p = bma_strndup_ext(pVarName, varNameLen, pCmdsl->pAlloc);
-	pushedVar.name.len = varNameLen;
 	if (pValue != NULL) {
 		pushedVar.value = *pValue; /* exchange, so set original to empty string */
 		bma_StrBldr_ctor_ext(pValue, pCmdsl->pAlloc);
@@ -307,7 +318,7 @@ BMA_DEF bma_bool_t bma_cmdsl_funcPush(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void
 		/* push of non-existing var is same as pushing empty-string var */
 		bma_StrBldr_ctor_ext(&pushedVar.value, pCmdsl->pAlloc);
 	}
-	bma_Vec_appnd(&pCmdsl->pushedVariables, bma_CmdslVar, &pushedVar);
+	bma_Vec_appnd(&pCmdsl->pushedVariables, bma_CmdslPshedVar, &pushedVar);
 	return BMA_TRUE;
 }
 
@@ -316,6 +327,7 @@ BMA_DEF bma_bool_t bma_cmdsl_funcPop(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void 
 	const char* pVarName;
 	size_t varNameLen;
 	size_t i;
+	bma_StrBldr *pValue;
 	if (numOfParams != 1u) {
 		bma_StrBldr_clear(pDst);
 		bma_StrBldr_appndStr(pDst, "Wrong number of parameters for function push(), expected 1 but got ");
@@ -326,13 +338,32 @@ BMA_DEF bma_bool_t bma_cmdsl_funcPop(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void 
 	varNameLen = bma_StrBldr_getSz(&pParams[0]);
 	i = bma_Vec_getSz(&pCmdsl->pushedVariables);
 	while(i-- > 0) {
-		bma_CmdslVar* pPushedVar = bma_Vec_at(&pCmdsl->pushedVariables, i, bma_CmdslVar);
-		if ((pPushedVar->name.len == varNameLen) && (memcmp(pPushedVar->name.p, pVarName, varNameLen) == 0)) {
+		bma_CmdslPshedVar* pPushedVar = bma_Vec_at(&pCmdsl->pushedVariables, i, bma_CmdslPshedVar);
+		if ((bma_StrBldr_getSz(&pPushedVar->name) == varNameLen) &&
+		    (memcmp(bma_StrBldr_getStr(&pPushedVar->name), pVarName, varNameLen) == 0)) {
+			bma_StrN varName;
 			bma_bool_t removed;
-			bma_Cmdsl_setVar_ext(pCmdsl, pVarName, varNameLen, bma_StrBldr_getStr(&pPushedVar->value), bma_StrBldr_getSz(&pPushedVar->value));
-			removed = bma_Vec_rmv(&pCmdsl->pushedVariables, i, NULL, bma_CmdslVar);
+			bma_CmdslPshedVar rmvdVar;
+			removed = bma_Vec_rmv(&pCmdsl->pushedVariables, i, &rmvdVar, bma_CmdslPshedVar);
 			bma_assert(removed);
 			(void)removed;
+			varName.p = (char*)pVarName;
+			varName.len = varNameLen;
+			pValue = bma_HshMp_get(&pCmdsl->variables, &varName, bma_StrN, bma_StrBldr);
+			if (pValue != NULL) {
+				bma_StrBldr_dtor(pValue, NULL);
+				*pValue = rmvdVar.value;
+			}
+			else {
+				bma_bool_t couldPut;
+				/* almost same but var name needs heap alloc */
+				/* dup key to not loose it, map takes ownership */
+				varName.p = bma_strndup_ext(pVarName, varNameLen, pCmdsl->pAlloc);
+				couldPut = bma_HshMp_put(&pCmdsl->variables, &varName, &rmvdVar.value, bma_StrN, bma_StrBldr);
+				bma_assert(couldPut);
+				(void)couldPut;
+			}
+			bma_Cmdsl_freeTmpStrBldr(pCmdsl, &rmvdVar.name);
 			return BMA_TRUE;
 		}
 	}
@@ -343,10 +374,10 @@ BMA_DEF bma_bool_t bma_cmdsl_funcPop(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void 
 	return BMA_FALSE;
 }
 
-BMA_DEF void bma_CmdslVar_dtor(bma_CmdslVar *pSelf, bma_IMemAlloc *pAlloc) {
+BMA_DEF void bma_CmdslPshedVar_dtor(bma_CmdslPshedVar *pSelf, bma_IMemAlloc *pAlloc) {
 	bma_assert(pSelf != NULL);
 	bma_assert(pAlloc != NULL);
-	bma_StrN_dtor(&pSelf->name, pAlloc);
+	bma_StrBldr_dtor(&pSelf->name, pAlloc);
 	bma_StrBldr_dtor(&pSelf->value, NULL);
 #if BMA_DBG
 	memset(pSelf, 0xFF, sizeof(*pSelf));
@@ -560,7 +591,7 @@ BMA_DEF void bma_Cmdsl_ctor_ext(bma_Cmdsl *pSelf, char escapeChar, bma_IMemAlloc
 	bma_HshMp_ctor_ext(&pSelf->variables, bma_StrN, bma_StrBldr,
 	                            (bma_dtor_t)&bma_StrN_dtor, (bma_dtor_t)&bma_StrBldr_dtor,
 	                            (bma_hash_t)&bma_StrN_hash, (bma_eq_t)&bma_StrN_eq, pAlloc);
-	bma_Vec_ctor_ext(&pSelf->pushedVariables, bma_CmdslVar, (bma_dtor_t)&bma_CmdslVar_dtor, pAlloc);
+	bma_Vec_ctor_ext(&pSelf->pushedVariables, bma_CmdslPshedVar, (bma_dtor_t)&bma_CmdslPshedVar_dtor, pAlloc);
 	bma_Vec_ctor_ext(&pSelf->tmpStrBldrs, bma_StrBldr, (bma_dtor_t)&bma_StrBldr_dtor, pAlloc);
 	bma_Vec_ctor_ext(&pSelf->tmpStrBldrsVecs, bma_Vec, (bma_dtor_t)&bma_Vec_dtor, pAlloc);
 	pSelf->pRootNode = NULL;
@@ -1012,6 +1043,8 @@ BMA_DEF void bma_Cmdsl_allcTmpStrBldrs(bma_Cmdsl *pSelf, size_t num, bma_Vec *pO
 }
 
 BMA_DEF void bma_Cmdsl_freeTmpStrBldrs(bma_Cmdsl *pSelf, bma_Vec *pTmpStrBldrs) {
+	bma_assert(pSelf != NULL);
+	bma_assert(pTmpStrBldrs != NULL);
 	while(bma_Vec_getSz(pTmpStrBldrs) > 0) {
 		bma_StrBldr b;
 		bma_Vec_rmv(pTmpStrBldrs, bma_Vec_getSz(pTmpStrBldrs) - 1u, &b, bma_StrBldr);
@@ -1020,6 +1053,25 @@ BMA_DEF void bma_Cmdsl_freeTmpStrBldrs(bma_Cmdsl *pSelf, bma_Vec *pTmpStrBldrs) 
 	bma_Vec_appnd(&pSelf->tmpStrBldrsVecs, bma_Vec, pTmpStrBldrs);
 }
 
+BMA_DEF void bma_Cmdsl_allcTmpStrBldr(bma_Cmdsl *pSelf, bma_StrBldr *pOut) {
+	bma_assert(pSelf != NULL);
+	bma_assert(pOut != NULL);
+	if (bma_Vec_getSz(&pSelf->tmpStrBldrs) > 0) {
+		/* re-use existing */
+		bma_Vec_rmv(&pSelf->tmpStrBldrs, bma_Vec_getSz(&pSelf->tmpStrBldrs) - 1u, pOut, bma_StrBldr);
+		bma_StrBldr_clear(pOut);
+	}
+	else {
+		/* create new */
+		bma_StrBldr_ctor_ext(pOut, pSelf->pAlloc);
+	}
+}
+
+BMA_DEF void bma_Cmdsl_freeTmpStrBldr(bma_Cmdsl *pSelf, bma_StrBldr *pTmpStrBldr) {
+	bma_assert(pSelf != NULL);
+	bma_assert(pTmpStrBldr != NULL);
+	bma_Vec_appnd(&pSelf->tmpStrBldrs, bma_StrBldr, pTmpStrBldr);
+}
 
 #ifdef __cplusplus
 	} /* extern "C" */

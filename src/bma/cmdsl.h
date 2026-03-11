@@ -98,6 +98,7 @@ typedef struct bma_CmdslFuncWthUsrData {
 	bma_cmdsl_func_t pFunc;
 	void *pUserData; /* optional, heap-allocated */
 	bma_dtor_t pUserDataDtor;  /* optional */
+	bma_bool_t isBuiltIn;
 } bma_CmdslFuncWthUsrData;
 
 BMA_DEF void bma_CmdslFuncWthUsrData_dtor(bma_CmdslFuncWthUsrData* pSelf, bma_IMemAlloc *pAlloc);
@@ -129,6 +130,12 @@ BMA_DEF bma_bool_t bma_Cmdsl_setVar_ext(bma_Cmdsl *pSelf, const char *pVarName, 
 BMA_DEF const char *bma_Cmdsl_getVar(bma_Cmdsl *pSelf, const char *pVarName);
 BMA_DEF const bma_StrBldr *bma_Cmdsl_getVar_ext(bma_Cmdsl *pSelf, const char *pVarName, size_t nameLen);
 
+BMA_DEF void bma_Cmdsl_push_ext(bma_Cmdsl *pSelf, const char *pVarName, size_t varNameLen);
+#define bma_Cmdsl_push(pSelf, pVarName) bma_Cmdsl_push_ext((pSelf), (pVarName), strlen(pVarName))
+
+BMA_DEF void bma_Cmdsl_pop_ext(bma_Cmdsl *pSelf, const char *pVarName, size_t varNameLen);
+#define bma_Cmdsl_pop(pSelf, pVarName) bma_Cmdsl_pop_ext((pSelf), (pVarName), strlen(pVarName))
+
 BMA_DEF bma_bool_t bma_Cmdsl_parseMem_ext(bma_Cmdsl *pSelf, const void *pMem, size_t memSize, bma_StrBldr *pErrFormatter);
 #define bma_Cmdsl_parseMem(pSelf, pMem, memSize) bma_Cmdsl_parseMem_ext((pSelf), (pMem), (memSize), NULL)
 
@@ -149,19 +156,29 @@ BMA_DEF void bma_Cmdsl_freeTmpStrBldr(bma_Cmdsl *pSelf, bma_StrBldr *pTmpStrBldr
 
 #include <string.h>
 #include <ctype.h>
-
+#include <stdlib.h>
 
 #ifdef __cplusplus
 	extern "C" {
 #endif
 
-#define BMA_CMDSL_MAX_NUM_PARAMS 8u
+BMA_DEF bma_bool_t bma_cmdsl_isValidIdentifier(const char* pStr, size_t len) {
+	size_t i;
+	char c;
+	if (len == 0) return BMA_FALSE;
+	c = *pStr++;
+	if (!(((c >= 'A') && (c <= 'Z')) || ((c >= 'a') && (c <= 'z')) || (c == '_'))) return BMA_FALSE;
+	for (i=1; i<len; ++i) {
+		c = *pStr++;
+		if (!(((c >= 'A') && (c <= 'Z')) || ((c >= 'a') && (c <= 'z')) || ((c >= '0') && (c <= '9')) || (c == '_'))) return BMA_FALSE;
+	}
+	return BMA_TRUE;
+}
 
 struct bma_ICmdslNode {
 	void (*pDestruct)(void* pSelf, bma_IMemAlloc *pAlloc);
 	bma_bool_t (*pEval)(void* pSelf, bma_StrBldr* pDst, bma_Cmdsl* pCmdsl);
 };
-
 
 typedef struct bma_cmdsl_ParseSrc {
 	const char *pBegin; /* for error reporting to calculate error offset */
@@ -169,9 +186,7 @@ typedef struct bma_cmdsl_ParseSrc {
 	size_t len; /* decremented while parsing */
 } bma_cmdsl_ParseSrc;
 
-/*
-typedef bma_bool_t (*bma_cmdsl_pFunction)(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void *pUserData, const bma_StrN* pParams, size_t numOfParams);
-*/
+BMA_DEF bma_ICmdslNode *bma_cmdsl_parseSequence(bma_Cmdsl *pSelf, bma_cmdsl_ParseSrc* pStr, bma_StrBldr *pErrFormatter, bma_bool_t insideFunction);
 
 BMA_DEF bma_bool_t bma_cmdsl_funcSet(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void *pUserData, const bma_StrBldr* pParams, size_t numOfParams) {
 	(void)pUserData;
@@ -181,10 +196,15 @@ BMA_DEF bma_bool_t bma_cmdsl_funcSet(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void 
 		bma_StrBldr_appndUnsgnd(pDst, numOfParams);
 		return BMA_FALSE;
 	}
-	bma_Cmdsl_setVar_ext(pCmdsl, bma_StrBldr_getStr(&pParams[0]),
-	                     bma_StrBldr_getSz(&pParams[0]),
-	                     bma_StrBldr_getStr(&pParams[1]),
-	                     bma_StrBldr_getSz(&pParams[1]));
+	if (!bma_Cmdsl_setVar_ext(pCmdsl, bma_StrBldr_getStr(&pParams[0]),
+	                          bma_StrBldr_getSz(&pParams[0]),
+	                          bma_StrBldr_getStr(&pParams[1]),
+	                          bma_StrBldr_getSz(&pParams[1]))) {
+		bma_StrBldr_clear(pDst);
+		bma_StrBldr_appndStr(pDst, "Invalid variable name '");
+		bma_StrBldr_appndStrN(pDst, bma_StrBldr_getStr(&pParams[0]), bma_StrBldr_getSz(&pParams[0]));
+		bma_StrBldr_appndStr(pDst, "'. Use [A-Z][a-z][0-9]_* not starting with a number");
+	}
 	return BMA_TRUE;
 }
 
@@ -355,13 +375,17 @@ BMA_DEF bma_bool_t bma_cmdsl_funcPop(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void 
 				*pValue = rmvdVar.value;
 			}
 			else {
-				bma_bool_t couldPut;
-				/* almost same but var name needs heap alloc */
-				/* dup key to not loose it, map takes ownership */
-				varName.p = bma_strndup_ext(pVarName, varNameLen, pCmdsl->pAlloc);
-				couldPut = bma_HshMp_put(&pCmdsl->variables, &varName, &rmvdVar.value, bma_StrN, bma_StrBldr);
-				bma_assert(couldPut);
-				(void)couldPut;
+				if (bma_StrBldr_getSz(&rmvdVar.value) > 0) {
+					bma_bool_t couldPut;
+					/* almost same but var name needs heap alloc */
+					/* dup key to not loose it, map takes ownership */
+					varName.p = bma_strndup_ext(pVarName, varNameLen, pCmdsl->pAlloc);
+					couldPut = bma_HshMp_put(&pCmdsl->variables, &varName, &rmvdVar.value, bma_StrN, bma_StrBldr);
+					bma_assert(couldPut);
+					(void)couldPut;
+				} else {
+					bma_StrBldr_dtor(&rmvdVar.value, NULL);
+				}
 			}
 			bma_Cmdsl_freeTmpStrBldr(pCmdsl, &rmvdVar.name);
 			return BMA_TRUE;
@@ -374,10 +398,192 @@ BMA_DEF bma_bool_t bma_cmdsl_funcPop(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void 
 	return BMA_FALSE;
 }
 
-BMA_DEF void bma_CmdslPshedVar_dtor(bma_CmdslPshedVar *pSelf, bma_IMemAlloc *pAlloc) {
+typedef struct bma_CmdslUsrDefndFuncData {
+	bma_StrN name;
+	bma_ICmdslNode *pBody;
+	bma_Vec paramNames;
+} bma_CmdslUsrDefndFuncData;
+
+void bma_CmdslUsrDefndFuncData_dtor(bma_CmdslUsrDefndFuncData *pSelf, bma_IMemAlloc *pAlloc) {
 	bma_assert(pSelf != NULL);
 	bma_assert(pAlloc != NULL);
-	bma_StrBldr_dtor(&pSelf->name, pAlloc);
+	bma_assert(pSelf->pBody != NULL);
+	bma_Vec_dtor(&pSelf->paramNames, NULL);
+	pSelf->pBody->pDestruct(pSelf->pBody, pAlloc);
+	bma_free_ext(pAlloc, pSelf->pBody);
+	bma_free_ext(pAlloc, pSelf->name.p);
+}
+
+bma_bool_t bma_cmdsl_funcUsrDefnd(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void *pUserData_, const bma_StrBldr* pParams, size_t numOfParams) {
+	bma_assert(pDst != NULL);
+	bma_assert(pCmdsl != NULL);
+	bma_assert(pUserData_ != NULL);
+	bma_CmdslUsrDefndFuncData* pUserData = (bma_CmdslUsrDefndFuncData*)pUserData_;
+	size_t i;
+	bma_bool_t result = BMA_FALSE;
+	if (numOfParams > bma_Vec_getSz(&pUserData->paramNames)) {
+		bma_StrBldr_clear(pDst);
+		bma_StrBldr_appndStr(pDst, "Too many parameters for function '");
+		bma_StrBldr_appndStrN(pDst, pUserData->name.p, pUserData->name.len);
+		bma_StrBldr_appndStr(pDst, "()'. The function accepts max. ");
+		bma_StrBldr_appndUnsgnd(pDst, bma_Vec_getSz(&pUserData->paramNames));
+		bma_StrBldr_appndStr(pDst, " but ");
+		bma_StrBldr_appndUnsgnd(pDst, numOfParams);
+		bma_StrBldr_appndStr(pDst, " were passed");
+	}
+
+	/* Push all variables that have the same name as the parameters onto stack so collisions are avoided */
+	for (i=0; i<bma_Vec_getSz(&pUserData->paramNames); ++i) {
+		bma_StrN *pParamName = bma_Vec_at(&pUserData->paramNames, i, bma_StrN);
+		bma_Cmdsl_push_ext(pCmdsl, pParamName->p, pParamName->len);
+	}
+	
+	/* Put parameter into variables so that the implementation of the function can access them via %get(name) */
+	for (i=0; i<numOfParams; ++i) {
+		bma_bool_t couldSet;
+		bma_StrN *pParamName = bma_Vec_at(&pUserData->paramNames, i, bma_StrN);
+		couldSet = bma_Cmdsl_setVar_ext(pCmdsl, pParamName->p, pParamName->len, bma_StrBldr_getStr(&pParams[i]), bma_StrBldr_getSz(&pParams[i]));
+		bma_assert(couldSet);
+		(void)couldSet;
+	}
+	/* All other arguments which weren't passed via pParams are now set as empty variables because the push above has cleared them to empty strings.
+           Now, call code: */
+	result = (*pUserData->pBody->pEval)(pUserData->pBody, pDst, pCmdsl);
+	/* Undo push by pop in reverse order to restore variables */
+	i = bma_Vec_getSz(&pUserData->paramNames);
+	while(i-- > 0) {
+		bma_StrN *pParamName = bma_Vec_at(&pUserData->paramNames, i, bma_StrN);
+		bma_Cmdsl_pop_ext(pCmdsl, pParamName->p, pParamName->len);
+	}
+	return result;
+}
+
+BMA_DEF bma_bool_t bma_cmdsl_funcDef(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void *pUserData, const bma_StrBldr* pParams, size_t numOfParams) {
+	(void)pUserData;
+	bma_StrN name;
+	size_t numFuncParams, i;
+	bma_cmdsl_ParseSrc parseSrc;
+	bma_ICmdslNode *pBody;
+	bma_StrBldr prseErrFmt;
+	bma_CmdslFuncWthUsrData fu;
+	bma_CmdslUsrDefndFuncData *pFuDt;
+	bma_bool_t coulPut;
+	/* %def(funcName,maxNumParams,param0,...,paramN,code) */
+	if (numOfParams < 2u) {
+		bma_StrBldr_clear(pDst);
+		bma_StrBldr_appndStr(pDst, "Wrong number of parameters for function def(), expected min. 2 but got ");
+		bma_StrBldr_appndUnsgnd(pDst, numOfParams);
+		return BMA_FALSE;
+	}
+	name.p = (char*)bma_StrBldr_getStr(&pParams[0]);
+	name.len = bma_StrBldr_getSz(&pParams[0]);
+	if (!bma_cmdsl_isValidIdentifier(name.p, name.len)) {
+		bma_StrBldr_clear(pDst);
+		bma_StrBldr_appndStr(pDst, "Invalid function name '");
+		bma_StrBldr_appndStrN(pDst, name.p, name.len);
+		bma_StrBldr_appndStr(pDst, "()'");
+		return BMA_FALSE;
+	}
+	if (bma_HshMp_get(&pCmdsl->functions, &name, bma_StrN, bma_CmdslFuncWthUsrData) != NULL) {
+		bma_StrBldr_clear(pDst);
+		bma_StrBldr_appndStr(pDst, "Function '");
+		bma_StrBldr_appndStrN(pDst, name.p, name.len);
+		bma_StrBldr_appndStr(pDst, "()' already defined");
+		return BMA_FALSE;
+	}
+	errno = 0;
+	numFuncParams = (size_t)strtoul(bma_StrBldr_getStr(&pParams[1]), NULL, 10);
+	if ((numOfParams != (numFuncParams + 3u)) || (errno != 0)) {
+		bma_StrBldr_clear(pDst);
+		bma_StrBldr_appndStr(pDst, "Wrong number/type of parameters for function def(), needs (name,numParams,paramName0,...,code)");
+		return BMA_FALSE;
+	}
+	for(i=2u; i<(numOfParams-1); ++i) {
+		if (!bma_cmdsl_isValidIdentifier(bma_StrBldr_getStr(&pParams[i]), bma_StrBldr_getSz(&pParams[i]))) {
+			bma_StrBldr_clear(pDst);
+			bma_StrBldr_appndStr(pDst, "Invalid parameter name '");
+			bma_StrBldr_appndStrN(pDst, bma_StrBldr_getStr(&pParams[i]), bma_StrBldr_getSz(&pParams[i]));
+			bma_StrBldr_appndStr(pDst, "' for new function '");
+			bma_StrBldr_appndStrN(pDst, name.p, name.len);
+			bma_StrBldr_appndStr(pDst, "()'. Use [A-Z][a-z][0-9]_ not starting with a number");
+			return BMA_FALSE;
+		}
+	}
+	parseSrc.pBegin = bma_StrBldr_getStr(&pParams[numOfParams - 1u]);
+	parseSrc.pStr = parseSrc.pBegin;
+	parseSrc.len = bma_StrBldr_getSz(&pParams[numOfParams - 1u]);
+	bma_StrBldr_ctor_ext(&prseErrFmt, pCmdsl->pAlloc);
+	pBody = bma_cmdsl_parseSequence(pCmdsl, &parseSrc, &prseErrFmt, BMA_TRUE);
+	if (pBody == NULL) {
+		bma_StrBldr_clear(pDst);
+		bma_StrBldr_appndStr(pDst, "Error parsing code for new function '");
+		bma_StrBldr_appndStrN(pDst, name.p, name.len);
+		bma_StrBldr_appndStr(pDst, "'(): ");
+		bma_StrBldr_appndStrN(pDst, bma_StrBldr_getStr(&prseErrFmt), bma_StrBldr_getSz(&prseErrFmt));
+	}
+	bma_StrBldr_dtor(&prseErrFmt, NULL);
+	name.p = bma_strndup_ext(name.p, name.len, pCmdsl->pAlloc);
+	fu.pFunc = &bma_cmdsl_funcUsrDefnd;
+	pFuDt = bma_malloc_ext(pCmdsl->pAlloc, bma_CmdslUsrDefndFuncData);
+	pFuDt->name.p = bma_strndup_ext(name.p, name.len, pCmdsl->pAlloc);
+	pFuDt->name.len = name.len;
+	pFuDt->pBody = pBody;
+	bma_Vec_ctor_ext(&pFuDt->paramNames, bma_StrN, (bma_dtor_t)&bma_StrN_dtor, pCmdsl->pAlloc);
+	bma_Vec_rsrv(&pFuDt->paramNames, numFuncParams);
+	for(i=2u; i<(numOfParams-1); ++i) {
+		bma_StrN paramName;
+		paramName.p = bma_strndup_ext(bma_StrBldr_getStr(&pParams[i]), bma_StrBldr_getSz(&pParams[i]), pCmdsl->pAlloc);
+		paramName.len = bma_StrBldr_getSz(&pParams[i]);
+		bma_Vec_appnd(&pFuDt->paramNames, bma_StrN, &paramName);
+	}
+	fu.pUserData = pFuDt;
+	fu.pUserDataDtor = (bma_dtor_t)&bma_CmdslUsrDefndFuncData_dtor;
+	fu.isBuiltIn = BMA_FALSE; /* so it can be removed via %undef() */
+	coulPut = bma_HshMp_put(&pCmdsl->functions, &name, &fu, bma_StrN, bma_CmdslFuncWthUsrData);
+	bma_assert(coulPut);
+	(void)coulPut;
+	return BMA_TRUE;
+}
+
+BMA_DEF bma_bool_t bma_cmdsl_funcUndef(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void *pUserData, const bma_StrBldr* pParams, size_t numOfParams) {
+	(void)pUserData;
+	bma_StrN name;
+	bma_CmdslFuncWthUsrData *pFoundFunc;
+	bma_bool_t couldRemove;
+	/* %def(funcName,maxNumParams,param0,...,paramN,code) */
+	if (numOfParams != 1u) {
+		bma_StrBldr_clear(pDst);
+		bma_StrBldr_appndStr(pDst, "Wrong number of parameters for function undef(), expected 1 but got ");
+		bma_StrBldr_appndUnsgnd(pDst, numOfParams);
+		return BMA_FALSE;
+	}
+	name.p = (char*)bma_StrBldr_getStr(&pParams[0]);
+	name.len = bma_StrBldr_getSz(&pParams[0]);
+	pFoundFunc = bma_HshMp_get(&pCmdsl->functions, &name, bma_StrN, bma_CmdslFuncWthUsrData);
+	if (pFoundFunc == NULL) {
+		bma_StrBldr_clear(pDst);
+		bma_StrBldr_appndStr(pDst, "undef(): function '");
+		bma_StrBldr_appndStrN(pDst, name.p, name.len);
+		bma_StrBldr_appndStr(pDst, "()' not found");
+		return BMA_FALSE;
+	}
+	if (pFoundFunc->isBuiltIn) {
+		bma_StrBldr_clear(pDst);
+		bma_StrBldr_appndStr(pDst, "undef(): function '");
+		bma_StrBldr_appndStrN(pDst, name.p, name.len);
+		bma_StrBldr_appndStr(pDst, "()' can't be removed because it is a pre-defined function");
+		return BMA_FALSE;
+	}
+	couldRemove = bma_HshMp_rmv(&pCmdsl->functions, &name, bma_StrN, NULL, bma_CmdslFuncWthUsrData);
+	bma_assert(couldRemove);
+	(void)couldRemove;
+	return BMA_TRUE;
+}
+
+BMA_DEF void bma_CmdslPshedVar_dtor(bma_CmdslPshedVar *pSelf, bma_IMemAlloc *pAlloc) {
+	bma_assert(pSelf != NULL);
+	(void)pAlloc;
+	bma_StrBldr_dtor(&pSelf->name, NULL);
 	bma_StrBldr_dtor(&pSelf->value, NULL);
 #if BMA_DBG
 	memset(pSelf, 0xFF, sizeof(*pSelf));
@@ -609,6 +815,10 @@ BMA_DEF void bma_Cmdsl_ctor_ext(bma_Cmdsl *pSelf, char escapeChar, bma_IMemAlloc
 	bma_Cmdsl_addFunc(pSelf, "push", &fu);
 	fu.pFunc = &bma_cmdsl_funcPop;
 	bma_Cmdsl_addFunc(pSelf, "pop", &fu);
+	fu.pFunc = &bma_cmdsl_funcDef;
+	bma_Cmdsl_addFunc(pSelf, "def", &fu);
+	fu.pFunc = &bma_cmdsl_funcUndef;
+	bma_Cmdsl_addFunc(pSelf, "undef", &fu);
 }
 
 BMA_DEF void bma_Cmdsl_dtor(bma_Cmdsl *pSelf, bma_IMemAlloc *pAlloc) {
@@ -625,19 +835,6 @@ BMA_DEF void bma_Cmdsl_dtor(bma_Cmdsl *pSelf, bma_IMemAlloc *pAlloc) {
 #if BMA_DBG
 	memset(pSelf, 0xFF, sizeof(*pSelf));
 #endif
-}
-
-BMA_DEF bma_bool_t bma_cmdsl_isValidIdentifier(const char* pStr, size_t len) {
-	size_t i;
-	char c;
-	if (len == 0) return BMA_FALSE;
-	c = *pStr++;
-	if (!(((c >= 'A') && (c <= 'Z')) || ((c >= 'a') && (c <= 'z')) || (c == '_'))) return BMA_FALSE;
-	for (i=1; i<len; ++i) {
-		c = *pStr++;
-		if (!(((c >= 'A') && (c <= 'Z')) || ((c >= 'a') && (c <= 'z')) || ((c >= '0') && (c <= '9')) || (c == '_'))) return BMA_FALSE;
-	}
-	return BMA_TRUE;
 }
 
 BMA_DEF bma_bool_t bma_Cmdsl_addFunc(bma_Cmdsl *pSelf, const char *pFuncName, bma_CmdslFuncWthUsrData* p) {
@@ -663,6 +860,7 @@ BMA_DEF bma_bool_t bma_Cmdsl_addFunc(bma_Cmdsl *pSelf, const char *pFuncName, bm
 	/* to put into map, dyn. allocate so string isn't lost */
 	key.p = bma_strndup_ext(pFuncName, funcNameLen, pSelf->pAlloc);
         /* len stays same */
+	p->isBuiltIn = BMA_TRUE;
 	bma_HshMp_put(&pSelf->functions, &key, p, bma_StrN, bma_CmdslFuncWthUsrData);
 	return BMA_TRUE;
 }
@@ -686,7 +884,10 @@ BMA_DEF bma_bool_t bma_Cmdsl_setVar_ext(bma_Cmdsl *pSelf, const char *pVarName, 
 		bma_StrBldr_appndStrN(pFoundValue, pValue, valueLen);
 		return BMA_TRUE;
 	}
-	/* now, varName must be heap allocated to not loose the content when stored */
+	if (valueLen == 0) { /* and variable doesn't exist yet: Fine, no need to create one */
+		return BMA_TRUE;
+	}
+	/* now, varName must be heap allocated to not lose the content when stored */
 	varName.p = bma_strndup_ext(pVarName, nameLen, pSelf->pAlloc);
 	/* len stays same */
 	bma_StrBldr_ctor_ext(&newContent, pSelf->pAlloc);
@@ -720,6 +921,63 @@ BMA_DEF const bma_StrBldr *bma_Cmdsl_getVar_ext(bma_Cmdsl *pSelf, const char *pV
 	return bma_HshMp_get(&pSelf->variables, &varName, bma_StrN, bma_StrBldr);
 }
 
+BMA_DEF void bma_Cmdsl_push_ext(bma_Cmdsl *pSelf, const char *pVarName, size_t varNameLen) {
+	bma_StrBldr *pValue;
+	bma_CmdslPshedVar pushedVar;
+	bma_Cmdsl_allcTmpStrBldr(pSelf, &pushedVar.name);
+	bma_assert(bma_StrBldr_getSz(&pushedVar.name) == 0);
+	bma_StrBldr_appndStrN(&pushedVar.name, pVarName, varNameLen);
+	pValue = (bma_StrBldr*)bma_Cmdsl_getVar_ext(pSelf, pVarName, varNameLen);
+	if (pValue != NULL) {
+		pushedVar.value = *pValue; /* exchange, so set original to empty string */
+		bma_StrBldr_ctor_ext(pValue, pSelf->pAlloc);
+	}
+	else {
+		/* push of non-existing var is same as pushing empty-string var */
+		bma_StrBldr_ctor_ext(&pushedVar.value, pSelf->pAlloc);
+	}
+	bma_Vec_appnd(&pSelf->pushedVariables, bma_CmdslPshedVar, &pushedVar);
+}
+
+BMA_DEF void bma_Cmdsl_pop_ext(bma_Cmdsl *pSelf, const char *pVarName, size_t varNameLen) {
+	size_t i;
+	i = bma_Vec_getSz(&pSelf->pushedVariables);
+	while(i-- > 0) {
+		bma_CmdslPshedVar* pPushedVar = bma_Vec_at(&pSelf->pushedVariables, i, bma_CmdslPshedVar);
+		if ((bma_StrBldr_getSz(&pPushedVar->name) == varNameLen) &&
+		    (memcmp(bma_StrBldr_getStr(&pPushedVar->name), pVarName, varNameLen) == 0)) {
+			bma_StrN varName;
+			bma_bool_t removed;
+			bma_CmdslPshedVar rmvdVar;
+			bma_StrBldr *pValue;
+			removed = bma_Vec_rmv(&pSelf->pushedVariables, i, &rmvdVar, bma_CmdslPshedVar);
+			bma_assert(removed);
+			(void)removed;
+			varName.p = (char*)pVarName;
+			varName.len = varNameLen;
+			pValue = bma_HshMp_get(&pSelf->variables, &varName, bma_StrN, bma_StrBldr);
+			if (pValue != NULL) {
+				bma_StrBldr_dtor(pValue, NULL);
+				*pValue = rmvdVar.value;
+			}
+			else {
+				if (bma_StrBldr_getSz(&rmvdVar.value) > 0) {
+					bma_bool_t couldPut;
+					/* almost same but var name needs heap alloc */
+					/* dup key to not loose it, map takes ownership */
+					varName.p = bma_strndup_ext(pVarName, varNameLen, pSelf->pAlloc);
+					couldPut = bma_HshMp_put(&pSelf->variables, &varName, &rmvdVar.value, bma_StrN, bma_StrBldr);
+					bma_assert(couldPut);
+					(void)couldPut;
+				} else {
+					bma_StrBldr_dtor(&rmvdVar.value, NULL);
+				}
+			}
+			bma_Cmdsl_freeTmpStrBldr(pSelf, &rmvdVar.name);
+			return;
+		}
+	}
+}
 
 BMA_DEF bma_bool_t bauam_cmdsl_isNonFunctionCallEscape(bma_Cmdsl *pSelf, bma_cmdsl_ParseSrc* pStr) {
 	char c;
@@ -805,6 +1063,37 @@ BMA_DEF bma_ICmdslNode *bma_cmdsl_parseText(bma_Cmdsl *pSelf, bma_cmdsl_ParseSrc
 						if (nestCnt == 0) break;
 					}
 					else {
+						++pStr->pStr;
+						--pStr->len;
+					}
+				}
+			}
+			else if (c == '{') {
+				size_t nestCnt = 1u;
+				/* %* comment */
+				while(pStr->len >= 2) {
+					if ((pStr->pStr[0] == pSelf->escapeChar) && (pStr->pStr[1] == '{')) {
+						/* nested comment detected */
+						++nestCnt;
+						bma_StrBldr_appndStrN(&b, pStr->pStr, 2u);
+						pStr->pStr += 2u;
+						pStr->len -= 2u;
+					}
+					else if ((pStr->pStr[0] == '}') && (pStr->pStr[1] == pSelf->escapeChar)) {
+						if (nestCnt == 0) {
+							if (pErrFormatter != NULL) {
+								bma_cmdsl_printErrAtOffs(pErrFormatter, pStr, "Found superfluous '}' escape end");
+							}
+							goto err;
+						}
+						if (nestCnt > 1) bma_StrBldr_appndStrN(&b, pStr->pStr, 2u);
+						pStr->pStr += 2u;
+						pStr->len -= 2u;
+						--nestCnt;
+						if (nestCnt == 0) break;
+					}
+					else {
+						bma_StrBldr_appndChr(&b, *pStr->pStr, 1u);
 						++pStr->pStr;
 						--pStr->len;
 					}
@@ -1158,11 +1447,11 @@ void test_parseEscapes(void) {
 	bma_Cmdsl_ctor(&cmdsl);
 	BMA_EXPECT(bma_Cmdsl_parseStr(&cmdsl,
 		"%% %( %) %, % \t \n %* comment %* nested comment *% still in comment *% %/ line comment\n"
-		"%/ other line comment\r\nx"
+		"%/ other line comment\r\nx%{H%{ell}%o}%"
 	));
 	BMA_EXPECT(cmdsl.pRootNode != NULL);
 	(*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl);
-	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&b), "% ( ) ,  x") == 0);
+	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&b), "% ( ) ,  xH%{ell}%o") == 0);
 	bma_StrBldr_dtor(&b, NULL);
 	bma_Cmdsl_dtor(&cmdsl, NULL);
 }
@@ -1207,6 +1496,20 @@ void test_pushPop(void) {
 	bma_Cmdsl_dtor(&cmdsl, NULL);
 }
 
+void test_defUndef(void) {
+	bma_Cmdsl cmdsl;
+	bma_StrBldr b;
+	bma_StrBldr_ctor(&b);
+	bma_Cmdsl_ctor(&cmdsl);
+	bma_Cmdsl_setVar(&cmdsl, "Y", "42");
+	BMA_EXPECT(bma_Cmdsl_parseStr(&cmdsl, "%def(f,0,Hello)%f()%undef(f)"));
+	(*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl);
+	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&b), "Hello") == 0);
+	BMA_EXPECT(strcmp(bma_Cmdsl_getVar(&cmdsl, "Y"), "42") == 0);
+	bma_StrBldr_dtor(&b, NULL);
+	bma_Cmdsl_dtor(&cmdsl, NULL);
+}
+
 #ifdef __cplusplus
 	} /* extern "C" */
 #endif
@@ -1221,6 +1524,7 @@ int main(int argc, char *argv[]) {
 	BMA_TEST(test_setGet);
 	BMA_TEST(test_call);
 	BMA_TEST(test_pushPop);
+	BMA_TEST(test_defUndef);
 
 	printf("All tests passed.\n");
 	fflush(stdout);

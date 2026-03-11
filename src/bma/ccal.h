@@ -506,9 +506,24 @@ BMA_DEF void* BMA_DBG_SFFX(bma_HshMp_get_impl)(
 
 #define bma_HshMp_get(pSelf, pKey, keyType, valueType) \
 	((valueType*)BMA_DBG_SFFX(bma_HshMp_get_impl)(pSelf, \
-	                                                        pKey \
-	                                                        BMA_DBG_OPT_PARAM(#keyType) \
-	                                                        BMA_DBG_OPT_PARAM(#valueType)))
+	                                              pKey \
+	                                              BMA_DBG_OPT_PARAM(#keyType) \
+	                                              BMA_DBG_OPT_PARAM(#valueType)))
+
+BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_HshMp_rmv_impl)(
+	bma_HshMp *pSelf,
+	const void *pKey,
+	void *pOptOutValue
+	BMA_DBG_OPT_PARAM(const char* pKeyType)
+	BMA_DBG_OPT_PARAM(const char* pValueType)
+);
+
+#define bma_HshMp_rmv(pSelf, pKey, keyType, pOptOutValue, valueType) \
+	BMA_DBG_SFFX(bma_HshMp_rmv_impl)(pSelf, \
+	                                 pKey, \
+	                                 pOptOutValue \
+	                                 BMA_DBG_OPT_PARAM(#keyType)\
+	                                 BMA_DBG_OPT_PARAM(#valueType))
 
 BMA_DEF void bma_HshMp_clear(bma_HshMp* pSelf);
 
@@ -680,12 +695,12 @@ BMA_DEF void bma_memblck_dtor(void* ppMemBlock, bma_IMemAlloc *pAlloc) {
 
 BMA_DEF size_t bma_strhash(const void *ppStr) {
 	const char* p;
-	size_t result = 0;
+	size_t result = 5381u;
 	bma_assert(ppStr != NULL);
 	p = *(const char**)ppStr;
 	bma_assert(p != 0);
 	while(*p) {
-		result = (31u * result) + (size_t)((unsigned char)*p);
+		result = (result << 5) + result + (size_t)((unsigned char)*p);
 		++p;
 	}
 	return result;
@@ -739,7 +754,7 @@ BMA_DEF void *bma_memmem(const void *pHayStack, size_t hayStackSize, const void 
 }
 
 BMA_DEF size_t bma_StrN_hash(const bma_StrN *pSelf) {
-	size_t result = 0;
+	size_t result = 5381u;
 	size_t i;
 	size_t len;
 	const char* p;
@@ -748,7 +763,7 @@ BMA_DEF size_t bma_StrN_hash(const bma_StrN *pSelf) {
 	len = pSelf->len;
 	bma_assert(p != 0);
 	for (i=0; i<len; ++i) {
-		result = (31u * result) + (size_t)((unsigned char)*p);
+		result = (result << 5) + result + (size_t)((unsigned char)*p);
 		++p;
 	}
 	return result;
@@ -1147,6 +1162,60 @@ BMA_DEF void* BMA_DBG_SFFX(bma_HshMp_get_impl)(
 	}
 	return NULL;
 }
+
+BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_HshMp_rmv_impl)(
+	bma_HshMp *pSelf,
+	const void *pKey,
+	void *pOptOutValue
+	BMA_DBG_OPT_PARAM(const char* pKeyType)
+	BMA_DBG_OPT_PARAM(const char* pValueType)
+);
+
+
+BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_HshMp_rmv_impl)(
+	                        bma_HshMp *pSelf,
+	                        const void *pKey,
+	                        void *pOptOutValue
+	                        BMA_DBG_OPT_PARAM(const char* pKeyType)
+	                        BMA_DBG_OPT_PARAM(const char* pValueType)) {
+	size_t hashCode;
+	bma_HshMpBcktHdr_ *pBucket;
+	char *p;
+	size_t i;
+	bma_assert(pSelf != NULL);
+	bma_assert(pKey != NULL);
+#if BMA_DBG
+	bma_assert(strcmp(pKeyType, pSelf->pKeyType) == 0);
+	bma_assert(strcmp(pValueType, pSelf->pValueType) == 0);
+#endif
+	if (pSelf->numBckts == 0) return BMA_FALSE;
+	hashCode = (*pSelf->pKeyHash)(pKey);
+	pBucket = pSelf->pBckts[hashCode % pSelf->numBckts];
+	if (pBucket == NULL) return BMA_FALSE;
+	p = ((char*)pBucket) + BMA_HSHMP_BCKT_HDR_SZ;
+	for (i=0; i<pBucket->size; ++i) {
+		
+		if ((*(size_t*)p == hashCode) &&
+		    (*pSelf->pKeyEq)(p + pSelf->keyOffs, pKey)) {
+			if (pOptOutValue != NULL) {
+				memcpy(pOptOutValue, p + pSelf->valueOffs, pSelf->valueSz);
+			}
+			else if (pSelf->pValueDtor != NULL) {
+				(*pSelf->pValueDtor)(p + pSelf->valueOffs, pSelf->pAlloc);
+			}
+			if (pSelf->pKeyDtor != NULL) {
+				(*pSelf->pKeyDtor)(p + pSelf->keyOffs, pSelf->pAlloc);
+			}
+			memmove(p, p + pSelf->bcktSz, (pBucket->size - i - 1u) * pSelf->bcktSz);
+			--pBucket->size;
+			--pSelf->size;
+			return BMA_TRUE;
+		}
+		p += pSelf->bcktSz;
+	}
+	return BMA_FALSE;
+}
+
 
 /*
   An empty StringBuilder shouldn't need to allocate memory; on the other hand,

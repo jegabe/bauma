@@ -156,6 +156,16 @@ containg the function definitions, which can be linked afterwards.
 	#endif
 #endif
 
+#ifndef bma_lndr_cast
+	#if defined(__cplusplus) && (__cplusplus >= 201703L)
+		#include <new>
+		/* C++17 introduces std::launder for casting raw memory (byte array) into types */
+		#define bma_lndr_cast(type, ptr) ::std::launder((type*)(ptr))
+	#else
+		#define bma_lndr_cast(type, ptr) ((type*)(ptr))
+	#endif
+#endif
+
 /*! For %g to printf double' that don't loose precision when re-parsed */
 #define BMA_DBL_DEC_PRECSN_STR "17"
 
@@ -395,9 +405,9 @@ BMA_DEF void BMA_DBG_SFFX(bma_Vec_appnd_impl)(
 		((type*)bma_Vec_getData_impl_D(pSelf, #type))
 #else
 	#define bma_Vec_at(pSelf, index, type) \
-		((type*)(((char*)(pSelf)->pData) + (index * (pSelf)->elemSz)))
+		bma_lndr_cast(type, ((char*)(pSelf)->pData) + (index * (pSelf)->elemSz)))
 	#define bma_Vec_getData(pSelf, type) \
-		((type*)(pSelf)->pData)
+		bma_lndr_cast(type, (pSelf)->pData)
 #endif
 
 #define bma_Vec_getSz(pSelf) ((const size_t)((pSelf)->size))
@@ -1041,7 +1051,7 @@ BMA_DEF void bma_HshMp_reserve(bma_HshMp *pSelf, size_t num) {
 		for (j=0; j<pBucket->size; ++j) {
 			size_t bucketIdx;
 			bma_HshMpBcktHdr_ *pNewBucket;
-			size_t hashCode = *(size_t*)p;
+			size_t hashCode = *bma_lndr_cast(size_t, p);
 			char *q;
 			bucketIdx = hashCode % newNumOfBuckets;
 			pNewBucket = pNewBuckets[bucketIdx];
@@ -1101,7 +1111,7 @@ BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_HshMp_put_impl)(
 	}
 	p = ((char*)pBucket) + BMA_HSHMP_BCKT_HDR_SZ;
 	for (i = 0; i < pBucket->size; ++i) {
-		if ((*(size_t*)p == hashCode) &&
+		if ((*bma_lndr_cast(size_t, p) == hashCode) &&
 		    (*pSelf->pKeyEq)(p + pSelf->keyOffs, pKey)) {
 			/* Key already exists, update value */
 			if (pSelf->pKeyDtor != NULL) {
@@ -1124,7 +1134,7 @@ BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_HshMp_put_impl)(
 		pSelf->pBckts[bucketIdx] = pBucket;
 	}
 	p = ((char*)pBucket) + BMA_HSHMP_BCKT_HDR_SZ + (pBucket->size * pSelf->bcktSz);
-	*(size_t*)p = hashCode;
+	*bma_lndr_cast(size_t, p) = hashCode;
 	memcpy(p + pSelf->keyOffs, pKey, pSelf->keySz);
 	memcpy(p + pSelf->valueOffs, pValue, pSelf->valueSz);
 	++pBucket->size;
@@ -1154,7 +1164,7 @@ BMA_DEF void* BMA_DBG_SFFX(bma_HshMp_get_impl)(
 	p = ((char*)pBucket) + BMA_HSHMP_BCKT_HDR_SZ;
 	for (i=0; i<pBucket->size; ++i) {
 		
-		if ((*(size_t*)p == hashCode) &&
+		if ((*bma_lndr_cast(size_t, p) == hashCode) &&
 		    (*pSelf->pKeyEq)(p + pSelf->keyOffs, pKey)) {
 			return p + pSelf->valueOffs;
 		}
@@ -1162,15 +1172,6 @@ BMA_DEF void* BMA_DBG_SFFX(bma_HshMp_get_impl)(
 	}
 	return NULL;
 }
-
-BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_HshMp_rmv_impl)(
-	bma_HshMp *pSelf,
-	const void *pKey,
-	void *pOptOutValue
-	BMA_DBG_OPT_PARAM(const char* pKeyType)
-	BMA_DBG_OPT_PARAM(const char* pValueType)
-);
-
 
 BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_HshMp_rmv_impl)(
 	                        bma_HshMp *pSelf,
@@ -1195,7 +1196,7 @@ BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_HshMp_rmv_impl)(
 	p = ((char*)pBucket) + BMA_HSHMP_BCKT_HDR_SZ;
 	for (i=0; i<pBucket->size; ++i) {
 		
-		if ((*(size_t*)p == hashCode) &&
+		if ((*bma_lndr_cast(size_t, p) == hashCode) &&
 		    (*pSelf->pKeyEq)(p + pSelf->keyOffs, pKey)) {
 			if (pOptOutValue != NULL) {
 				memcpy(pOptOutValue, p + pSelf->valueOffs, pSelf->valueSz);

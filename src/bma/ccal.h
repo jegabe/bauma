@@ -54,6 +54,17 @@ containg the function definitions, which can be linked afterwards.
 #include <stddef.h> /* for size_t, NULL and stuff */
 #include <limits.h> /* For size limits */
 
+#ifdef _WIN32
+	#ifndef WIN32_LEAN_AND_MEAN
+		#define WIN32_LEAN_AND_MEAN
+	#endif
+	#ifndef NOMINMAX
+		#define NOMINMAX
+	#endif
+	#include <Windows.h> /* for Interlocked operations and other things */
+#endif
+
+
 /* Define this before including when something else is needed */
 #ifndef BMA_DBG
 	#ifdef NDEBUG /* Standard way of detecting releas build */
@@ -561,6 +572,58 @@ BMA_DEF void bma_StrBldr_appndDbl(bma_StrBldr *pSelf, double d);
 BMA_DEF void bma_StrBldr_appndBool(bma_StrBldr *pSelf, bma_bool_t b);
 BMA_DEF void bma_StrBldr_appndCdPntUtf8(bma_StrBldr *pSelf, unsigned long cdPnt);
 BMA_DEF void bma_StrBldr_clear(bma_StrBldr *pSelf);
+
+#ifdef _WIN32
+	typedef LONG bma_atmc_t;
+	#define bma_atmc_inc(p) InterlockedIncrement((volatile LONG*)(p))
+	#define bma_atmc_dec(p) InterlockedDecrement((volatile LONG*)(p))
+#elif defined (__GNUC__) || defined (__clang__)
+	typedef int bma_atmc_t;
+	#define bma_atmc_inc(p) __atomic_add_fetch(p, 1, __ATOMIC_SEQ_CST)
+	#define bma_atmc_dec(p) __atomic_sub_fetch(p, 1, __ATOMIC_SEQ_CST)
+#else
+	#error "No atomic increment/decrement implementation for this platform/compiler, please implement"
+#endif
+
+typedef struct bma_Shrd {
+	bma_atmc_t strongRefs;
+	bma_atmc_t weakRefs;
+	bma_dtor_t pDtor;
+	bma_IMemAlloc *pAlloc;
+#if BMA_DBG
+	const char *pType;
+#endif
+	bma_max_align_t aligner_;
+} bma_Shrd;
+
+#define BMA_SHRD_HDR_SZ (sizeof(bma_Shrd) - sizeof(bma_max_align_t))
+
+BMA_DEF bma_Shrd *BMA_DBG_SFFX(bma_Shrd_new_impl)(
+	size_t sz,
+	bma_dtor_t pDtor,
+	bma_IMemAlloc *pAlloc
+	BMA_DBG_OPT_PARAM(const char* pType)
+);
+
+#define bma_Shrd_new_ext(type, pDtor, pAlloc) \
+	BMA_DBG_SFFX(bma_Shrd_new_impl)(sizeof(type), pDtor, pAlloc BMA_DBG_OPT_PARAM(#type))
+
+#define bma_Shrd_new(type, pDtor) \
+	BMA_DBG_SFFX(bma_Shrd_new_impl)(sizeof(type), pDtor, bma_getDfltMemAlloc() BMA_DBG_OPT_PARAM(#type))
+
+#if BMA_DBG
+	BMA_DEF void *bma_Shrd_get_impl_D(bma_Shrd *pSelf, size_t typeSz, const char *pType);
+	#define bma_Shrd_get(pSelf, type) \
+		((type*)bma_Shrd_get_impl_D(pSelf, sizeof(type), #type))
+#else
+	#define bma_Shrd_get(pSelf, type) \
+		bma_lndr_cast(type, ((char*)pSelf) + BMA_SHRD_HDR_SZ)
+#endif
+
+BMA_DEF void bma_Shrd_inc(bma_Shrd *pSelf);
+BMA_DEF void bma_Shrd_dec(bma_Shrd *pSelf);
+BMA_DEF void bma_Shrd_incWk(bma_Shrd *pSelf);
+BMA_DEF void bma_Shrd_decWk(bma_Shrd *pSelf);
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -1415,6 +1478,83 @@ BMA_DEF void bma_StrBldr_clear(bma_StrBldr *pSelf) {
 
 }
 
+BMA_DEF bma_Shrd *BMA_DBG_SFFX(bma_Shrd_new_impl)(
+	size_t sz,
+	bma_dtor_t pDtor,
+	bma_IMemAlloc *pAlloc
+	BMA_DBG_OPT_PARAM(const char* pType)
+) {
+	bma_assert(sz > 0);
+	bma_assert(pAlloc != NULL);
+	bma_Shrd *p = (bma_Shrd*)(*pAlloc->pRllc)(pAlloc, NULL, BMA_SHRD_HDR_SZ + sz, NULL);
+	p->strongRefs = 1;
+	p->weakRefs = 1;
+	p->pDtor = pDtor;
+	p->pAlloc = pAlloc;
+#if BMA_DBG
+	p->pType = pType;
+#endif
+	return p;
+}
+
+
+#if BMA_DBG
+
+BMA_DEF void *bma_Shrd_get_impl_D(bma_Shrd *pSelf, size_t typeSz, const char *pType) {
+	bma_assert(pSelf != NULL);
+	bma_assert(pSelf->pType != NULL);
+	bma_assert(typeSz > 0);
+	bma_assert(strcmp(pType, pSelf->pType) == 0);
+	bma_assert(pSelf->strongRefs > 0);
+	return ((char*)pSelf) + BMA_SHRD_HDR_SZ;
+}
+
+#endif
+
+BMA_DEF void bma_Shrd_inc(bma_Shrd *pSelf) {
+	bma_assert(pSelf != NULL);
+	bma_atmc_inc(&pSelf->weakRefs);
+	bma_atmc_inc(&pSelf->strongRefs);
+}
+
+BMA_DEF void bma_Shrd_dec(bma_Shrd *pSelf) {
+	bma_assert(pSelf != NULL);
+	bma_assert(pSelf->pAlloc != NULL);
+	if (bma_atmc_dec(&pSelf->strongRefs) == 0) {
+		if (pSelf->pDtor != NULL) {
+			pSelf->pDtor(((char*)pSelf) + BMA_SHRD_HDR_SZ, pSelf->pAlloc);
+			pSelf->pDtor = NULL;
+		}
+	}
+	if (bma_atmc_dec(&pSelf->weakRefs) == 0) {
+		bma_IMemAlloc *pAlloc = pSelf->pAlloc;
+#if BMA_DBG
+		memset(pSelf, 0xFF, sizeof(*pSelf));
+#endif
+		(*pAlloc->pRllc)(pAlloc, pSelf, 0, NULL);
+	}
+}
+
+BMA_DEF void bma_Shrd_incWk(bma_Shrd *pSelf) {
+	bma_atmc_t i;
+	bma_assert(pSelf != NULL);
+	i = bma_atmc_inc(&pSelf->weakRefs);
+	bma_assert(i > 1);
+	(void)i;
+}
+
+BMA_DEF void bma_Shrd_decWk(bma_Shrd *pSelf) {
+	bma_assert(pSelf != NULL);
+	bma_assert(pSelf->pAlloc != NULL);
+	if (bma_atmc_dec(&pSelf->weakRefs) == 0) {
+		bma_IMemAlloc *pAlloc = pSelf->pAlloc;
+#if BMA_DBG
+		memset(pSelf, 0xFF, sizeof(*pSelf));
+#endif
+		(*pAlloc->pRllc)(pAlloc, pSelf, 0, NULL);
+	}
+}
+
 #ifdef __cplusplus
 	} /* extern "C" */
 #endif
@@ -1782,6 +1922,17 @@ void test_hashMap_manyElements(void) {
 	bma_HshMp_dtor(&h, NULL);
 }
 
+void test_Shrd(void) {
+	bma_Shrd *p;
+	p = bma_Shrd_new(int, NULL);
+	BMA_EXPECT(p != NULL);
+	BMA_EXPECT(p->strongRefs == 1);
+	BMA_EXPECT(p->weakRefs == 1);
+	BMA_EXPECT(p->pDtor == NULL);
+	BMA_EXPECT(p->pAlloc == bma_getDfltMemAlloc());
+	bma_Shrd_dec(p);
+}
+
 #ifdef __cplusplus
 	} /* extern "C" */
 #endif
@@ -1810,6 +1961,7 @@ int main(int argc, char *argv[]) {
 	BMA_TEST(test_hashMap_constructDestruct);
 	BMA_TEST(test_hashMap_putGet);
 	BMA_TEST(test_hashMap_manyElements);
+	BMA_TEST(test_Shrd);
 
 	printf("All tests passed.\n");
 	fflush(stdout);

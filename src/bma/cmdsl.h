@@ -157,6 +157,7 @@ BMA_DEF void bma_Cmdsl_freeTmpStrBldr(bma_Cmdsl *pSelf, bma_StrBldr *pTmpStrBldr
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
+#include <errno.h>
 
 #ifdef __cplusplus
 	extern "C" {
@@ -1373,7 +1374,6 @@ BMA_DEF void bma_Cmdsl_freeTmpStrBldr(bma_Cmdsl *pSelf, bma_StrBldr *pTmpStrBldr
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <math.h>
 
 #ifdef __cplusplus
 	extern "C" {

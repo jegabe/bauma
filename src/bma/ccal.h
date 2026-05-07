@@ -759,11 +759,11 @@ BMA_DEF void bma_Wk_dec(bma_Wk *pSelf);
 	} name_; \
 	\
 	bma_inline name_ *name_ ## _new_ext(bma_IMemAlloc *pAlloc) { \
-		return bma_lndr_cast(name_, bma_Shrd_new(datatype_, pDtor_)); \
+		return bma_lndr_cast(name_, bma_Shrd_new_ext(datatype_, pDtor_, pAlloc)); \
 	} \
 	\
 	bma_inline name_ *name_ ## _new() { \
-		return bma_lndr_cast(name_, bma_Shrd_new_ext(datatype_, pDtor_, bma_getDfltMemAlloc())); \
+		return bma_lndr_cast(name_, bma_Shrd_new(datatype_, pDtor_)); \
 	} \
 	\
 	bma_inline datatype_ *name_ ## _get(name_ *pSelf) { \
@@ -1885,9 +1885,11 @@ void test_vector_rmv(void) {
 	BMA_EXPECT(bma_Vec_getSz(&v) == 2u);
 	BMA_EXPECT(bma_Vec_rmv(&v, 1u, &p, char*));
 	BMA_EXPECT(strcmp(p, "three") == 0);
+	bma_free(p);
 	BMA_EXPECT(bma_Vec_getSz(&v) == 1u);
 	BMA_EXPECT(bma_Vec_rmv(&v, 0u, &p, char*));
 	BMA_EXPECT(strcmp(p, "two") == 0);
+	bma_free(p);
 	BMA_EXPECT(bma_Vec_getSz(&v) == 0u);
 	bma_Vec_dtor(&v, NULL);
 }
@@ -2128,6 +2130,7 @@ void test_hashMap_manyElements(void) {
 bma_bool_t g_shrdDtorRan = BMA_FALSE;
 
 void test_ShrdInt_dtor(void* p, bma_IMemAlloc *pAlloc) {
+	(void)pAlloc;
 	BMA_EXPECT(*(int*)p == 42);
 	g_shrdDtorRan = BMA_TRUE;
 }

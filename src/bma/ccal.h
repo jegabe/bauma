@@ -445,7 +445,7 @@ BMA_DEF void BMA_DBG_SFFX(bma_Vec_appnd_impl)(
 		((type*)bma_Vec_getData_impl_D(pSelf, #type))
 #else
 	#define bma_Vec_at(pSelf, index, type) \
-		bma_lndr_cast(type, ((char*)(pSelf)->pData) + (index * (pSelf)->elemSz)))
+		bma_lndr_cast(type, ((char*)(pSelf)->pData) + (index * (pSelf)->elemSz))
 	#define bma_Vec_getData(pSelf, type) \
 		bma_lndr_cast(type, (pSelf)->pData)
 #endif

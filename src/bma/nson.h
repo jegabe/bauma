@@ -98,16 +98,20 @@ typedef unsigned int bma_NsonDialect;
 #define BMA_NSON_DIALECT_NSON         1
 #define BMA_NSON_DIALECT_NUM_DIALECTS 2
 
-typedef union bma_NsonNodeUnion {
-	bma_bool_t    b;
-	bma_intmax_t  si;
-	bma_uintmax_t ui;
-	double        d;
-	char          *p;
-	bma_Vec       v; /* for maps and arrays, this points to all values */
-} bma_NsonNodeUnion;
-
 typedef struct bma_NsonNode bma_NsonNode;
+
+BMA_DEF void bma_nsonNodePtrDtor(void *ppNode, bma_IMemAlloc *pAlloc);
+
+BMA_DEF_VEC(bma_NsonNodePtrVec, bma_NsonNode*, &bma_nsonNodePtrDtor)
+
+typedef union bma_NsonNodeUnion {
+	bma_bool_t         b;
+	bma_intmax_t       si;
+	bma_uintmax_t      ui;
+	double             d;
+	char               *p;
+	bma_NsonNodePtrVec v; /* for maps and arrays, this points to all values */
+} bma_NsonNodeUnion;
 
 struct bma_NsonNode {
 	bma_NsonNodeType  type;
@@ -288,7 +292,7 @@ BMA_DEF bma_NsonNode *bma_nsonNewStrWithLen_ext(const char *pValue, size_t value
 BMA_DEF bma_NsonNode *bma_nsonNewArr_ext(bma_IMemAlloc *pAlloc) {
 	bma_NsonNode *p = bma_nsonNew_ext(pAlloc);
 	p->type = BMA_NSON_NODE_TYPE_ARR;
-	bma_Vec_ctor_ext(&p->value.v, bma_NsonNode*, &bma_nsonNodePtrDtor, pAlloc);
+	bma_NsonNodePtrVec_ctor(&p->value.v, pAlloc);
 	return p;
 }
 
@@ -296,7 +300,7 @@ BMA_DEF void bma_nsonArrAppnd(bma_NsonNode *pNode, bma_NsonNode *pArrayElement) 
 	bma_assert(pNode != NULL);
 	bma_assert(pArrayElement != NULL);
 	bma_assert(pNode->type == BMA_NSON_NODE_TYPE_ARR);
-	bma_Vec_appnd(&pNode->value.v, bma_NsonNode*, &pArrayElement);
+	bma_NsonNodePtrVec_appnd(&pNode->value.v, &pArrayElement);
 }
 
 BMA_DEF void bma_nsonObjAppnd(bma_NsonNode* pNode, bma_NsonNode *pKey, bma_NsonNode *pValue) {
@@ -308,14 +312,13 @@ BMA_DEF void bma_nsonObjAppnd(bma_NsonNode* pNode, bma_NsonNode *pKey, bma_NsonN
 		bma_nsonDelete(pKey->pObjectValue);
 	}
 	pKey->pObjectValue = pValue;
-	bma_Vec_appnd(&pNode->value.v, bma_NsonNode*, &pKey);
+	bma_NsonNodePtrVec_appnd(&pNode->value.v, &pKey);
 }
-
 
 BMA_DEF bma_NsonNode *bma_nsonNewObj_ext(bma_IMemAlloc *pAlloc) {
 	bma_NsonNode *p = bma_nsonNew_ext(pAlloc);
 	p->type = BMA_NSON_NODE_TYPE_OBJ;
-	bma_Vec_ctor_ext(&p->value.v, bma_NsonNode*, &bma_nsonNodePtrDtor, pAlloc);
+	bma_NsonNodePtrVec_ctor(&p->value.v, pAlloc);
 	return p;
 }
 
@@ -334,7 +337,7 @@ BMA_DEF void bma_nsonDelete(bma_NsonNode *pNode) {
 		}
 		case BMA_NSON_NODE_TYPE_ARR: /* fall through */
 		case BMA_NSON_NODE_TYPE_OBJ: {
-			bma_Vec_dtor(&pNode->value.v, pNode->pAlloc);
+			bma_NsonNodePtrVec_dtor(&pNode->value.v, NULL);
 			break;
 		}
 		default: break;
@@ -756,8 +759,8 @@ BMA_DEF bma_NsonNode *bma_nsonGet(bma_NsonNode *pNode, const char *pPath) {
 			if (errno != 0) return NULL;
 			if (idx > ((size_t)-1)) return NULL;
 			if (pNode->type != BMA_NSON_NODE_TYPE_ARR) return NULL;
-			if (idx > bma_Vec_getSz(&pNode->value.v)) return NULL;
-			pNode = *bma_Vec_at(&pNode->value.v, (size_t)idx, bma_NsonNode*);
+			if (idx > bma_NsonNodePtrVec_getSz(&pNode->value.v)) return NULL;
+			pNode = *bma_NsonNodePtrVec_at(&pNode->value.v, (size_t)idx);
 			num = (size_t)((pEnd+1) - pPath);
 			pPath += num;
 			pathLen -= num;
@@ -772,8 +775,8 @@ BMA_DEF bma_NsonNode *bma_nsonGet(bma_NsonNode *pNode, const char *pPath) {
 			num = (size_t)(pEnd - pPath);
 			if (num == 0) return NULL;
 			if (pNode->type != BMA_NSON_NODE_TYPE_OBJ) return NULL;
-			for (i=0; i<bma_Vec_getSz(&pNode->value.v); ++i) {
-				pSubNode = *bma_Vec_at(&pNode->value.v, i, bma_NsonNode*);
+			for (i=0; i<bma_NsonNodePtrVec_getSz(&pNode->value.v); ++i) {
+				pSubNode = *bma_NsonNodePtrVec_at(&pNode->value.v, i);
 				if (pSubNode->type != BMA_NSON_NODE_TYPE_STR) return NULL;
 				bma_assert(pSubNode->value.p != NULL);
 				if (strlen(pSubNode->value.p) != num) continue;
@@ -1031,9 +1034,9 @@ BMA_DEF void bma_nsonToStr_impl(bma_StrBldr *pDst, bma_NsonNode *pNode, bma_Nson
 				bma_StrBldr_appndChr(pDst, '\n', 1u);
 			}
 			++indentLevel;
-			size = bma_Vec_getSz(&pNode->value.v);
+			size = bma_NsonNodePtrVec_getSz(&pNode->value.v);
 			for (i=0; i<size; ++i) {
-				pSubNode = *bma_Vec_at(&pNode->value.v, i, bma_NsonNode*);
+				pSubNode = *bma_NsonNodePtrVec_at(&pNode->value.v, i);
 				bma_nsonToStr_impl(pDst, pSubNode, dialect, pretty, BMA_TRUE, pIndent, indentSize, indentLevel);
 				if (((dialect == BMA_NSON_DIALECT_NSON) && (size > 1)) || ((i+1) < size)) {
 					bma_StrBldr_appndChr(pDst, ',', 1u);
@@ -1057,9 +1060,9 @@ BMA_DEF void bma_nsonToStr_impl(bma_StrBldr *pDst, bma_NsonNode *pNode, bma_Nson
 				bma_StrBldr_appndChr(pDst, '\n', 1u);
 			}
 			++indentLevel;
-			size = bma_Vec_getSz(&pNode->value.v);
+			size = bma_NsonNodePtrVec_getSz(&pNode->value.v);
 			for (i=0; i<size; ++i) {
-				pKeyNode = *bma_Vec_at(&pNode->value.v, i, bma_NsonNode*);
+				pKeyNode = *bma_NsonNodePtrVec_at(&pNode->value.v, i);
 				pValueNode = pKeyNode->pObjectValue;
 				bma_nsonToStr_impl(pDst, pKeyNode, dialect, pretty, BMA_TRUE, pIndent, indentSize, indentLevel);
 				bma_StrBldr_appndChr(pDst, ':', 1u);
@@ -1188,7 +1191,7 @@ void test_new(void) {
 	pNode = bma_nsonNewObj();
 	bma_nsonObjAppnd(pNode, bma_nsonNewStr("Key"), bma_nsonNewStr("Hello"));
 	BMA_EXPECT(pNode->type == BMA_NSON_NODE_TYPE_OBJ);
-	pSubNode = *bma_Vec_at(&pNode->value.v, 0, bma_NsonNode*);
+	pSubNode = *bma_NsonNodePtrVec_at(&pNode->value.v, 0);
 	BMA_EXPECT(strcmp(pSubNode->value.p, "Key") == 0);
 	BMA_EXPECT(pSubNode->pObjectValue != NULL);
 	BMA_EXPECT(strcmp(pSubNode->pObjectValue->value.p, "Hello") == 0);
@@ -1234,37 +1237,37 @@ void test_parse(void) {
 	pNode = bma_nsonParse("[]");
 	BMA_EXPECT(pNode != NULL);
 	BMA_EXPECT(pNode->type == BMA_NSON_NODE_TYPE_ARR);
-	BMA_EXPECT(bma_Vec_getSz(&pNode->value.v) == 0);
+	BMA_EXPECT(bma_NsonNodePtrVec_getSz(&pNode->value.v) == 0);
 	bma_nsonDelete(pNode);
 	pNode = bma_nsonParse("[1]");
 	BMA_EXPECT(pNode != NULL);
 	BMA_EXPECT(pNode->type == BMA_NSON_NODE_TYPE_ARR);
-	BMA_EXPECT(bma_Vec_getSz(&pNode->value.v) == 1);
+	BMA_EXPECT(bma_NsonNodePtrVec_getSz(&pNode->value.v) == 1);
 	bma_nsonDelete(pNode);
 	pNode = bma_nsonParse("[1 Hello]");
 	BMA_EXPECT(pNode != NULL);
 	BMA_EXPECT(pNode->type == BMA_NSON_NODE_TYPE_ARR);
-	BMA_EXPECT(bma_Vec_getSz(&pNode->value.v) == 2);
+	BMA_EXPECT(bma_NsonNodePtrVec_getSz(&pNode->value.v) == 2);
 	bma_nsonDelete(pNode);
 	pNode = bma_nsonParse("[1,Hello,]");
 	BMA_EXPECT(pNode != NULL);
 	BMA_EXPECT(pNode->type == BMA_NSON_NODE_TYPE_ARR);
-	BMA_EXPECT(bma_Vec_getSz(&pNode->value.v) == 2);
+	BMA_EXPECT(bma_NsonNodePtrVec_getSz(&pNode->value.v) == 2);
 	bma_nsonDelete(pNode);
 	pNode = bma_nsonParse("{A:1,B:2}");
 	BMA_EXPECT(pNode != NULL);
 	BMA_EXPECT(pNode->type == BMA_NSON_NODE_TYPE_OBJ);
-	BMA_EXPECT(bma_Vec_getSz(&pNode->value.v) == 2);
+	BMA_EXPECT(bma_NsonNodePtrVec_getSz(&pNode->value.v) == 2);
 	bma_nsonDelete(pNode);
 	pNode = bma_nsonParse("{A 1 B 2}");
 	BMA_EXPECT(pNode != NULL);
 	BMA_EXPECT(pNode->type == BMA_NSON_NODE_TYPE_OBJ);
-	BMA_EXPECT(bma_Vec_getSz(&pNode->value.v) == 2);
+	BMA_EXPECT(bma_NsonNodePtrVec_getSz(&pNode->value.v) == 2);
 	bma_nsonDelete(pNode);
 	pNode = bma_nsonParse(" // comment \n[1 /* comment */ 2] // comment");
 	BMA_EXPECT(pNode != NULL);
 	BMA_EXPECT(pNode->type == BMA_NSON_NODE_TYPE_ARR);
-	BMA_EXPECT(bma_Vec_getSz(&pNode->value.v) == 2);
+	BMA_EXPECT(bma_NsonNodePtrVec_getSz(&pNode->value.v) == 2);
 	bma_nsonDelete(pNode);
 	pNode = bma_nsonParse("\"Hello\"");
 	BMA_EXPECT(pNode != NULL);

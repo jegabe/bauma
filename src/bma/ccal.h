@@ -175,7 +175,6 @@ containg the function definitions, which can be linked afterwards.
 	#define bma_maybe_unused
 #endif
 
-
 /* Support for static inline functions, if the compiler supports it.
    For old or unknown compilers, it just resolves into a normal static function
    which might produce slower and bloatier code, but it will still
@@ -509,6 +508,9 @@ BMA_DEF void bma_Vec_clear(bma_Vec *pSelf);
 	\
 	bma_inline datatype_ *name_ ## _at(name_ *pSelf, size_t index) { \
 		return bma_Vec_at(&pSelf->impl, index, datatype_); \
+	} \
+	bma_inline datatype_ *name_ ## _getData(name_ *pSelf) { \
+		return bma_Vec_getData(&pSelf->impl, datatype_); \
 	} \
 	\
 	bma_inline size_t name_ ## _getSz(name_ *pSelf) { \

@@ -90,6 +90,10 @@ typedef struct bma_CmdslPshedVar {
 
 BMA_DEF void bma_CmdslPshedVar_dtor(bma_CmdslPshedVar *p, bma_IMemAlloc *pAlloc);
 
+BMA_DEF_VEC(bma_CmdslPshdVarVec, bma_CmdslPshedVar, (bma_dtor_t)&bma_CmdslPshedVar_dtor)
+BMA_DEF_VEC(bma_CmdslTmpStrBldrsVec, bma_StrBldr, (bma_dtor_t)&bma_StrBldr_dtor)
+BMA_DEF_VEC(bma_CmdslTmpStrBldrsVecVec, bma_CmdslTmpStrBldrsVec, (bma_dtor_t)&bma_Vec_dtor)
+
 typedef struct bma_Cmdsl bma_Cmdsl;
 
 typedef bma_bool_t (*bma_cmdsl_func_t)(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void *pUserData, const bma_StrBldr* pParams, size_t numOfParams);
@@ -106,13 +110,13 @@ BMA_DEF void bma_CmdslFuncWthUsrData_dtor(bma_CmdslFuncWthUsrData* pSelf, bma_IM
 typedef struct bma_ICmdslNode bma_ICmdslNode;
 
 struct bma_Cmdsl {
-	bma_HshMp       functions;
-	bma_HshMp       variables;
-	bma_Vec         pushedVariables;
-	bma_Vec         tmpStrBldrs;
-	bma_Vec         tmpStrBldrsVecs;
-	bma_ICmdslNode  *pRootNode;
-	bma_IMemAlloc   *pAlloc;
+	bma_HshMp                  functions;
+	bma_HshMp                  variables;
+	bma_CmdslPshdVarVec        pushedVariables;
+	bma_CmdslTmpStrBldrsVec    tmpStrBldrs;
+	bma_CmdslTmpStrBldrsVecVec tmpStrBldrsVecs;
+	bma_ICmdslNode             *pRootNode;
+	bma_IMemAlloc              *pAlloc;
 	char escapeChar;
 };
 
@@ -142,8 +146,8 @@ BMA_DEF bma_bool_t bma_Cmdsl_parseMem_ext(bma_Cmdsl *pSelf, const void *pMem, si
 BMA_DEF bma_bool_t bma_Cmdsl_parseStr_ext(bma_Cmdsl *pSelf, const char *pStr, bma_StrBldr *pErrFormatter);
 #define bma_Cmdsl_parseStr(pSelf, pStr) bma_Cmdsl_parseStr_ext((pSelf), (pStr), NULL)
 
-BMA_DEF void bma_Cmdsl_allcTmpStrBldrs(bma_Cmdsl *pSelf, size_t num, bma_Vec *pOut);
-BMA_DEF void bma_Cmdsl_freeTmpStrBldrs(bma_Cmdsl *pSelf, bma_Vec *pTmpStrBldrs);
+BMA_DEF void bma_Cmdsl_allcTmpStrBldrs(bma_Cmdsl *pSelf, size_t num, bma_CmdslTmpStrBldrsVec *pOut);
+BMA_DEF void bma_Cmdsl_freeTmpStrBldrs(bma_Cmdsl *pSelf, bma_CmdslTmpStrBldrsVec *pTmpStrBldrs);
 
 BMA_DEF void bma_Cmdsl_allcTmpStrBldr(bma_Cmdsl *pSelf, bma_StrBldr *pOut);
 BMA_DEF void bma_Cmdsl_freeTmpStrBldr(bma_Cmdsl *pSelf, bma_StrBldr *pTmpStrBldr);
@@ -234,7 +238,7 @@ BMA_DEF bma_bool_t bma_cmdsl_funcCall(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void
 	size_t argsLen;
 	size_t nArgs;
 	size_t i;
-	bma_Vec parsedArgs;
+	bma_CmdslTmpStrBldrsVec parsedArgs;
 	bma_StrBldr *pParsedArg;
 	if (numOfParams != 2u) {
 		bma_StrBldr_clear(pDst);
@@ -300,7 +304,7 @@ BMA_DEF bma_bool_t bma_cmdsl_funcCall(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void
 		}
 		if (!isEscaped) {
 			bma_assert(i < nArgs);
-			pParsedArg = bma_Vec_at(&parsedArgs, i, bma_StrBldr);
+			pParsedArg = bma_CmdslTmpStrBldrsVec_at(&parsedArgs, i);
 			bma_assert(bma_StrBldr_getSz(pParsedArg) == 0);
 			bma_StrBldr_appndStrN(pParsedArg, pArgs, len);
 			++i;
@@ -308,7 +312,7 @@ BMA_DEF bma_bool_t bma_cmdsl_funcCall(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void
 		pArgs += offs;
 		argsLen -= offs;
 	}
-	result = (func.pFunc)(pDst, pCmdsl, func.pUserData, bma_Vec_getData(&parsedArgs, bma_StrBldr), bma_Vec_getSz(&parsedArgs));
+	result = (func.pFunc)(pDst, pCmdsl, func.pUserData, bma_CmdslTmpStrBldrsVec_getData(&parsedArgs), bma_CmdslTmpStrBldrsVec_getSz(&parsedArgs));
 	bma_Cmdsl_freeTmpStrBldrs(pCmdsl, &parsedArgs);
 	return result;
 }
@@ -339,7 +343,7 @@ BMA_DEF bma_bool_t bma_cmdsl_funcPush(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void
 		/* push of non-existing var is same as pushing empty-string var */
 		bma_StrBldr_ctor_ext(&pushedVar.value, pCmdsl->pAlloc);
 	}
-	bma_Vec_appnd(&pCmdsl->pushedVariables, bma_CmdslPshedVar, &pushedVar);
+	bma_CmdslPshdVarVec_appnd(&pCmdsl->pushedVariables, &pushedVar);
 	return BMA_TRUE;
 }
 
@@ -357,15 +361,15 @@ BMA_DEF bma_bool_t bma_cmdsl_funcPop(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void 
 	}
 	pVarName = bma_StrBldr_getStr(&pParams[0]);
 	varNameLen = bma_StrBldr_getSz(&pParams[0]);
-	i = bma_Vec_getSz(&pCmdsl->pushedVariables);
+	i = bma_CmdslPshdVarVec_getSz(&pCmdsl->pushedVariables);
 	while(i-- > 0) {
-		bma_CmdslPshedVar* pPushedVar = bma_Vec_at(&pCmdsl->pushedVariables, i, bma_CmdslPshedVar);
+		bma_CmdslPshedVar* pPushedVar = bma_CmdslPshdVarVec_at(&pCmdsl->pushedVariables, i);
 		if ((bma_StrBldr_getSz(&pPushedVar->name) == varNameLen) &&
 		    (memcmp(bma_StrBldr_getStr(&pPushedVar->name), pVarName, varNameLen) == 0)) {
 			bma_StrN varName;
 			bma_bool_t removed;
 			bma_CmdslPshedVar rmvdVar;
-			removed = bma_Vec_rmv(&pCmdsl->pushedVariables, i, &rmvdVar, bma_CmdslPshedVar);
+			removed = bma_CmdslPshdVarVec_rmv(&pCmdsl->pushedVariables, i, &rmvdVar);
 			bma_assert(removed);
 			(void)removed;
 			varName.p = (char*)pVarName;
@@ -687,7 +691,7 @@ BMA_DEF void bma_cmdsl_NodeFunctionCall_destruct(bma_CmdslNodeFuncCall *pSelf, b
 
 BMA_DEF bma_bool_t bma_cmdsl_NodeFunctionCall_eval(void *pSelf_, bma_StrBldr *pDst, bma_Cmdsl* pCmdsl) {
 	bma_CmdslNodeFuncCall *pSelf = (bma_CmdslNodeFuncCall*)pSelf_;
-	bma_Vec tmpStrBldrs;
+	bma_CmdslTmpStrBldrsVec tmpStrBldrs;
 	size_t i, nargs;
 	bma_CmdslFuncWthUsrData *pFunc, func;
 	bma_bool_t result = BMA_TRUE;
@@ -708,14 +712,14 @@ BMA_DEF bma_bool_t bma_cmdsl_NodeFunctionCall_eval(void *pSelf_, bma_StrBldr *pD
 	for (i=0; i<nargs; ++i) {
 		/* evaluate arguments */
 		bma_ICmdslNode *pArgNode = *bma_Vec_at(&pSelf->args, i, bma_ICmdslNode*);
-		bma_StrBldr *pArg = bma_Vec_at(&tmpStrBldrs, i, bma_StrBldr);
+		bma_StrBldr *pArg = bma_CmdslTmpStrBldrsVec_at(&tmpStrBldrs, i);
 		if (!(*pArgNode->pEval)(pArgNode, pArg, pCmdsl)) {
 			result = BMA_FALSE;
 			goto cleanup;
 		}
 	}
 	/* call function with args, results stored in pDst */
-	result = (*func.pFunc)(pDst, pCmdsl, func.pUserData, bma_Vec_getData(&tmpStrBldrs, bma_StrBldr), nargs);
+	result = (*func.pFunc)(pDst, pCmdsl, func.pUserData, bma_CmdslTmpStrBldrsVec_getData(&tmpStrBldrs), nargs);
 cleanup:
 	bma_Cmdsl_freeTmpStrBldrs(pCmdsl, &tmpStrBldrs);
 	return result;
@@ -798,9 +802,9 @@ BMA_DEF void bma_Cmdsl_ctor_ext(bma_Cmdsl *pSelf, char escapeChar, bma_IMemAlloc
 	bma_HshMp_ctor_ext(&pSelf->variables, bma_StrN, bma_StrBldr,
 	                            (bma_dtor_t)&bma_StrN_dtor, (bma_dtor_t)&bma_StrBldr_dtor,
 	                            (bma_hash_t)&bma_StrN_hash, (bma_eq_t)&bma_StrN_eq, pAlloc);
-	bma_Vec_ctor_ext(&pSelf->pushedVariables, bma_CmdslPshedVar, (bma_dtor_t)&bma_CmdslPshedVar_dtor, pAlloc);
-	bma_Vec_ctor_ext(&pSelf->tmpStrBldrs, bma_StrBldr, (bma_dtor_t)&bma_StrBldr_dtor, pAlloc);
-	bma_Vec_ctor_ext(&pSelf->tmpStrBldrsVecs, bma_Vec, (bma_dtor_t)&bma_Vec_dtor, pAlloc);
+	bma_CmdslPshdVarVec_ctor(&pSelf->pushedVariables, pAlloc);
+	bma_CmdslTmpStrBldrsVec_ctor(&pSelf->tmpStrBldrs, pAlloc);
+	bma_CmdslTmpStrBldrsVecVec_ctor(&pSelf->tmpStrBldrsVecs, pAlloc);
 	pSelf->pRootNode = NULL;
 	pSelf->pAlloc = pAlloc;
 	/* add built-in functions */
@@ -828,9 +832,9 @@ BMA_DEF void bma_Cmdsl_dtor(bma_Cmdsl *pSelf, bma_IMemAlloc *pAlloc) {
 		(*pSelf->pRootNode->pDestruct)(pSelf->pRootNode, pSelf->pAlloc);
 		bma_free_ext(pSelf->pAlloc, pSelf->pRootNode);
 	}
-	bma_Vec_dtor(&pSelf->tmpStrBldrsVecs, NULL);
-	bma_Vec_dtor(&pSelf->tmpStrBldrs, NULL);
-	bma_Vec_dtor(&pSelf->pushedVariables, NULL);
+	bma_CmdslTmpStrBldrsVecVec_dtor(&pSelf->tmpStrBldrsVecs, NULL);
+	bma_CmdslTmpStrBldrsVec_dtor(&pSelf->tmpStrBldrs, NULL);
+	bma_CmdslPshdVarVec_dtor(&pSelf->pushedVariables, NULL);
 	bma_HshMp_dtor(&pSelf->variables, NULL);
 	bma_HshMp_dtor(&pSelf->functions, NULL);
 #if BMA_DBG
@@ -937,21 +941,21 @@ BMA_DEF void bma_Cmdsl_push_ext(bma_Cmdsl *pSelf, const char *pVarName, size_t v
 		/* push of non-existing var is same as pushing empty-string var */
 		bma_StrBldr_ctor_ext(&pushedVar.value, pSelf->pAlloc);
 	}
-	bma_Vec_appnd(&pSelf->pushedVariables, bma_CmdslPshedVar, &pushedVar);
+	bma_CmdslPshdVarVec_appnd(&pSelf->pushedVariables, &pushedVar);
 }
 
 BMA_DEF void bma_Cmdsl_pop_ext(bma_Cmdsl *pSelf, const char *pVarName, size_t varNameLen) {
 	size_t i;
-	i = bma_Vec_getSz(&pSelf->pushedVariables);
+	i = bma_CmdslPshdVarVec_getSz(&pSelf->pushedVariables);
 	while(i-- > 0) {
-		bma_CmdslPshedVar* pPushedVar = bma_Vec_at(&pSelf->pushedVariables, i, bma_CmdslPshedVar);
+		bma_CmdslPshedVar* pPushedVar = bma_CmdslPshdVarVec_at(&pSelf->pushedVariables, i);
 		if ((bma_StrBldr_getSz(&pPushedVar->name) == varNameLen) &&
 		    (memcmp(bma_StrBldr_getStr(&pPushedVar->name), pVarName, varNameLen) == 0)) {
 			bma_StrN varName;
 			bma_bool_t removed;
 			bma_CmdslPshedVar rmvdVar;
 			bma_StrBldr *pValue;
-			removed = bma_Vec_rmv(&pSelf->pushedVariables, i, &rmvdVar, bma_CmdslPshedVar);
+			removed = bma_CmdslPshdVarVec_rmv(&pSelf->pushedVariables, i, &rmvdVar);
 			bma_assert(removed);
 			(void)removed;
 			varName.p = (char*)pVarName;
@@ -1304,51 +1308,51 @@ BMA_DEF bma_bool_t bma_Cmdsl_parseStr_ext(bma_Cmdsl *pSelf, const char *pStr, bm
 	return bma_Cmdsl_parseMem_ext(pSelf, pStr, len, pErrFormatter);
 }
 
-BMA_DEF void bma_Cmdsl_allcTmpStrBldrs(bma_Cmdsl *pSelf, size_t num, bma_Vec *pOut) {
+BMA_DEF void bma_Cmdsl_allcTmpStrBldrs(bma_Cmdsl *pSelf, size_t num, bma_CmdslTmpStrBldrsVec *pOut) {
 	size_t numExstng, rest, i, n;
 	bma_assert(pSelf != NULL);
 	bma_assert(pOut != NULL);
-	if (bma_Vec_getSz(&pSelf->tmpStrBldrsVecs) > 0) {
-		bma_Vec_rmv(&pSelf->tmpStrBldrsVecs, bma_Vec_getSz(&pSelf->tmpStrBldrsVecs) - 1u, pOut, bma_Vec);
-		bma_Vec_clear(pOut);
+	if (bma_CmdslTmpStrBldrsVecVec_getSz(&pSelf->tmpStrBldrsVecs) > 0) {
+		bma_CmdslTmpStrBldrsVecVec_rmv(&pSelf->tmpStrBldrsVecs, bma_CmdslTmpStrBldrsVecVec_getSz(&pSelf->tmpStrBldrsVecs) - 1u, pOut);
+		bma_CmdslTmpStrBldrsVec_clear(pOut);
 	}
 	else {
-		bma_Vec_ctor_ext(pOut, bma_StrBldr, (bma_dtor_t)&bma_StrBldr_dtor, pSelf->pAlloc);
+		bma_CmdslTmpStrBldrsVec_ctor(pOut, pSelf->pAlloc);
 	}
-	numExstng = bma_Vec_getSz(&pSelf->tmpStrBldrs);
+	numExstng = bma_CmdslTmpStrBldrsVec_getSz(&pSelf->tmpStrBldrs);
 	n = bma_min(num, numExstng);
 	for (i=0; i<n; ++i) {
 		bma_StrBldr b;
-		bma_Vec_rmv(&pSelf->tmpStrBldrs, bma_Vec_getSz(&pSelf->tmpStrBldrs) - 1u, &b, bma_StrBldr);
+		bma_CmdslTmpStrBldrsVec_rmv(&pSelf->tmpStrBldrs, bma_CmdslTmpStrBldrsVec_getSz(&pSelf->tmpStrBldrs) - 1u, &b);
 		bma_StrBldr_clear(&b);
-		bma_Vec_appnd(pOut, bma_StrBldr, &b);
+		bma_CmdslTmpStrBldrsVec_appnd(pOut, &b);
 	}
 	if (num <= numExstng) return;
 	rest = num - numExstng;
 	for (i=0; i<rest; ++i) {
 		bma_StrBldr b;
 		bma_StrBldr_ctor_ext(&b, pSelf->pAlloc);
-		bma_Vec_appnd(pOut, bma_StrBldr, &b);
+		bma_CmdslTmpStrBldrsVec_appnd(pOut, &b);
 	}
 }
 
-BMA_DEF void bma_Cmdsl_freeTmpStrBldrs(bma_Cmdsl *pSelf, bma_Vec *pTmpStrBldrs) {
+BMA_DEF void bma_Cmdsl_freeTmpStrBldrs(bma_Cmdsl *pSelf, bma_CmdslTmpStrBldrsVec *pTmpStrBldrs) {
 	bma_assert(pSelf != NULL);
 	bma_assert(pTmpStrBldrs != NULL);
-	while(bma_Vec_getSz(pTmpStrBldrs) > 0) {
+	while(bma_CmdslTmpStrBldrsVec_getSz(pTmpStrBldrs) > 0) {
 		bma_StrBldr b;
-		bma_Vec_rmv(pTmpStrBldrs, bma_Vec_getSz(pTmpStrBldrs) - 1u, &b, bma_StrBldr);
-		bma_Vec_appnd(&pSelf->tmpStrBldrs, bma_StrBldr, &b);
+		bma_CmdslTmpStrBldrsVec_rmv(pTmpStrBldrs, bma_CmdslTmpStrBldrsVec_getSz(pTmpStrBldrs) - 1u, &b);
+		bma_CmdslTmpStrBldrsVec_appnd(&pSelf->tmpStrBldrs, &b);
 	}
-	bma_Vec_appnd(&pSelf->tmpStrBldrsVecs, bma_Vec, pTmpStrBldrs);
+	bma_CmdslTmpStrBldrsVecVec_appnd(&pSelf->tmpStrBldrsVecs, pTmpStrBldrs);
 }
 
 BMA_DEF void bma_Cmdsl_allcTmpStrBldr(bma_Cmdsl *pSelf, bma_StrBldr *pOut) {
 	bma_assert(pSelf != NULL);
 	bma_assert(pOut != NULL);
-	if (bma_Vec_getSz(&pSelf->tmpStrBldrs) > 0) {
+	if (bma_CmdslTmpStrBldrsVec_getSz(&pSelf->tmpStrBldrs) > 0) {
 		/* re-use existing */
-		bma_Vec_rmv(&pSelf->tmpStrBldrs, bma_Vec_getSz(&pSelf->tmpStrBldrs) - 1u, pOut, bma_StrBldr);
+		bma_CmdslTmpStrBldrsVec_rmv(&pSelf->tmpStrBldrs, bma_CmdslTmpStrBldrsVec_getSz(&pSelf->tmpStrBldrs) - 1u, pOut);
 		bma_StrBldr_clear(pOut);
 	}
 	else {
@@ -1360,7 +1364,7 @@ BMA_DEF void bma_Cmdsl_allcTmpStrBldr(bma_Cmdsl *pSelf, bma_StrBldr *pOut) {
 BMA_DEF void bma_Cmdsl_freeTmpStrBldr(bma_Cmdsl *pSelf, bma_StrBldr *pTmpStrBldr) {
 	bma_assert(pSelf != NULL);
 	bma_assert(pTmpStrBldr != NULL);
-	bma_Vec_appnd(&pSelf->tmpStrBldrs, bma_StrBldr, pTmpStrBldr);
+	bma_CmdslTmpStrBldrsVec_appnd(&pSelf->tmpStrBldrs, pTmpStrBldr);
 }
 
 #ifdef __cplusplus
@@ -1403,7 +1407,7 @@ void test_construct(void) {
 	bma_Cmdsl_ctor(&cmdsl);
 	BMA_EXPECT(bma_HshMp_getSz(&cmdsl.functions) > 0);
 	BMA_EXPECT(bma_HshMp_getSz(&cmdsl.variables) == 0);
-	BMA_EXPECT(bma_Vec_getSz(&cmdsl.pushedVariables) == 0);
+	BMA_EXPECT(bma_CmdslPshdVarVec_getSz(&cmdsl.pushedVariables) == 0);
 	BMA_EXPECT(cmdsl.pRootNode == NULL);
 	bma_Cmdsl_dtor(&cmdsl, NULL);
 }

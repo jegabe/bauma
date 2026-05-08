@@ -509,6 +509,7 @@ BMA_DEF void bma_Vec_clear(bma_Vec *pSelf);
 	bma_inline datatype_ *name_ ## _at(name_ *pSelf, size_t index) { \
 		return bma_Vec_at(&pSelf->impl, index, datatype_); \
 	} \
+	\
 	bma_inline datatype_ *name_ ## _getData(name_ *pSelf) { \
 		return bma_Vec_getData(&pSelf->impl, datatype_); \
 	} \

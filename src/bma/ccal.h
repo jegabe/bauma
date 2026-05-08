@@ -171,7 +171,7 @@ containg the function definitions, which can be linked afterwards.
 	#define bma_maybe_unused [[maybe_unused]]
 #elif defined(__GNUC__) || defined(__clang__)
 	#define bma_maybe_unused __attribute__((unused))
-#else
+#else /* Unknown compiler */
 	#define bma_maybe_unused
 #endif
 
@@ -183,7 +183,8 @@ containg the function definitions, which can be linked afterwards.
 #ifdef __GNUC__
 	#if ((__GNUC__ > 3) || ((__GNUC__ == 3 && __GNUC_MINOR__ >= 1)))
 		#define bma_inline bma_maybe_unused static inline __attribute__((always_inline))
-	#elif defined(__cplusplus)
+	/* C99 or any C++ has inline keyword */
+	#elif defined(__cplusplus) || (defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L))
 		#define bma_inline bma_maybe_unused static inline
 	#else
 		#define bma_inline bma_maybe_unused static
@@ -193,13 +194,15 @@ containg the function definitions, which can be linked afterwards.
 #elif defined(_MSC_VER)
 	#if _MSC_VER >= 1200 /* Visual Studio 6.0 or newer */
 		#define bma_inline bma_maybe_unused static __forceinline
-	#elif defined(__cplusplus)
+	/* C99 or any C++ has inline keyword */
+	#elif defined(__cplusplus) || (defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L))
 		#define bma_inline bma_maybe_unused static inline
 	#else
 		#define bma_inline bma_maybe_unused static
 	#endif
-#else
-	#if defined(__cplusplus)
+#else /* any other compiler */
+	/* C99 or any C++ has inline keyword */
+	#if defined(__cplusplus) || (defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L))
 		#define bma_inline bma_maybe_unused static inline
 	#else
 		#define bma_inline bma_maybe_unused static
@@ -466,10 +469,10 @@ BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_Vec_rmv_impl)(bma_Vec *pSelf,
 BMA_DEF void bma_Vec_clear(bma_Vec *pSelf);
 
 /*! \brief Declares and defines a type safe bma_Vec wrapper.
-    In old compilers not supporting (force) inline, this may generate bloat,
+    In very old compilers not supporting inlining, this may generate a small call overhead,
     but for every other compiler, this doesn't have any downside. What it
     offers is a more clean and more type safe API. Otherwise, everything
-    is just forwarded to bma_Vec to have exactly one implementation of a vec.
+    is just forwarded to bma_Vec to have exactly one binary implementation of a vec.
     Usage example:
     \code
 
@@ -609,10 +612,10 @@ BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_HshMp_put_impl)(
 
 #define bma_HshMp_put(pSelf, pKey, pValue, keyType, valueType) \
 	BMA_DBG_SFFX(bma_HshMp_put_impl)(pSelf, \
-						   pKey, \
-						   pValue \
-						   BMA_DBG_OPT_PARAM(#keyType) \
-						   BMA_DBG_OPT_PARAM(#valueType))
+	                                 pKey, \
+	                                 pValue \
+	                                 BMA_DBG_OPT_PARAM(#keyType) \
+	                                 BMA_DBG_OPT_PARAM(#valueType))
 
 BMA_DEF void* BMA_DBG_SFFX(bma_HshMp_get_impl)(
 	bma_HshMp *pSelf,

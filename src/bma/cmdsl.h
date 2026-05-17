@@ -538,7 +538,7 @@ BMA_DEF bma_bool_t bma_cmdsl_funcDef(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void 
 	pFuDt->name.p = bma_strndup_ext(name.p, name.len, pCmdsl->pAlloc);
 	pFuDt->name.len = name.len;
 	pFuDt->pBody = pBody;
-	bma_CmdslStrNVec_ctor(&pFuDt->paramNames, pCmdsl->pAlloc);
+	bma_CmdslStrNVec_ctor_ext(&pFuDt->paramNames, pCmdsl->pAlloc);
 	bma_CmdslStrNVec_rsrv(&pFuDt->paramNames, numFuncParams);
 	for(i=2u; i<(numOfParams-1); ++i) {
 		bma_StrN paramName;
@@ -740,7 +740,7 @@ BMA_DEF void bma_cmdsl_NodeFunctionCall_construct(bma_CmdslNodeFuncCall *pSelf, 
 	pSelf->base.pEval = &bma_cmdsl_NodeFunctionCall_eval;
 	pSelf->name.p = bma_strndup_ext(pName->p, pName->len, pAlloc);
 	pSelf->name.len = pName->len;
-	bma_CmdslNodePtrVec_ctor(&pSelf->args, pAlloc);
+	bma_CmdslNodePtrVec_ctor_ext(&pSelf->args, pAlloc);
 }
 
 typedef struct bma_CmdslNodeSeq {
@@ -777,7 +777,7 @@ BMA_DEF void bma_CmdslNodeSeq_ctor(bma_CmdslNodeSeq *pSelf, bma_IMemAlloc *pAllo
 	bma_assert(pAlloc != NULL);
 	pSelf->base.pDestruct = (bma_dtor_t)&bma_CmdslNodeSeq_dtor;
 	pSelf->base.pEval = &bma_CmdslNodeSeq_eval;
-	bma_CmdslNodePtrVec_ctor(&pSelf->nodes, pAlloc);
+	bma_CmdslNodePtrVec_ctor_ext(&pSelf->nodes, pAlloc);
 }
 
 BMA_DEF void bma_CmdslNodeSeq_appnd(bma_CmdslNodeSeq *pSelf, bma_ICmdslNode *pNode) {
@@ -805,11 +805,11 @@ BMA_DEF void bma_Cmdsl_ctor_ext(bma_Cmdsl *pSelf, char escapeChar, bma_IMemAlloc
 	bma_assert(pSelf != NULL);
 	bma_assert(pAlloc != NULL);
 	pSelf->escapeChar = escapeChar;
-	bma_CmdslStrNtoFuncWithUsrDataMap_ctor(&pSelf->functions, pAlloc);
-	bma_CmdslStrNtoStrBldrMap_ctor(&pSelf->variables, pAlloc);
-	bma_CmdslPshdVarVec_ctor(&pSelf->pushedVariables, pAlloc);
-	bma_CmdslTmpStrBldrsVec_ctor(&pSelf->tmpStrBldrs, pAlloc);
-	bma_CmdslTmpStrBldrsVecVec_ctor(&pSelf->tmpStrBldrsVecs, pAlloc);
+	bma_CmdslStrNtoFuncWithUsrDataMap_ctor_ext(&pSelf->functions, pAlloc);
+	bma_CmdslStrNtoStrBldrMap_ctor_ext(&pSelf->variables, pAlloc);
+	bma_CmdslPshdVarVec_ctor_ext(&pSelf->pushedVariables, pAlloc);
+	bma_CmdslTmpStrBldrsVec_ctor_ext(&pSelf->tmpStrBldrs, pAlloc);
+	bma_CmdslTmpStrBldrsVecVec_ctor_ext(&pSelf->tmpStrBldrsVecs, pAlloc);
 	pSelf->pRootNode = NULL;
 	pSelf->pAlloc = pAlloc;
 	/* add built-in functions */
@@ -1322,7 +1322,7 @@ BMA_DEF void bma_Cmdsl_allcTmpStrBldrs(bma_Cmdsl *pSelf, size_t num, bma_CmdslTm
 		bma_CmdslTmpStrBldrsVec_clear(pOut);
 	}
 	else {
-		bma_CmdslTmpStrBldrsVec_ctor(pOut, pSelf->pAlloc);
+		bma_CmdslTmpStrBldrsVec_ctor_ext(pOut, pSelf->pAlloc);
 	}
 	numExstng = bma_CmdslTmpStrBldrsVec_getSz(&pSelf->tmpStrBldrs);
 	n = bma_min(num, numExstng);

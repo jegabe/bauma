@@ -292,7 +292,7 @@ BMA_DEF bma_NsonNode *bma_nsonNewStrWithLen_ext(const char *pValue, size_t value
 BMA_DEF bma_NsonNode *bma_nsonNewArr_ext(bma_IMemAlloc *pAlloc) {
 	bma_NsonNode *p = bma_nsonNew_ext(pAlloc);
 	p->type = BMA_NSON_NODE_TYPE_ARR;
-	bma_NsonNodePtrVec_ctor(&p->value.v, pAlloc);
+	bma_NsonNodePtrVec_ctor_ext(&p->value.v, pAlloc);
 	return p;
 }
 
@@ -318,7 +318,7 @@ BMA_DEF void bma_nsonObjAppnd(bma_NsonNode* pNode, bma_NsonNode *pKey, bma_NsonN
 BMA_DEF bma_NsonNode *bma_nsonNewObj_ext(bma_IMemAlloc *pAlloc) {
 	bma_NsonNode *p = bma_nsonNew_ext(pAlloc);
 	p->type = BMA_NSON_NODE_TYPE_OBJ;
-	bma_NsonNodePtrVec_ctor(&p->value.v, pAlloc);
+	bma_NsonNodePtrVec_ctor_ext(&p->value.v, pAlloc);
 	return p;
 }
 

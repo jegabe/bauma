@@ -489,8 +489,12 @@ BMA_DEF void bma_Vec_clear(bma_Vec *pSelf);
 		bma_Vec impl; \
 	} name_; \
 	\
-	bma_inline void name_ ## _ctor(name_ *pSelf, bma_IMemAlloc* pAlloc) { \
+	bma_inline void name_ ## _ctor_ext(name_ *pSelf, bma_IMemAlloc* pAlloc) { \
 		bma_Vec_ctor_ext(&pSelf->impl, datatype_, pDtor_, pAlloc); \
+	} \
+	\
+	bma_inline void name_ ## _ctor(name_ *pSelf) { \
+		bma_Vec_ctor(&pSelf->impl, datatype_, pDtor_); \
 	} \
 	\
 	bma_inline void name_ ## _dtor(name_ *pSelf, bma_IMemAlloc *pAlloc) { \
@@ -656,8 +660,12 @@ BMA_DEF void bma_HshMp_clear(bma_HshMp* pSelf);
 		bma_HshMp impl; \
 	} name_; \
 	\
-	bma_inline void name_ ## _ctor(name_ *pSelf, bma_IMemAlloc* pAlloc) { \
+	bma_inline void name_ ## _ctor_ext(name_ *pSelf, bma_IMemAlloc* pAlloc) { \
 		bma_HshMp_ctor_ext(&pSelf->impl, keyType_, valueType_, pKeyDtor_, pValueDtor_, pKeyHsh_, pKeyEq_, pAlloc); \
+	} \
+	\
+	bma_inline void name_ ## _ctor(name_ *pSelf) { \
+		bma_HshMp_ctor(&pSelf->impl, keyType_, valueType_, pKeyDtor_, pValueDtor_, pKeyHsh_, pKeyEq_); \
 	} \
 	\
 	bma_inline void name_ ## _dtor(name_ *pSelf, bma_IMemAlloc *pAlloc) { \

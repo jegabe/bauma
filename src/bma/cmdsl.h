@@ -109,14 +109,17 @@ BMA_DEF void bma_CmdslFuncWthUsrData_dtor(bma_CmdslFuncWthUsrData* pSelf, bma_IM
 
 typedef struct bma_ICmdslNode bma_ICmdslNode;
 
+BMA_DEF_HSHMP(bma_CmdslStrNtoFuncWithUsrDataMap, bma_StrN, bma_CmdslFuncWthUsrData, (bma_dtor_t)&bma_StrN_dtor, (bma_dtor_t)&bma_CmdslFuncWthUsrData_dtor, (bma_hash_t)&bma_StrN_hash, (bma_eq_t)&bma_StrN_eq)
+BMA_DEF_HSHMP(bma_CmdslStrNtoStrBldrMap, bma_StrN, bma_StrBldr, (bma_dtor_t)&bma_StrN_dtor, (bma_dtor_t)&bma_StrBldr_dtor, (bma_hash_t)&bma_StrN_hash, (bma_eq_t)&bma_StrN_eq)
+
 struct bma_Cmdsl {
-	bma_HshMp                  functions;
-	bma_HshMp                  variables;
-	bma_CmdslPshdVarVec        pushedVariables;
-	bma_CmdslTmpStrBldrsVec    tmpStrBldrs;
-	bma_CmdslTmpStrBldrsVecVec tmpStrBldrsVecs;
-	bma_ICmdslNode             *pRootNode;
-	bma_IMemAlloc              *pAlloc;
+	bma_CmdslStrNtoFuncWithUsrDataMap functions;
+	bma_CmdslStrNtoStrBldrMap         variables;
+	bma_CmdslPshdVarVec               pushedVariables;
+	bma_CmdslTmpStrBldrsVec           tmpStrBldrs;
+	bma_CmdslTmpStrBldrsVecVec        tmpStrBldrsVecs;
+	bma_ICmdslNode                    *pRootNode;
+	bma_IMemAlloc                     *pAlloc;
 	char escapeChar;
 };
 
@@ -248,7 +251,7 @@ BMA_DEF bma_bool_t bma_cmdsl_funcCall(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void
 	}
 	funcName.p = (char*)bma_StrBldr_getStr(&pParams[0]);
 	funcName.len = bma_StrBldr_getSz(&pParams[0]);
-	pFunc = bma_HshMp_get(&pCmdsl->functions, &funcName, bma_StrN, bma_CmdslFuncWthUsrData);
+	pFunc = bma_CmdslStrNtoFuncWithUsrDataMap_get(&pCmdsl->functions, &funcName);
 	if (pFunc == NULL) {
 		bma_StrBldr_clear(pDst);
 		bma_StrBldr_appndStr(pDst, "In function call(): Function '");
@@ -374,7 +377,7 @@ BMA_DEF bma_bool_t bma_cmdsl_funcPop(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void 
 			(void)removed;
 			varName.p = (char*)pVarName;
 			varName.len = varNameLen;
-			pValue = bma_HshMp_get(&pCmdsl->variables, &varName, bma_StrN, bma_StrBldr);
+			pValue = bma_CmdslStrNtoStrBldrMap_get(&pCmdsl->variables, &varName);
 			if (pValue != NULL) {
 				bma_StrBldr_dtor(pValue, NULL);
 				*pValue = rmvdVar.value;
@@ -385,7 +388,7 @@ BMA_DEF bma_bool_t bma_cmdsl_funcPop(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void 
 					/* almost same but var name needs heap alloc */
 					/* dup key to not loose it, map takes ownership */
 					varName.p = bma_strndup_ext(pVarName, varNameLen, pCmdsl->pAlloc);
-					couldPut = bma_HshMp_put(&pCmdsl->variables, &varName, &rmvdVar.value, bma_StrN, bma_StrBldr);
+					couldPut = bma_CmdslStrNtoStrBldrMap_put(&pCmdsl->variables, &varName, &rmvdVar.value);
 					bma_assert(couldPut);
 					(void)couldPut;
 				} else {
@@ -491,7 +494,7 @@ BMA_DEF bma_bool_t bma_cmdsl_funcDef(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void 
 		bma_StrBldr_appndStr(pDst, "()'");
 		return BMA_FALSE;
 	}
-	if (bma_HshMp_get(&pCmdsl->functions, &name, bma_StrN, bma_CmdslFuncWthUsrData) != NULL) {
+	if (bma_CmdslStrNtoFuncWithUsrDataMap_get(&pCmdsl->functions, &name) != NULL) {
 		bma_StrBldr_clear(pDst);
 		bma_StrBldr_appndStr(pDst, "Function '");
 		bma_StrBldr_appndStrN(pDst, name.p, name.len);
@@ -546,7 +549,7 @@ BMA_DEF bma_bool_t bma_cmdsl_funcDef(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void 
 	fu.pUserData = pFuDt;
 	fu.pUserDataDtor = (bma_dtor_t)&bma_CmdslUsrDefndFuncData_dtor;
 	fu.isBuiltIn = BMA_FALSE; /* so it can be removed via %undef() */
-	coulPut = bma_HshMp_put(&pCmdsl->functions, &name, &fu, bma_StrN, bma_CmdslFuncWthUsrData);
+	coulPut = bma_CmdslStrNtoFuncWithUsrDataMap_put(&pCmdsl->functions, &name, &fu);
 	bma_assert(coulPut);
 	(void)coulPut;
 	return BMA_TRUE;
@@ -566,7 +569,7 @@ BMA_DEF bma_bool_t bma_cmdsl_funcUndef(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, voi
 	}
 	name.p = (char*)bma_StrBldr_getStr(&pParams[0]);
 	name.len = bma_StrBldr_getSz(&pParams[0]);
-	pFoundFunc = bma_HshMp_get(&pCmdsl->functions, &name, bma_StrN, bma_CmdslFuncWthUsrData);
+	pFoundFunc = bma_CmdslStrNtoFuncWithUsrDataMap_get(&pCmdsl->functions, &name);
 	if (pFoundFunc == NULL) {
 		bma_StrBldr_clear(pDst);
 		bma_StrBldr_appndStr(pDst, "undef(): function '");
@@ -581,7 +584,7 @@ BMA_DEF bma_bool_t bma_cmdsl_funcUndef(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, voi
 		bma_StrBldr_appndStr(pDst, "()' can't be removed because it is a pre-defined function");
 		return BMA_FALSE;
 	}
-	couldRemove = bma_HshMp_rmv(&pCmdsl->functions, &name, bma_StrN, NULL, bma_CmdslFuncWthUsrData);
+	couldRemove = bma_CmdslStrNtoFuncWithUsrDataMap_rmv(&pCmdsl->functions, &name, NULL);
 	bma_assert(couldRemove);
 	(void)couldRemove;
 	return BMA_TRUE;
@@ -702,7 +705,7 @@ BMA_DEF bma_bool_t bma_cmdsl_NodeFunctionCall_eval(void *pSelf_, bma_StrBldr *pD
 	bma_assert(pSelf != NULL);
 	bma_assert(pDst != NULL);
 	bma_assert(pCmdsl != NULL);
-	pFunc = bma_HshMp_get(&pCmdsl->functions, &pSelf->name, bma_StrN, bma_CmdslFuncWthUsrData);
+	pFunc = bma_CmdslStrNtoFuncWithUsrDataMap_get(&pCmdsl->functions, &pSelf->name);
 	if (pFunc == NULL) {
 		bma_StrBldr_clear(pDst);
 		bma_StrBldr_appndStr(pDst, "Function '");
@@ -802,10 +805,8 @@ BMA_DEF void bma_Cmdsl_ctor_ext(bma_Cmdsl *pSelf, char escapeChar, bma_IMemAlloc
 	bma_assert(pSelf != NULL);
 	bma_assert(pAlloc != NULL);
 	pSelf->escapeChar = escapeChar;
-	bma_HshMp_ctor_ext(&pSelf->functions, bma_StrN, bma_CmdslFuncWthUsrData, (bma_dtor_t)&bma_StrN_dtor, (bma_dtor_t)&bma_CmdslFuncWthUsrData_dtor, (bma_hash_t)&bma_StrN_hash, (bma_eq_t)&bma_StrN_eq, pAlloc);
-	bma_HshMp_ctor_ext(&pSelf->variables, bma_StrN, bma_StrBldr,
-	                            (bma_dtor_t)&bma_StrN_dtor, (bma_dtor_t)&bma_StrBldr_dtor,
-	                            (bma_hash_t)&bma_StrN_hash, (bma_eq_t)&bma_StrN_eq, pAlloc);
+	bma_CmdslStrNtoFuncWithUsrDataMap_ctor(&pSelf->functions, pAlloc);
+	bma_CmdslStrNtoStrBldrMap_ctor(&pSelf->variables, pAlloc);
 	bma_CmdslPshdVarVec_ctor(&pSelf->pushedVariables, pAlloc);
 	bma_CmdslTmpStrBldrsVec_ctor(&pSelf->tmpStrBldrs, pAlloc);
 	bma_CmdslTmpStrBldrsVecVec_ctor(&pSelf->tmpStrBldrsVecs, pAlloc);
@@ -839,8 +840,8 @@ BMA_DEF void bma_Cmdsl_dtor(bma_Cmdsl *pSelf, bma_IMemAlloc *pAlloc) {
 	bma_CmdslTmpStrBldrsVecVec_dtor(&pSelf->tmpStrBldrsVecs, NULL);
 	bma_CmdslTmpStrBldrsVec_dtor(&pSelf->tmpStrBldrs, NULL);
 	bma_CmdslPshdVarVec_dtor(&pSelf->pushedVariables, NULL);
-	bma_HshMp_dtor(&pSelf->variables, NULL);
-	bma_HshMp_dtor(&pSelf->functions, NULL);
+	bma_CmdslStrNtoStrBldrMap_dtor(&pSelf->variables, NULL);
+	bma_CmdslStrNtoFuncWithUsrDataMap_dtor(&pSelf->functions, NULL);
 #if BMA_DBG
 	memset(pSelf, 0xFF, sizeof(*pSelf));
 #endif
@@ -861,7 +862,7 @@ BMA_DEF bma_bool_t bma_Cmdsl_addFunc(bma_Cmdsl *pSelf, const char *pFuncName, bm
 	/* for look-up, no dyn. allocation is needed */
 	key.p = (char*)pFuncName;
 	key.len = funcNameLen;
-	pExistingFunc = bma_HshMp_get(&pSelf->functions, &key, bma_StrN, bma_CmdslFuncWthUsrData);
+	pExistingFunc = bma_CmdslStrNtoFuncWithUsrDataMap_get(&pSelf->functions, &key);
 	if (pExistingFunc != NULL) {
 		/* function already exists */
 		return BMA_FALSE;
@@ -870,7 +871,7 @@ BMA_DEF bma_bool_t bma_Cmdsl_addFunc(bma_Cmdsl *pSelf, const char *pFuncName, bm
 	key.p = bma_strndup_ext(pFuncName, funcNameLen, pSelf->pAlloc);
         /* len stays same */
 	p->isBuiltIn = BMA_TRUE;
-	bma_HshMp_put(&pSelf->functions, &key, p, bma_StrN, bma_CmdslFuncWthUsrData);
+	bma_CmdslStrNtoFuncWithUsrDataMap_put(&pSelf->functions, &key, p);
 	return BMA_TRUE;
 }
 
@@ -887,7 +888,7 @@ BMA_DEF bma_bool_t bma_Cmdsl_setVar_ext(bma_Cmdsl *pSelf, const char *pVarName, 
 	/* For look-up, varName doesn't need heap allocation (will be faster)*/
 	varName.p = (char*)pVarName;
 	varName.len = nameLen;
-	pFoundValue = bma_HshMp_get(&pSelf->variables, &varName, bma_StrN, bma_StrBldr);
+	pFoundValue = bma_CmdslStrNtoStrBldrMap_get(&pSelf->variables, &varName);
 	if (pFoundValue != NULL) {
 		bma_StrBldr_clear(pFoundValue);
 		bma_StrBldr_appndStrN(pFoundValue, pValue, valueLen);
@@ -901,7 +902,7 @@ BMA_DEF bma_bool_t bma_Cmdsl_setVar_ext(bma_Cmdsl *pSelf, const char *pVarName, 
 	/* len stays same */
 	bma_StrBldr_ctor_ext(&newContent, pSelf->pAlloc);
 	bma_StrBldr_appndStrN(&newContent, pValue, valueLen);
-	bma_HshMp_put(&pSelf->variables, &varName, &newContent, bma_StrN, bma_StrBldr);
+	bma_CmdslStrNtoStrBldrMap_put(&pSelf->variables, &varName, &newContent);
 	return BMA_TRUE;
 }
 
@@ -927,7 +928,7 @@ BMA_DEF const bma_StrBldr *bma_Cmdsl_getVar_ext(bma_Cmdsl *pSelf, const char *pV
 	bma_StrN varName;
 	varName.p = (char*)pVarName;
 	varName.len = nameLen;
-	return bma_HshMp_get(&pSelf->variables, &varName, bma_StrN, bma_StrBldr);
+	return bma_CmdslStrNtoStrBldrMap_get(&pSelf->variables, &varName);
 }
 
 BMA_DEF void bma_Cmdsl_push_ext(bma_Cmdsl *pSelf, const char *pVarName, size_t varNameLen) {
@@ -964,7 +965,7 @@ BMA_DEF void bma_Cmdsl_pop_ext(bma_Cmdsl *pSelf, const char *pVarName, size_t va
 			(void)removed;
 			varName.p = (char*)pVarName;
 			varName.len = varNameLen;
-			pValue = bma_HshMp_get(&pSelf->variables, &varName, bma_StrN, bma_StrBldr);
+			pValue = bma_CmdslStrNtoStrBldrMap_get(&pSelf->variables, &varName);
 			if (pValue != NULL) {
 				bma_StrBldr_dtor(pValue, NULL);
 				*pValue = rmvdVar.value;
@@ -975,7 +976,7 @@ BMA_DEF void bma_Cmdsl_pop_ext(bma_Cmdsl *pSelf, const char *pVarName, size_t va
 					/* almost same but var name needs heap alloc */
 					/* dup key to not loose it, map takes ownership */
 					varName.p = bma_strndup_ext(pVarName, varNameLen, pSelf->pAlloc);
-					couldPut = bma_HshMp_put(&pSelf->variables, &varName, &rmvdVar.value, bma_StrN, bma_StrBldr);
+					couldPut = bma_CmdslStrNtoStrBldrMap_put(&pSelf->variables, &varName, &rmvdVar.value);
 					bma_assert(couldPut);
 					(void)couldPut;
 				} else {
@@ -1409,8 +1410,8 @@ void bma_test_exit_fail(const char *exp, const char *file, int line) {
 void test_construct(void) {
 	bma_Cmdsl cmdsl;
 	bma_Cmdsl_ctor(&cmdsl);
-	BMA_EXPECT(bma_HshMp_getSz(&cmdsl.functions) > 0);
-	BMA_EXPECT(bma_HshMp_getSz(&cmdsl.variables) == 0);
+	BMA_EXPECT(bma_CmdslStrNtoFuncWithUsrDataMap_getSz(&cmdsl.functions) > 0);
+	BMA_EXPECT(bma_CmdslStrNtoStrBldrMap_getSz(&cmdsl.variables) == 0);
 	BMA_EXPECT(bma_CmdslPshdVarVec_getSz(&cmdsl.pushedVariables) == 0);
 	BMA_EXPECT(cmdsl.pRootNode == NULL);
 	bma_Cmdsl_dtor(&cmdsl, NULL);
@@ -1426,7 +1427,7 @@ void test_setGetVariable(void) {
 	bma_Cmdsl_setVar(&cmdsl, "var2", "value3");
 	BMA_EXPECT(strcmp(bma_Cmdsl_getVar(&cmdsl, "var2"), "value3") == 0);
 	BMA_EXPECT(strcmp(bma_Cmdsl_getVar(&cmdsl, "Unknown"), "") == 0);
-	BMA_EXPECT(bma_HshMp_getSz(&cmdsl.variables) == 2u);
+	BMA_EXPECT(bma_CmdslStrNtoStrBldrMap_getSz(&cmdsl.variables) == 2u);
 	bma_Cmdsl_dtor(&cmdsl, NULL);
 }
 

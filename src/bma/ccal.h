@@ -650,6 +650,42 @@ BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_HshMp_rmv_impl)(
 
 BMA_DEF void bma_HshMp_clear(bma_HshMp* pSelf);
 
+#define BMA_DEF_HSHMP(name_, keyType_, valueType_, pKeyDtor_, pValueDtor_, pKeyHsh_, pKeyEq_) \
+	\
+	typedef struct name_ { \
+		bma_HshMp impl; \
+	} name_; \
+	\
+	bma_inline void name_ ## _ctor(name_ *pSelf, bma_IMemAlloc* pAlloc) { \
+		bma_HshMp_ctor_ext(&pSelf->impl, keyType_, valueType_, pKeyDtor_, pValueDtor_, pKeyHsh_, pKeyEq_, pAlloc); \
+	} \
+	\
+	bma_inline void name_ ## _dtor(name_ *pSelf, bma_IMemAlloc *pAlloc) { \
+		(void)pAlloc; \
+		bma_HshMp_dtor(&pSelf->impl, NULL); \
+	} \
+	\
+	bma_inline size_t name_ ## _getSz(name_ *pSelf) { \
+		return bma_HshMp_getSz(&pSelf->impl); \
+	} \
+	\
+	bma_inline bma_bool_t name_ ## _put(name_ *pSelf, keyType_ *pKey, valueType_ *pValue) { \
+		return bma_HshMp_put(&pSelf->impl, pKey, pValue, keyType_, valueType_); \
+	} \
+	\
+	bma_inline valueType_ *name_ ## _get(name_ *pSelf, const keyType_ *pKey) { \
+		return bma_HshMp_get(&pSelf->impl, pKey, keyType_, valueType_); \
+	} \
+	\
+	bma_inline bma_bool_t name_ ## _rmv(name_ *pSelf, const keyType_ *pKey, valueType_ *pOptOutValue) { \
+		return bma_HshMp_rmv(&pSelf->impl, pKey, keyType_, pOptOutValue, valueType_); \
+	} \
+	\
+	bma_inline void name_ ## _clear(name_ *pSelf) { \
+		bma_HshMp_clear(&pSelf->impl); \
+	}
+
+
 typedef struct bma_StrBldr {
 	char   *pStr;
 	size_t size; /* not counting the null terminator */

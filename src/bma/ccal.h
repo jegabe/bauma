@@ -848,17 +848,13 @@ BMA_DEF void bma_Wk_dec(bma_Wk *pSelf);
 		bma_Wk_dec(&pSelf->impl); \
 	}
 
-typedef struct bma_StrTreeNode_ {
-	bma_StrN key;
-	void *pOptValue;
-	bma_dtor_t pValueDtor;
-	bma_Vec children; /* Vec of bma_StrTreeNode */
-} bma_StrTreeNode_;
-
-BMA_DEF void bma_StrTreeNode_dtor(bma_StrTreeNode_ *pSelf, bma_IMemAlloc *pAlloc);
+typedef struct bma_StrTreeNodeHdr_ bma_StrTreeNodeHdr_;
 
 typedef struct bma_StrTree {
-	bma_StrTreeNode_ root;
+	char sep;
+	size_t elemSz;
+	bma_dtor_t pElemDtor;
+	bma_StrTreeNodeHdr_* pRoot;
 #if BMA_DBG
 	const char *pType;
 #endif
@@ -866,22 +862,28 @@ typedef struct bma_StrTree {
 
 BMA_DEF void BMA_DBG_SFFX(bma_StrTree_ctor_impl)(
 	bma_StrTree *pSelf,
+	char sep,
+	size_t elemSz,
 	bma_dtor_t pElemDtor,
 	bma_IMemAlloc *pAlloc
 	BMA_DBG_OPT_PARAM(const char *pType)
 );
 
-#define bma_StrTree_ctor_ext(pSelf, type, pElemDtor, pAlloc) \
+#define bma_StrTree_ctor_ext(pSelf, sep, type, pElemDtor, pAlloc) \
 	BMA_DBG_SFFX(bma_StrTree_ctor_impl)( \
 		pSelf, \
+		sep, \
+		sizeof(type), \
 		pElemDtor, \
 		pAlloc \
 		BMA_DBG_OPT_PARAM(#type) \
 	)
 
-#define bma_StrTree_ctor(pSelf, type, pElemDtor) \
+#define bma_StrTree_ctor(pSelf, sep, type, pElemDtor) \
 	BMA_DBG_SFFX(bma_StrTree_ctor_impl)( \
 		pSelf, \
+		sep, \
+		sizeof(type), \
 		pElemDtor, \
 		bma_getDfltMemAlloc() \
 		BMA_DBG_OPT_PARAM(#type) \
@@ -889,7 +891,7 @@ BMA_DEF void BMA_DBG_SFFX(bma_StrTree_ctor_impl)(
 
 BMA_DEF void bma_StrTree_dtor(bma_StrTree *pSelf, bma_IMemAlloc *pAlloc);
 
-BMA_DEF void BMA_DBG_SFFX(bma_StrTree_put_impl)(
+BMA_DEF void *BMA_DBG_SFFX(bma_StrTree_put_impl)(
 	bma_StrTree *pSelf,
 	const char *pPath,
 	void *pValue
@@ -897,10 +899,10 @@ BMA_DEF void BMA_DBG_SFFX(bma_StrTree_put_impl)(
 );
 
 #define bma_StrTree_put(pSelf, pPath, type, pValue) \
-	BMA_DBG_SFFX(bma_StrTree_put_impl)(pSelf, \
-	                                   pPath, \
-	                                   pValue \
-	                                   BMA_DBG_OPT_PARAM(#type))
+	(type*)BMA_DBG_SFFX(bma_StrTree_put_impl)(pSelf, \
+	                                          pPath, \
+	                                          pValue \
+	                                          BMA_DBG_OPT_PARAM(#type))
 
 BMA_DEF void *BMA_DBG_SFFX(bma_StrTree_get_impl)(
 	bma_StrTree *pSelf,
@@ -914,12 +916,12 @@ BMA_DEF void *BMA_DBG_SFFX(bma_StrTree_get_impl)(
 BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_StrTree_rmv_impl)(
 	bma_StrTree *pSelf,
 	const char *pPath,
-	void **ppOptOutValue
+	void *pOptOutValue
 	BMA_DBG_OPT_PARAM(const char *pType)
 );
 
-#define bma_StrTree_rmv(pSelf, pPath, type, ppOutValue) \
-	BMA_DBG_SFFX(bma_StrTree_rmv_impl)(pSelf, pPath, (void**)ppOutValue BMA_DBG_OPT_PARAM(#type))
+#define bma_StrTree_rmv(pSelf, pPath, type, pOptOutValue) \
+	BMA_DBG_SFFX(bma_StrTree_rmv_impl)(pSelf, pPath, pOptOutValue BMA_DBG_OPT_PARAM(#type))
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -1881,51 +1883,69 @@ BMA_DEF void bma_Wk_dec(bma_Wk *pSelf) {
 	}
 }
 
-BMA_DEF void bma_StrTreeNode_dtor(bma_StrTreeNode_ *pSelf, bma_IMemAlloc *pAlloc_) {
-	bma_IMemAlloc *pAlloc;
-	(void)pAlloc_;
-	bma_assert(pSelf != NULL);
-	pAlloc = bma_Vec_getAlloc(&pSelf->children);
-	if (pSelf->key.len > 0) {
-		bma_StrN_dtor(&pSelf->key, pAlloc);
-	}
-	if (pSelf->pOptValue != NULL) {
-		if (pSelf->pValueDtor != NULL) {
-			(*pSelf->pValueDtor)(pSelf->pOptValue, pAlloc);
-		}
-		bma_free_ext(pAlloc, pSelf->pOptValue);
-	}
-	bma_Vec_dtor(&pSelf->children, NULL);
-}
+struct bma_StrTreeNodeHdr_ {
+	bma_StrN key;
+	bma_bool_t hasValue;
+	bma_Vec children; /* Vec of bma_StrTreeNode_* */
+	bma_max_align_t valueAligner_;
+};
+
+#define BMA_STRTREE_NODE_HDR_SZ (sizeof(bma_StrTreeNodeHdr_) - sizeof(bma_max_align_t))
 
 BMA_DEF void BMA_DBG_SFFX(bma_StrTree_ctor_impl)(
 	bma_StrTree *pSelf,
+	char sep,
+	size_t elemSz,
 	bma_dtor_t pElemDtor,
 	bma_IMemAlloc *pAlloc
 	BMA_DBG_OPT_PARAM(const char *pType)
 ) {
 	bma_assert(pSelf != NULL);
 	bma_assert(pAlloc != NULL);
-	pSelf->root.key.p = (char*)"";
-	pSelf->root.key.len = 0;
-	pSelf->root.pOptValue = NULL;
-	pSelf->root.pValueDtor = pElemDtor;
-	bma_Vec_ctor_ext(&pSelf->root.children, bma_StrTreeNode_, (bma_dtor_t)&bma_StrTreeNode_dtor, pAlloc);
+	pSelf->elemSz = elemSz;
+	pSelf->pElemDtor = pElemDtor;
+	pSelf->sep = sep;
+	pSelf->pRoot = (bma_StrTreeNodeHdr_*)(pAlloc->pRllc)(pAlloc, NULL, BMA_STRTREE_NODE_HDR_SZ + elemSz, NULL);
+	pSelf->pRoot->key.p = (char*)"";
+	pSelf->pRoot->key.len = 0;
+	pSelf->pRoot->hasValue = BMA_FALSE;
+	bma_Vec_ctor_ext(&pSelf->pRoot->children, bma_StrTreeNodeHdr_*, NULL, pAlloc);
 #if BMA_DBG
 	pSelf->pType = pType;
 #endif
 }
 
+BMA_DEF void bma_StrTreeNode_del(bma_StrTree *pSelf, bma_StrTreeNodeHdr_* pNode) {
+	bma_IMemAlloc *pAlloc;
+	size_t i;
+	bma_assert(pSelf != NULL);
+	bma_assert(pNode != NULL);
+	pAlloc = bma_Vec_getAlloc(&pSelf->pRoot->children);
+	i = bma_Vec_getSz(&pNode->children);
+	while (i-- > 0) {
+		bma_StrTreeNodeHdr_* pChild = *bma_Vec_at(&pNode->children, i, bma_StrTreeNodeHdr_*);
+		bma_StrTreeNode_del(pSelf, pChild);
+	}
+	bma_Vec_dtor(&pNode->children, NULL);
+	if (pNode->hasValue && (pSelf->pElemDtor != NULL)) {
+		(*pSelf->pElemDtor)(((char*)pNode) + BMA_STRTREE_NODE_HDR_SZ, pAlloc);
+	}
+	if (pNode->key.len > 0) {
+		bma_StrN_dtor(&pNode->key, pAlloc);
+	}
+	bma_free_ext(pAlloc, pNode);
+}
+
 BMA_DEF void bma_StrTree_dtor(bma_StrTree *pSelf, bma_IMemAlloc *pAlloc) {
 	bma_assert(pSelf != NULL);
 	(void)pAlloc;
-	bma_StrTreeNode_dtor(&pSelf->root, NULL);
+	bma_StrTreeNode_del(pSelf, pSelf->pRoot);
 #if BMA_DBG
 	memset(pSelf, 0xFF, sizeof(*pSelf));
 #endif
 }
 
-BMA_DEF void BMA_DBG_SFFX(bma_StrTree_put_impl)(
+BMA_DEF void *BMA_DBG_SFFX(bma_StrTree_put_impl)(
 	bma_StrTree *pSelf,
 	const char *pPath,
 	void *pValue
@@ -1933,31 +1953,24 @@ BMA_DEF void BMA_DBG_SFFX(bma_StrTree_put_impl)(
 ) {
 	bma_IMemAlloc *pAlloc;
 	size_t pathLen;
-	bma_StrTreeNode_ *pNode;
+	bma_StrTreeNodeHdr_ *pNode;
 	bma_bool_t end = BMA_FALSE;
+	char *pElem;
 	bma_assert(pSelf != NULL);
 	bma_assert(pPath != NULL);
 	bma_assert(pValue != NULL);
 	bma_assert(strcmp(pType, pSelf->pType) == 0);
-	pAlloc = bma_Vec_getAlloc(&pSelf->root.children);
+	pAlloc = bma_Vec_getAlloc(&pSelf->pRoot->children);
 	pathLen = strlen(pPath);
+	pNode = pSelf->pRoot;
 	if (pathLen == 0) {
-		/* root node */
-		if (pSelf->root.pOptValue != NULL) {
-			if (pSelf->root.pValueDtor != NULL) {
-				(*pSelf->root.pValueDtor)(pSelf->root.pOptValue, pAlloc);
-			}
-			bma_free_ext(pAlloc, pSelf->root.pOptValue);
-		}
-		pSelf->root.pOptValue = pValue;
-		return;
+		end = BMA_TRUE;
 	}
-	pNode = &pSelf->root;
 	while (!end) {
 		const char *p;
 		size_t l, i;
 		bma_bool_t found = BMA_FALSE;
-		p = (const char*)memchr(pPath, '.', pathLen);
+		p = (const char*)memchr(pPath, (unsigned char)pSelf->sep, pathLen);
 		if (p != NULL) {
 			l = (size_t)(p - pPath);
 		}
@@ -1966,7 +1979,7 @@ BMA_DEF void BMA_DBG_SFFX(bma_StrTree_put_impl)(
 			end = BMA_TRUE;
 		}
 		for (i=0; i<bma_Vec_getSz(&pNode->children); ++i) {
-			bma_StrTreeNode_ *pChild = bma_Vec_at(&pNode->children, i, bma_StrTreeNode_);
+			bma_StrTreeNodeHdr_ *pChild = *bma_Vec_at(&pNode->children, i, bma_StrTreeNodeHdr_*);
 			if ((pChild->key.len == l) && (memcmp(pChild->key.p, pPath, l) == 0)) {
 				pNode = pChild;
 				found = BMA_TRUE;
@@ -1974,39 +1987,80 @@ BMA_DEF void BMA_DBG_SFFX(bma_StrTree_put_impl)(
 			}
 		}
 		if (!found) {
-			bma_StrTreeNode_ newNode;
-			newNode.key.p = bma_strndup_ext(pPath, l, pAlloc);
-			newNode.key.len = l;
-			newNode.pOptValue = NULL;
-			newNode.pValueDtor = pSelf->root.pValueDtor;
-			bma_Vec_ctor_ext(&newNode.children, bma_StrTreeNode_, (bma_dtor_t)&bma_StrTreeNode_dtor, pAlloc);
-			bma_Vec_appnd(&pNode->children, bma_StrTreeNode_, &newNode);
-			pNode = bma_Vec_at(&pNode->children, bma_Vec_getSz(&pNode->children) - 1u, bma_StrTreeNode_);
+			bma_StrTreeNodeHdr_ *pNew;
+			pNew = (bma_StrTreeNodeHdr_*)(pAlloc->pRllc)(pAlloc, NULL, BMA_STRTREE_NODE_HDR_SZ + pSelf->elemSz, NULL);
+			pNew->key.p = bma_strndup_ext(pPath, l, pAlloc);
+			pNew->key.len = l;
+			pNew->hasValue = BMA_FALSE;
+			bma_Vec_ctor_ext(&pNew->children, bma_StrTreeNodeHdr_*, NULL, pAlloc);
+			bma_Vec_appnd(&pNode->children, bma_StrTreeNodeHdr_*, &pNew);
+			pNode = pNew;
 		}
 		if (!end) {
 			pPath += (l + 1u);
 			pathLen -= (l + 1u);
 		}
 	}
-	if (pNode->pOptValue != NULL) {
-		if (pNode->pValueDtor != NULL) {
-			(*pNode->pValueDtor)(pNode->pOptValue, pAlloc);
-		}
-		bma_free_ext(pAlloc, pNode->pOptValue);
+	pElem = ((char*)pNode) + BMA_STRTREE_NODE_HDR_SZ;
+	if (pNode->hasValue && (pSelf->pElemDtor != NULL)) {
+		(*pSelf->pElemDtor)(pElem, pAlloc);
 	}
-	pNode->pOptValue = pValue;
+	memcpy(pElem, pValue, pSelf->elemSz);
+	pNode->hasValue = BMA_TRUE;
+	return pElem;
 }
-
-#if 0
 
 BMA_DEF void *BMA_DBG_SFFX(bma_StrTree_get_impl)(
 	bma_StrTree *pSelf,
 	const char *pPath
 	BMA_DBG_OPT_PARAM(const char *pType)
-);
+) {
+	size_t pathLen;
+	bma_StrTreeNodeHdr_ *pNode;
+	bma_bool_t end = BMA_FALSE;
+	bma_assert(pSelf != NULL);
+	bma_assert(pPath != NULL);
+	bma_assert(strcmp(pType, pSelf->pType) == 0);
+	pathLen = strlen(pPath);
+	pNode = pSelf->pRoot;
+	if (pathLen == 0) {
+		end = BMA_TRUE;
+	}
+	while (!end) {
+		const char *p;
+		size_t l, i;
+		bma_bool_t found = BMA_FALSE;
+		p = (const char*)memchr(pPath, (unsigned char)pSelf->sep, pathLen);
+		if (p != NULL) {
+			l = (size_t)(p - pPath);
+		}
+		else {
+			l = pathLen;
+			end = BMA_TRUE;
+		}
+		for (i=0; i<bma_Vec_getSz(&pNode->children); ++i) {
+			bma_StrTreeNodeHdr_ *pChild = *bma_Vec_at(&pNode->children, i, bma_StrTreeNodeHdr_*);
+			if ((pChild->key.len == l) && (memcmp(pChild->key.p, pPath, l) == 0)) {
+				pNode = pChild;
+				found = BMA_TRUE;
+				break;
+			}
+		}
+		if (!found) {
+			return NULL;
+		}
+		if (!end) {
+			pPath += (l + 1u);
+			pathLen -= (l + 1u);
+		}
+	}
+	if (!pNode->hasValue) {
+		return NULL;
+	}
+	return ((char*)pNode) + BMA_STRTREE_NODE_HDR_SZ;
+}
 
-#define bma_StrTree_get(pSelf, pPath, type) \
-	((type*)BMA_DBG_SFFX(bma_StrTree_get_impl)(pSelf, pPath BMA_DBG_OPT_PARAM(#type)))
+#if 0
 
 BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_StrTree_rmv_impl)(
 	bma_StrTree *pSelf,
@@ -2468,19 +2522,37 @@ void test_Shrd(void) {
 	bma_TestWkInt_dec(p2);
 }
 
-int *test_new_int(int x) {
-	int *p = bma_malloc(int);
-	*p = x;
-	return p;
-}
-
 void test_StrTree(void) {
 	bma_StrTree t;
-	bma_StrTree_ctor(&t, int, NULL);
-	bma_StrTree_put(&t, "a.b.c", int, test_new_int(1));
-	bma_StrTree_put(&t, "a.b.d", int, test_new_int(2));
-	bma_StrTree_put(&t, "a.e", int, test_new_int(3));
-	bma_StrTree_put(&t, "f", int, test_new_int(4));
+	int x, *p;
+	bma_StrTree_ctor(&t, '.', int, NULL);
+	x = 1;
+	bma_StrTree_put(&t, "a.b.c", int, &x);
+	x = 2;
+	bma_StrTree_put(&t, "a.b.d", int, &x);
+	x = 3;
+	bma_StrTree_put(&t, "a.e", int, &x);
+	x = 4;
+	bma_StrTree_put(&t, "f", int, &x);
+	x = 5;
+	bma_StrTree_put(&t, "", int, &x);
+	p = bma_StrTree_get(&t, "a.b.c", int);
+	BMA_EXPECT(p != NULL);
+	BMA_EXPECT(*p == 1);
+	p = bma_StrTree_get(&t, "a.b.d", int);
+	BMA_EXPECT(p != NULL);
+	BMA_EXPECT(*p == 2);
+	p = bma_StrTree_get(&t, "a.e", int);
+	BMA_EXPECT(p != NULL);
+	BMA_EXPECT(*p == 3);
+	p = bma_StrTree_get(&t, "f", int);
+	BMA_EXPECT(p != NULL);
+	BMA_EXPECT(*p == 4);
+	p = bma_StrTree_get(&t, "", int);
+	BMA_EXPECT(p != NULL);
+	BMA_EXPECT(*p == 5);
+	p = bma_StrTree_get(&t, "a.b.x", int);
+	BMA_EXPECT(p == NULL);
 	bma_StrTree_dtor(&t, NULL);
 }
 

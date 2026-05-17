@@ -848,6 +848,79 @@ BMA_DEF void bma_Wk_dec(bma_Wk *pSelf);
 		bma_Wk_dec(&pSelf->impl); \
 	}
 
+typedef struct bma_StrTreeNode_ {
+	bma_StrN key;
+	void *pOptValue;
+	bma_dtor_t pValueDtor;
+	bma_Vec children; /* Vec of bma_StrTreeNode */
+} bma_StrTreeNode_;
+
+BMA_DEF void bma_StrTreeNode_dtor(bma_StrTreeNode_ *pSelf, bma_IMemAlloc *pAlloc);
+
+typedef struct bma_StrTree {
+	bma_StrTreeNode_ root;
+#if BMA_DBG
+	const char *pType;
+#endif
+} bma_StrTree;
+
+BMA_DEF void BMA_DBG_SFFX(bma_StrTree_ctor_impl)(
+	bma_StrTree *pSelf,
+	bma_dtor_t pElemDtor,
+	bma_IMemAlloc *pAlloc
+	BMA_DBG_OPT_PARAM(const char *pType)
+);
+
+#define bma_StrTree_ctor_ext(pSelf, type, pElemDtor, pAlloc) \
+	BMA_DBG_SFFX(bma_StrTree_ctor_impl)( \
+		pSelf, \
+		pElemDtor, \
+		pAlloc \
+		BMA_DBG_OPT_PARAM(#type) \
+	)
+
+#define bma_StrTree_ctor(pSelf, type, pElemDtor) \
+	BMA_DBG_SFFX(bma_StrTree_ctor_impl)( \
+		pSelf, \
+		pElemDtor, \
+		bma_getDfltMemAlloc() \
+		BMA_DBG_OPT_PARAM(#type) \
+	)
+
+BMA_DEF void bma_StrTree_dtor(bma_StrTree *pSelf, bma_IMemAlloc *pAlloc);
+
+BMA_DEF void BMA_DBG_SFFX(bma_StrTree_put_impl)(
+	bma_StrTree *pSelf,
+	const char *pPath,
+	void *pValue
+	BMA_DBG_OPT_PARAM(const char *pType)
+);
+
+#define bma_StrTree_put(pSelf, pPath, type, pValue) \
+	BMA_DBG_SFFX(bma_StrTree_put_impl)(pSelf, \
+	                                   pPath, \
+	                                   pValue \
+	                                   BMA_DBG_OPT_PARAM(#type))
+
+BMA_DEF void *BMA_DBG_SFFX(bma_StrTree_get_impl)(
+	bma_StrTree *pSelf,
+	const char *pPath
+	BMA_DBG_OPT_PARAM(const char *pType)
+);
+
+#define bma_StrTree_get(pSelf, pPath, type) \
+	((type*)BMA_DBG_SFFX(bma_StrTree_get_impl)(pSelf, pPath BMA_DBG_OPT_PARAM(#type)))
+
+BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_StrTree_rmv_impl)(
+	bma_StrTree *pSelf,
+	const char *pPath,
+	void **ppOptOutValue
+	BMA_DBG_OPT_PARAM(const char *pType)
+);
+
+#define bma_StrTree_rmv(pSelf, pPath, type, ppOutValue) \
+	BMA_DBG_SFFX(bma_StrTree_rmv_impl)(pSelf, pPath, (void**)ppOutValue BMA_DBG_OPT_PARAM(#type))
+
 #ifdef __cplusplus
 	} /* extern "C" */
 #endif
@@ -1808,6 +1881,146 @@ BMA_DEF void bma_Wk_dec(bma_Wk *pSelf) {
 	}
 }
 
+BMA_DEF void bma_StrTreeNode_dtor(bma_StrTreeNode_ *pSelf, bma_IMemAlloc *pAlloc_) {
+	bma_IMemAlloc *pAlloc;
+	(void)pAlloc_;
+	bma_assert(pSelf != NULL);
+	pAlloc = bma_Vec_getAlloc(&pSelf->children);
+	if (pSelf->key.len > 0) {
+		bma_StrN_dtor(&pSelf->key, pAlloc);
+	}
+	if (pSelf->pOptValue != NULL) {
+		if (pSelf->pValueDtor != NULL) {
+			(*pSelf->pValueDtor)(pSelf->pOptValue, pAlloc);
+		}
+		bma_free_ext(pAlloc, pSelf->pOptValue);
+	}
+	bma_Vec_dtor(&pSelf->children, NULL);
+}
+
+BMA_DEF void BMA_DBG_SFFX(bma_StrTree_ctor_impl)(
+	bma_StrTree *pSelf,
+	bma_dtor_t pElemDtor,
+	bma_IMemAlloc *pAlloc
+	BMA_DBG_OPT_PARAM(const char *pType)
+) {
+	bma_assert(pSelf != NULL);
+	bma_assert(pAlloc != NULL);
+	pSelf->root.key.p = (char*)"";
+	pSelf->root.key.len = 0;
+	pSelf->root.pOptValue = NULL;
+	pSelf->root.pValueDtor = pElemDtor;
+	bma_Vec_ctor_ext(&pSelf->root.children, bma_StrTreeNode_, (bma_dtor_t)&bma_StrTreeNode_dtor, pAlloc);
+#if BMA_DBG
+	pSelf->pType = pType;
+#endif
+}
+
+BMA_DEF void bma_StrTree_dtor(bma_StrTree *pSelf, bma_IMemAlloc *pAlloc) {
+	bma_assert(pSelf != NULL);
+	(void)pAlloc;
+	bma_StrTreeNode_dtor(&pSelf->root, NULL);
+#if BMA_DBG
+	memset(pSelf, 0xFF, sizeof(*pSelf));
+#endif
+}
+
+BMA_DEF void BMA_DBG_SFFX(bma_StrTree_put_impl)(
+	bma_StrTree *pSelf,
+	const char *pPath,
+	void *pValue
+	BMA_DBG_OPT_PARAM(const char *pType)
+) {
+	bma_IMemAlloc *pAlloc;
+	size_t pathLen;
+	bma_StrTreeNode_ *pNode;
+	bma_bool_t end = BMA_FALSE;
+	bma_assert(pSelf != NULL);
+	bma_assert(pPath != NULL);
+	bma_assert(pValue != NULL);
+	bma_assert(strcmp(pType, pSelf->pType) == 0);
+	pAlloc = bma_Vec_getAlloc(&pSelf->root.children);
+	pathLen = strlen(pPath);
+	if (pathLen == 0) {
+		/* root node */
+		if (pSelf->root.pOptValue != NULL) {
+			if (pSelf->root.pValueDtor != NULL) {
+				(*pSelf->root.pValueDtor)(pSelf->root.pOptValue, pAlloc);
+			}
+			bma_free_ext(pAlloc, pSelf->root.pOptValue);
+		}
+		pSelf->root.pOptValue = pValue;
+		return;
+	}
+	pNode = &pSelf->root;
+	while (!end) {
+		const char *p;
+		size_t l, i;
+		bma_bool_t found = BMA_FALSE;
+		p = (const char*)memchr(pPath, '.', pathLen);
+		if (p != NULL) {
+			l = (size_t)(p - pPath);
+		}
+		else {
+			l = pathLen;
+			end = BMA_TRUE;
+		}
+		for (i=0; i<bma_Vec_getSz(&pNode->children); ++i) {
+			bma_StrTreeNode_ *pChild = bma_Vec_at(&pNode->children, i, bma_StrTreeNode_);
+			if ((pChild->key.len == l) && (memcmp(pChild->key.p, pPath, l) == 0)) {
+				pNode = pChild;
+				found = BMA_TRUE;
+				break;
+			}
+		}
+		if (!found) {
+			bma_StrTreeNode_ newNode;
+			newNode.key.p = bma_strndup_ext(pPath, l, pAlloc);
+			newNode.key.len = l;
+			newNode.pOptValue = NULL;
+			newNode.pValueDtor = pSelf->root.pValueDtor;
+			bma_Vec_ctor_ext(&newNode.children, bma_StrTreeNode_, (bma_dtor_t)&bma_StrTreeNode_dtor, pAlloc);
+			bma_Vec_appnd(&pNode->children, bma_StrTreeNode_, &newNode);
+			pNode = bma_Vec_at(&pNode->children, bma_Vec_getSz(&pNode->children) - 1u, bma_StrTreeNode_);
+		}
+		if (!end) {
+			pPath += (l + 1u);
+			pathLen -= (l + 1u);
+		}
+	}
+	if (pNode->pOptValue != NULL) {
+		if (pNode->pValueDtor != NULL) {
+			(*pNode->pValueDtor)(pNode->pOptValue, pAlloc);
+		}
+		bma_free_ext(pAlloc, pNode->pOptValue);
+	}
+	pNode->pOptValue = pValue;
+}
+
+#if 0
+
+BMA_DEF void *BMA_DBG_SFFX(bma_StrTree_get_impl)(
+	bma_StrTree *pSelf,
+	const char *pPath
+	BMA_DBG_OPT_PARAM(const char *pType)
+);
+
+#define bma_StrTree_get(pSelf, pPath, type) \
+	((type*)BMA_DBG_SFFX(bma_StrTree_get_impl)(pSelf, pPath BMA_DBG_OPT_PARAM(#type)))
+
+BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_StrTree_rmv_impl)(
+	bma_StrTree *pSelf,
+	const char *pPath,
+	void **ppOptOutValue
+	BMA_DBG_OPT_PARAM(const char *pType)
+);
+
+#define bma_StrTree_rmv(pSelf, pPath, type, ppOutValue) \
+	BMA_DBG_SFFX(bma_StrTree_rmv_impl)(pSelf, pPath, (void**)ppOutValue BMA_DBG_OPT_PARAM(#type))
+
+
+#endif
+
 #ifdef __cplusplus
 	} /* extern "C" */
 #endif
@@ -2255,6 +2468,22 @@ void test_Shrd(void) {
 	bma_TestWkInt_dec(p2);
 }
 
+int *test_new_int(int x) {
+	int *p = bma_malloc(int);
+	*p = x;
+	return p;
+}
+
+void test_StrTree(void) {
+	bma_StrTree t;
+	bma_StrTree_ctor(&t, int, NULL);
+	bma_StrTree_put(&t, "a.b.c", int, test_new_int(1));
+	bma_StrTree_put(&t, "a.b.d", int, test_new_int(2));
+	bma_StrTree_put(&t, "a.e", int, test_new_int(3));
+	bma_StrTree_put(&t, "f", int, test_new_int(4));
+	bma_StrTree_dtor(&t, NULL);
+}
+
 #ifdef __cplusplus
 	} /* extern "C" */
 #endif
@@ -2284,6 +2513,7 @@ int main(int argc, char *argv[]) {
 	BMA_TEST(test_hashMap_putGet);
 	BMA_TEST(test_hashMap_manyElements);
 	BMA_TEST(test_Shrd);
+	BMA_TEST(test_StrTree);
 
 	printf("All tests passed.\n");
 	fflush(stdout);

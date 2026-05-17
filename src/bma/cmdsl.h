@@ -403,17 +403,19 @@ BMA_DEF bma_bool_t bma_cmdsl_funcPop(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void 
 	return BMA_FALSE;
 }
 
+BMA_DEF_VEC(bma_CmdslStrNVec, bma_StrN, (bma_dtor_t)&bma_StrN_dtor)
+
 typedef struct bma_CmdslUsrDefndFuncData {
 	bma_StrN name;
 	bma_ICmdslNode *pBody;
-	bma_Vec paramNames;
+	bma_CmdslStrNVec paramNames;
 } bma_CmdslUsrDefndFuncData;
 
 void bma_CmdslUsrDefndFuncData_dtor(bma_CmdslUsrDefndFuncData *pSelf, bma_IMemAlloc *pAlloc) {
 	bma_assert(pSelf != NULL);
 	bma_assert(pAlloc != NULL);
 	bma_assert(pSelf->pBody != NULL);
-	bma_Vec_dtor(&pSelf->paramNames, NULL);
+	bma_CmdslStrNVec_dtor(&pSelf->paramNames, NULL);
 	pSelf->pBody->pDestruct(pSelf->pBody, pAlloc);
 	bma_free_ext(pAlloc, pSelf->pBody);
 	bma_free_ext(pAlloc, pSelf->name.p);
@@ -426,27 +428,27 @@ bma_bool_t bma_cmdsl_funcUsrDefnd(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void *pU
 	bma_CmdslUsrDefndFuncData* pUserData = (bma_CmdslUsrDefndFuncData*)pUserData_;
 	size_t i;
 	bma_bool_t result = BMA_FALSE;
-	if (numOfParams > bma_Vec_getSz(&pUserData->paramNames)) {
+	if (numOfParams > bma_CmdslStrNVec_getSz(&pUserData->paramNames)) {
 		bma_StrBldr_clear(pDst);
 		bma_StrBldr_appndStr(pDst, "Too many parameters for function '");
 		bma_StrBldr_appndStrN(pDst, pUserData->name.p, pUserData->name.len);
 		bma_StrBldr_appndStr(pDst, "()'. The function accepts max. ");
-		bma_StrBldr_appndUnsgnd(pDst, bma_Vec_getSz(&pUserData->paramNames));
+		bma_StrBldr_appndUnsgnd(pDst, bma_CmdslStrNVec_getSz(&pUserData->paramNames));
 		bma_StrBldr_appndStr(pDst, " but ");
 		bma_StrBldr_appndUnsgnd(pDst, numOfParams);
 		bma_StrBldr_appndStr(pDst, " were passed");
 	}
 
 	/* Push all variables that have the same name as the parameters onto stack so collisions are avoided */
-	for (i=0; i<bma_Vec_getSz(&pUserData->paramNames); ++i) {
-		bma_StrN *pParamName = bma_Vec_at(&pUserData->paramNames, i, bma_StrN);
+	for (i=0; i<bma_CmdslStrNVec_getSz(&pUserData->paramNames); ++i) {
+		bma_StrN *pParamName = bma_CmdslStrNVec_at(&pUserData->paramNames, i);
 		bma_Cmdsl_push_ext(pCmdsl, pParamName->p, pParamName->len);
 	}
 	
 	/* Put parameter into variables so that the implementation of the function can access them via %get(name) */
 	for (i=0; i<numOfParams; ++i) {
 		bma_bool_t couldSet;
-		bma_StrN *pParamName = bma_Vec_at(&pUserData->paramNames, i, bma_StrN);
+		bma_StrN *pParamName = bma_CmdslStrNVec_at(&pUserData->paramNames, i);
 		couldSet = bma_Cmdsl_setVar_ext(pCmdsl, pParamName->p, pParamName->len, bma_StrBldr_getStr(&pParams[i]), bma_StrBldr_getSz(&pParams[i]));
 		bma_assert(couldSet);
 		(void)couldSet;
@@ -455,9 +457,9 @@ bma_bool_t bma_cmdsl_funcUsrDefnd(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void *pU
            Now, call code: */
 	result = (*pUserData->pBody->pEval)(pUserData->pBody, pDst, pCmdsl);
 	/* Undo push by pop in reverse order to restore variables */
-	i = bma_Vec_getSz(&pUserData->paramNames);
+	i = bma_CmdslStrNVec_getSz(&pUserData->paramNames);
 	while(i-- > 0) {
-		bma_StrN *pParamName = bma_Vec_at(&pUserData->paramNames, i, bma_StrN);
+		bma_StrN *pParamName = bma_CmdslStrNVec_at(&pUserData->paramNames, i);
 		bma_Cmdsl_pop_ext(pCmdsl, pParamName->p, pParamName->len);
 	}
 	return result;
@@ -533,13 +535,13 @@ BMA_DEF bma_bool_t bma_cmdsl_funcDef(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void 
 	pFuDt->name.p = bma_strndup_ext(name.p, name.len, pCmdsl->pAlloc);
 	pFuDt->name.len = name.len;
 	pFuDt->pBody = pBody;
-	bma_Vec_ctor_ext(&pFuDt->paramNames, bma_StrN, (bma_dtor_t)&bma_StrN_dtor, pCmdsl->pAlloc);
-	bma_Vec_rsrv(&pFuDt->paramNames, numFuncParams);
+	bma_CmdslStrNVec_ctor(&pFuDt->paramNames, pCmdsl->pAlloc);
+	bma_CmdslStrNVec_rsrv(&pFuDt->paramNames, numFuncParams);
 	for(i=2u; i<(numOfParams-1); ++i) {
 		bma_StrN paramName;
 		paramName.p = bma_strndup_ext(bma_StrBldr_getStr(&pParams[i]), bma_StrBldr_getSz(&pParams[i]), pCmdsl->pAlloc);
 		paramName.len = bma_StrBldr_getSz(&pParams[i]);
-		bma_Vec_appnd(&pFuDt->paramNames, bma_StrN, &paramName);
+		bma_CmdslStrNVec_appnd(&pFuDt->paramNames, &paramName);
 	}
 	fu.pUserData = pFuDt;
 	fu.pUserDataDtor = (bma_dtor_t)&bma_CmdslUsrDefndFuncData_dtor;
@@ -673,16 +675,18 @@ BMA_DEF void bma_CmdslNodeEmpty_ctor(bma_CmdslNodeEmpty *pSelf) {
 	pSelf->base.pDestruct = (bma_dtor_t)&bma_CmdslNodeEmpty_dtor;
 	pSelf->base.pEval = &bma_CmdslNodeEmpty_eval;
 }
-		
+
+BMA_DEF_VEC(bma_CmdslNodePtrVec, bma_ICmdslNode*, (bma_dtor_t)&bma_CmdslNodePtr_dtor)
+
 typedef struct bma_CmdslNodeFuncCall {
 	bma_ICmdslNode base;
 	bma_StrN name;
-	bma_Vec args;
+	bma_CmdslNodePtrVec args;
 } bma_CmdslNodeFuncCall;
 
 BMA_DEF void bma_cmdsl_NodeFunctionCall_destruct(bma_CmdslNodeFuncCall *pSelf, bma_IMemAlloc *pAlloc) {
 	bma_assert(pSelf != NULL);
-	bma_Vec_dtor(&pSelf->args, NULL);
+	bma_CmdslNodePtrVec_dtor(&pSelf->args, NULL);
 	bma_StrN_dtor(&pSelf->name, pAlloc);
 #if BMA_DBG
 	memset(pSelf, 0xFF, sizeof(*pSelf));
@@ -707,11 +711,11 @@ BMA_DEF bma_bool_t bma_cmdsl_NodeFunctionCall_eval(void *pSelf_, bma_StrBldr *pD
 		return BMA_FALSE;
 	}
 	func = *pFunc; /* Save state because map can get reallocated during function call */
-	nargs = bma_Vec_getSz(&pSelf->args);
+	nargs = bma_CmdslNodePtrVec_getSz(&pSelf->args);
 	bma_Cmdsl_allcTmpStrBldrs(pCmdsl, nargs, &tmpStrBldrs);
 	for (i=0; i<nargs; ++i) {
 		/* evaluate arguments */
-		bma_ICmdslNode *pArgNode = *bma_Vec_at(&pSelf->args, i, bma_ICmdslNode*);
+		bma_ICmdslNode *pArgNode = *bma_CmdslNodePtrVec_at(&pSelf->args, i);
 		bma_StrBldr *pArg = bma_CmdslTmpStrBldrsVec_at(&tmpStrBldrs, i);
 		if (!(*pArgNode->pEval)(pArgNode, pArg, pCmdsl)) {
 			result = BMA_FALSE;
@@ -733,18 +737,18 @@ BMA_DEF void bma_cmdsl_NodeFunctionCall_construct(bma_CmdslNodeFuncCall *pSelf, 
 	pSelf->base.pEval = &bma_cmdsl_NodeFunctionCall_eval;
 	pSelf->name.p = bma_strndup_ext(pName->p, pName->len, pAlloc);
 	pSelf->name.len = pName->len;
-	bma_Vec_ctor_ext(&pSelf->args, bma_ICmdslNode*, (bma_dtor_t)&bma_CmdslNodePtr_dtor, pAlloc);
+	bma_CmdslNodePtrVec_ctor(&pSelf->args, pAlloc);
 }
 
 typedef struct bma_CmdslNodeSeq {
 	bma_ICmdslNode base;
-	bma_Vec nodes; /* of bma_CmdslNodeAndAlloc* */
+	bma_CmdslNodePtrVec nodes;
 } bma_CmdslNodeSeq;
 
 BMA_DEF void bma_CmdslNodeSeq_dtor(bma_CmdslNodeSeq *pSelf, bma_IMemAlloc *pAlloc) {
 	bma_assert(pSelf != NULL);
 	(void)pAlloc;
-	bma_Vec_dtor(&pSelf->nodes, NULL);
+	bma_CmdslNodePtrVec_dtor(&pSelf->nodes, NULL);
 #if BMA_DBG
 	memset(pSelf, 0xFF, sizeof(*pSelf));
 #endif
@@ -756,8 +760,8 @@ BMA_DEF bma_bool_t bma_CmdslNodeSeq_eval(void *pSelf_, bma_StrBldr *pDst, bma_Cm
 	bma_assert(pSelf != NULL);
 	bma_assert(pDst != NULL);
 	bma_assert(pCmdsl != NULL);
-	for (i=0; i<bma_Vec_getSz(&pSelf->nodes); ++i) {
-		bma_ICmdslNode *pNode = *bma_Vec_at(&pSelf->nodes, i, bma_ICmdslNode*);
+	for (i=0; i<bma_CmdslNodePtrVec_getSz(&pSelf->nodes); ++i) {
+		bma_ICmdslNode *pNode = *bma_CmdslNodePtrVec_at(&pSelf->nodes, i);
 		if (!(*pNode->pEval)(pNode, pDst, pCmdsl)) {
 			return BMA_FALSE;
 		}
@@ -770,13 +774,13 @@ BMA_DEF void bma_CmdslNodeSeq_ctor(bma_CmdslNodeSeq *pSelf, bma_IMemAlloc *pAllo
 	bma_assert(pAlloc != NULL);
 	pSelf->base.pDestruct = (bma_dtor_t)&bma_CmdslNodeSeq_dtor;
 	pSelf->base.pEval = &bma_CmdslNodeSeq_eval;
-	bma_Vec_ctor_ext(&pSelf->nodes, bma_ICmdslNode*, (bma_dtor_t)&bma_CmdslNodePtr_dtor, pAlloc);
+	bma_CmdslNodePtrVec_ctor(&pSelf->nodes, pAlloc);
 }
 
 BMA_DEF void bma_CmdslNodeSeq_appnd(bma_CmdslNodeSeq *pSelf, bma_ICmdslNode *pNode) {
 	bma_assert(pSelf != NULL);
 	bma_assert(pNode != NULL);
-	bma_Vec_appnd(&pSelf->nodes, bma_ICmdslNode*, &pNode);
+	bma_CmdslNodePtrVec_appnd(&pSelf->nodes, &pNode);
 }
 
 BMA_DEF void bma_CmdslFuncWthUsrData_dtor(bma_CmdslFuncWthUsrData* pSelf, bma_IMemAlloc *pAlloc) {
@@ -1205,12 +1209,12 @@ BMA_DEF bma_ICmdslNode *bma_cmdsl_parseFunctionCall(bma_Cmdsl *pSelf, bma_cmdsl_
 			pEmpty = bma_malloc_ext(pSelf->pAlloc, bma_CmdslNodeEmpty);
 			bma_CmdslNodeEmpty_ctor(pEmpty);
 			pArg = (bma_ICmdslNode*)pEmpty;
-			bma_Vec_appnd(&pFuncCall->args, bma_ICmdslNode*, &pArg);
+			bma_CmdslNodePtrVec_appnd(&pFuncCall->args, &pArg);
 			continue;
 		}
 		pArg = bma_cmdsl_parseElement(pSelf, pStr, pErrFormatter, BMA_TRUE);
 		if (pArg == NULL) goto err;
-		bma_Vec_appnd(&pFuncCall->args, bma_ICmdslNode*, &pArg);
+		bma_CmdslNodePtrVec_appnd(&pFuncCall->args, &pArg);
 		if (pStr->len == 0) {
 			if (pErrFormatter != NULL) {
 				bma_cmdsl_printErrAtOffs(pErrFormatter, pStr, "reached end while before ')'");

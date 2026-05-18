@@ -542,6 +542,7 @@ BMA_DEF void bma_Vec_clear(bma_Vec *pSelf);
 		bma_Vec_clear(&pSelf->impl); \
 	}
 
+
 typedef struct bma_HshMpBcktHdr_ bma_HshMpBcktHdr_;
 
 typedef struct bma_HshMp {
@@ -922,6 +923,38 @@ BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_StrTree_rmv_impl)(
 
 #define bma_StrTree_rmv(pSelf, pPath, type, pOptOutValue) \
 	BMA_DBG_SFFX(bma_StrTree_rmv_impl)(pSelf, pPath, pOptOutValue BMA_DBG_OPT_PARAM(#type))
+
+#define BMA_DEF_STRTREE(name_, sep_, type_, pElemDtor_) \
+	\
+	typedef struct name_ { \
+		bma_StrTree impl; \
+	} name_; \
+	\
+	bma_inline void name_ ## _ctor_ext(name_ *pSelf, bma_IMemAlloc* pAlloc) { \
+		bma_StrTree_ctor_ext(&pSelf->impl, sep_, type_, pElemDtor_, pAlloc); \
+	} \
+	\
+	bma_inline void name_ ## _ctor(name_ *pSelf) { \
+		bma_StrTree_ctor(&pSelf->impl, sep_, type_, pElemDtor_); \
+	} \
+	\
+	bma_inline void name_ ## _dtor(name_ *pSelf, bma_IMemAlloc *pAlloc) { \
+		(void)pAlloc; \
+		bma_StrTree_dtor(&pSelf->impl, NULL); \
+	} \
+	\
+	bma_inline type_ *name_ ## _put(name_ *pSelf, const char *pPath, type_ *pValue) { \
+		return (type_*)bma_StrTree_put(&pSelf->impl, pPath, type_, pValue); \
+	} \
+	\
+	bma_inline type_ *name_ ## _get(name_ *pSelf, const char *pPath) { \
+		return bma_StrTree_get(&pSelf->impl, pPath, type_); \
+	} \
+	\
+	bma_inline bma_bool_t name_ ## _rmv(name_ *pSelf, const char *pPath, type_ *pOptOutValue) { \
+		return bma_StrTree_rmv(&pSelf->impl, pPath, type_, pOptOutValue); \
+	} \
+
 
 #ifdef __cplusplus
 	} /* extern "C" */

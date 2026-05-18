@@ -47,6 +47,8 @@ typedef unsigned char bma_LogLevel;
 
 typedef struct bma_Log bma_Log;
 
+BMA_DEF void bma_log_init(void);
+BMA_DEF void bma_log_clnup(void);
 BMA_DEF bma_Log *bma_Log_get_impl_(const char *pPath);
 BMA_DEF bma_bool_t bma_Log_isLoggable_impl_(bma_Log *pLog, bma_LogLevel level);
 BMA_DEF void bma_Log_log_impl_(bma_Log *pLog, bma_LogLevel level, const char *pFile, int line, const char *pFmt, ...);
@@ -56,55 +58,55 @@ BMA_DEF void bma_Log_log_impl_(bma_Log *pLog, bma_LogLevel level, const char *pF
 #define bma_Log_get(pPath) ((bma_Log*)NULL)
 #define bma_Log_isLoggable(pLog, level) (BMA_FALSE)
 
-#define bma_Log_debug_0(pLog, pFmt) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_debug_1(pLog, pFmt, p0) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_debug_2(pLog, pFmt, p0, p1) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_debug_3(pLog, pFmt, p0, p1, p2) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_debug_4(pLog, pFmt, p0, p1, p2, p3) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_debug_5(pLog, pFmt, p0, p1, p2, p3, p4) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_debug_6(pLog, pFmt, p0, p1, p2, p3, p4, p5) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_debug_7(pLog, pFmt, p0, p1, p2, p3, p4, p5, p6) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_debug_8(pLog, pFmt, p0, p1, p2, p3, p4, p5, p6, p7) do { (void)pLog; (void)pFmt; } while(0)
+#define bma_Log_debug_0(pLog, pFmt) ((void)pLog)
+#define bma_Log_debug_1(pLog, pFmt, p0) ((void)pLog)
+#define bma_Log_debug_2(pLog, pFmt, p0, p1) ((void)pLog)
+#define bma_Log_debug_3(pLog, pFmt, p0, p1, p2) ((void)pLog)
+#define bma_Log_debug_4(pLog, pFmt, p0, p1, p2, p3) ((void)pLog)
+#define bma_Log_debug_5(pLog, pFmt, p0, p1, p2, p3, p4) ((void)pLog)
+#define bma_Log_debug_6(pLog, pFmt, p0, p1, p2, p3, p4, p5) ((void)pLog)
+#define bma_Log_debug_7(pLog, pFmt, p0, p1, p2, p3, p4, p5, p6) ((void)pLog)
+#define bma_Log_debug_8(pLog, pFmt, p0, p1, p2, p3, p4, p5, p6, p7) ((void)pLog)
 
-#define bma_Log_info_0(pLog, pFmt) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_info_1(pLog, pFmt, p0) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_info_2(pLog, pFmt, p0, p1) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_info_3(pLog, pFmt, p0, p1, p2) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_info_4(pLog, pFmt, p0, p1, p2, p3) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_info_5(pLog, pFmt, p0, p1, p2, p3, p4) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_info_6(pLog, pFmt, p0, p1, p2, p3, p4, p5) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_info_7(pLog, pFmt, p0, p1, p2, p3, p4, p5, p6) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_info_8(pLog, pFmt, p0, p1, p2, p3, p4, p5, p6, p7) do { (void)pLog; (void)pFmt; } while(0)
+#define bma_Log_info_0(pLog, pFmt) ((void)pLog)
+#define bma_Log_info_1(pLog, pFmt, p0) ((void)pLog)
+#define bma_Log_info_2(pLog, pFmt, p0, p1) ((void)pLog)
+#define bma_Log_info_3(pLog, pFmt, p0, p1, p2) ((void)pLog)
+#define bma_Log_info_4(pLog, pFmt, p0, p1, p2, p3) ((void)pLog)
+#define bma_Log_info_5(pLog, pFmt, p0, p1, p2, p3, p4) ((void)pLog)
+#define bma_Log_info_6(pLog, pFmt, p0, p1, p2, p3, p4, p5) ((void)pLog)
+#define bma_Log_info_7(pLog, pFmt, p0, p1, p2, p3, p4, p5, p6) ((void)pLog)
+#define bma_Log_info_8(pLog, pFmt, p0, p1, p2, p3, p4, p5, p6, p7) ((void)pLog)
 
-#define bma_Log_warn_0(pLog, pFmt) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_warn_1(pLog, pFmt, p0) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_warn_2(pLog, pFmt, p0, p1) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_warn_3(pLog, pFmt, p0, p1, p2) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_warn_4(pLog, pFmt, p0, p1, p2, p3) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_warn_5(pLog, pFmt, p0, p1, p2, p3, p4) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_warn_6(pLog, pFmt, p0, p1, p2, p3, p4, p5) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_warn_7(pLog, pFmt, p0, p1, p2, p3, p4, p5, p6) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_warn_8(pLog, pFmt, p0, p1, p2, p3, p4, p5, p6, p7) do { (void)pLog; (void)pFmt; } while(0)
+#define bma_Log_warn_0(pLog, pFmt) ((void)pLog)
+#define bma_Log_warn_1(pLog, pFmt, p0) ((void)pLog)
+#define bma_Log_warn_2(pLog, pFmt, p0, p1) ((void)pLog)
+#define bma_Log_warn_3(pLog, pFmt, p0, p1, p2) ((void)pLog)
+#define bma_Log_warn_4(pLog, pFmt, p0, p1, p2, p3) ((void)pLog)
+#define bma_Log_warn_5(pLog, pFmt, p0, p1, p2, p3, p4) ((void)pLog)
+#define bma_Log_warn_6(pLog, pFmt, p0, p1, p2, p3, p4, p5) ((void)pLog)
+#define bma_Log_warn_7(pLog, pFmt, p0, p1, p2, p3, p4, p5, p6) ((void)pLog)
+#define bma_Log_warn_8(pLog, pFmt, p0, p1, p2, p3, p4, p5, p6, p7) ((void)pLog)
 
-#define bma_Log_error_0(pLog, pFmt) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_error_1(pLog, pFmt, p0) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_error_2(pLog, pFmt, p0, p1) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_error_3(pLog, pFmt, p0, p1, p2) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_error_4(pLog, pFmt, p0, p1, p2, p3) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_error_5(pLog, pFmt, p0, p1, p2, p3, p4) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_error_6(pLog, pFmt, p0, p1, p2, p3, p4, p5) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_error_7(pLog, pFmt, p0, p1, p2, p3, p4, p5, p6) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_error_8(pLog, pFmt, p0, p1, p2, p3, p4, p5, p6, p7) do { (void)pLog; (void)pFmt; } while(0)
+#define bma_Log_error_0(pLog, pFmt) ((void)pLog)
+#define bma_Log_error_1(pLog, pFmt, p0) ((void)pLog)
+#define bma_Log_error_2(pLog, pFmt, p0, p1) ((void)pLog)
+#define bma_Log_error_3(pLog, pFmt, p0, p1, p2) ((void)pLog)
+#define bma_Log_error_4(pLog, pFmt, p0, p1, p2, p3) ((void)pLog)
+#define bma_Log_error_5(pLog, pFmt, p0, p1, p2, p3, p4) ((void)pLog)
+#define bma_Log_error_6(pLog, pFmt, p0, p1, p2, p3, p4, p5) ((void)pLog)
+#define bma_Log_error_7(pLog, pFmt, p0, p1, p2, p3, p4, p5, p6) ((void)pLog)
+#define bma_Log_error_8(pLog, pFmt, p0, p1, p2, p3, p4, p5, p6, p7) ((void)pLog)
 
-#define bma_Log_fatal_0(pLog, pFmt) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_fatal_1(pLog, pFmt, p0) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_fatal_2(pLog, pFmt, p0, p1) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_fatal_3(pLog, pFmt, p0, p1, p2) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_fatal_4(pLog, pFmt, p0, p1, p2, p3) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_fatal_5(pLog, pFmt, p0, p1, p2, p3, p4) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_fatal_6(pLog, pFmt, p0, p1, p2, p3, p4, p5) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_fatal_7(pLog, pFmt, p0, p1, p2, p3, p4, p5, p6) do { (void)pLog; (void)pFmt; } while(0)
-#define bma_Log_fatal_8(pLog, pFmt, p0, p1, p2, p3, p4, p5, p6, p7) do { (void)pLog; (void)pFmt; } while(0)
+#define bma_Log_fatal_0(pLog, pFmt) ((void)pLog)
+#define bma_Log_fatal_1(pLog, pFmt, p0) ((void)pLog)
+#define bma_Log_fatal_2(pLog, pFmt, p0, p1) ((void)pLog)
+#define bma_Log_fatal_3(pLog, pFmt, p0, p1, p2) ((void)pLog)
+#define bma_Log_fatal_4(pLog, pFmt, p0, p1, p2, p3) ((void)pLog)
+#define bma_Log_fatal_5(pLog, pFmt, p0, p1, p2, p3, p4) ((void)pLog)
+#define bma_Log_fatal_6(pLog, pFmt, p0, p1, p2, p3, p4, p5) ((void)pLog)
+#define bma_Log_fatal_7(pLog, pFmt, p0, p1, p2, p3, p4, p5, p6) ((void)pLog)
+#define bma_Log_fatal_8(pLog, pFmt, p0, p1, p2, p3, p4, p5, p6, p7) ((void)pLog)
 
 #else /* BMA_LOG_DISABLE not defined */
 
@@ -181,6 +183,33 @@ BMA_DEF void bma_Log_log_impl_(bma_Log *pLog, bma_LogLevel level, const char *pF
 struct bma_Log {
 	/* TODO */
 };
+
+BMA_DEF void bma_Log_dtor(bma_Log *pLog, bma_IMemAlloc *pAlloc) {
+	(void)pLog;
+	(void)pAlloc;
+	/* TODO */
+}
+
+BMA_DEF_STRTREE(bma_LogTree, '.', bma_Log, (bma_dtor_t)&bma_Log_dtor)
+
+static bma_LogTree g_logTree;
+
+BMA_DEF void bma_log_init(void) {
+	bma_LogTree_ctor(&g_logTree);
+}
+
+BMA_DEF void bma_log_clnup(void) {
+	bma_LogTree_dtor(&g_logTree, NULL);
+}
+
+BMA_DEF bma_Log *bma_Log_get_impl_(const char *pPath) {
+	bma_Log *pLog, newLog;
+	pLog = bma_LogTree_get(&g_logTree, pPath);
+	if (pLog != NULL) return pLog;
+	pLog = bma_LogTree_put(&g_logTree, pPath, &newLog);
+	return pLog;
+}
+
 
 #ifdef __cplusplus
 	} /* extern "C" */

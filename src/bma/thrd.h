@@ -69,6 +69,7 @@ Bau 'ma's basic multithreading support
 		#undef BMA_UNDEF_NOMINMAX
 	#endif
 #elif BMA_POSIX_THRDS
+	#include <time.h>
 	#include <pthread.h>
 #endif
 
@@ -215,7 +216,9 @@ BMA_DEF void bma_Wk_dec(bma_Wk *pSelf);
 	typedef HANDLE bma_Thrd;
 #elif BMA_POSIX_THRDS
 	typedef pthread_mutex_t bma_Mtx;
+	typedef pthread_rwlock_t bma_Rw;
 	typedef pthread_cond_t bma_Cnd;
+	typedef pthread_t bma_Thrd;
 #else
 	#undef BMA_HAS_THRDS
 	#undef BMA_WIN_THRDS
@@ -225,6 +228,8 @@ BMA_DEF void bma_Wk_dec(bma_Wk *pSelf);
 	#define BMA_POSIX_THRDS 0
 	typedef char bma_Mtx;
 	typedef char bma_Cnd;
+	typedef char bma_Rw;
+	typedef char bma_Thrd;
 #endif
 
 BMA_DEF void bma_Mtx_ctor(bma_Mtx *pSelf);
@@ -379,6 +384,9 @@ BMA_DEF void bma_Mtx_ctor(bma_Mtx *pSelf) {
 	#if BMA_WIN_THRDS
 		InitializeCriticalSection(pSelf);
 	#elif BMA_POSIX_THRDS
+		if (pthread_mutex_init(pSelf, NULL) != 0) {
+			bma_exit_err("pthread_mutex_init() failed");
+		}
 	#elif (BMA_HAS_THRDS == 0)
 		(void)pSelf;
 	#else
@@ -391,6 +399,9 @@ BMA_DEF void bma_Mtx_dtor(bma_Mtx* pSelf, bma_IMemAlloc *pAlloc) {
 	#if BMA_WIN_THRDS
 		DeleteCriticalSection(pSelf);
 	#elif BMA_POSIX_THRDS
+		if (pthread_mutex_destroy(pSelf) != 0) {
+			bma_exit_err("pthread_mutex_destroy() failed");
+		}
 	#elif (BMA_HAS_THRDS == 0)
 		(void)pSelf;
 	#else
@@ -402,6 +413,9 @@ BMA_DEF void bma_Mtx_lck(bma_Mtx* pSelf) {
 	#if BMA_WIN_THRDS
 		EnterCriticalSection(pSelf);
 	#elif BMA_POSIX_THRDS
+		if (pthread_mutex_lock(pSelf) != 0) {
+			bma_exit_err("pthread_mutex_lock() failed");
+		}
 	#elif (BMA_HAS_THRDS == 0)
 		(void)pSelf;
 	#else
@@ -413,6 +427,9 @@ BMA_DEF void bma_Mtx_unlck(bma_Mtx* pSelf) {
 	#if BMA_WIN_THRDS
 		LeaveCriticalSection(pSelf);
 	#elif BMA_POSIX_THRDS
+		if (pthread_mutex_unlock(pSelf) != 0) {
+			bma_exit_err("pthread_mutex_unlock() failed");
+		}
 	#elif (BMA_HAS_THRDS == 0)
 		(void)pSelf;
 	#else
@@ -424,17 +441,24 @@ BMA_DEF void bma_Rw_ctor(bma_Rw *pSelf) {
 	#if BMA_WIN_THRDS
 		InitializeSRWLock(pSelf);
 	#elif BMA_POSIX_THRDS
+		if (pthread_rwlock_init(pSelf, NULL) != 0) {
+			bma_exit_err("pthread_rwlock_init() failed");
+		}
 	#elif (BMA_HAS_THRDS == 0)
 		(void)pSelf;
 	#else
 		#error "Missing impl. for bma_Rw_ctor()"
 	#endif
 }
+
 BMA_DEF void bma_Rw_dtor(bma_Rw *pSelf, bma_IMemAlloc *pAlloc) {
 	(void)pAlloc;
 	#if BMA_WIN_THRDS
 	(void)pSelf; /* WinAPI doesn't need SRWLocks to be destroyed funny enough */
 	#elif BMA_POSIX_THRDS
+		if (pthread_rwlock_destroy(pSelf) != 0) {
+			bma_exit_err("pthread_rwlock_destroy() failed");
+		}
 	#elif (BMA_HAS_THRDS == 0)
 		(void)pSelf;
 	#else
@@ -446,6 +470,9 @@ BMA_DEF void bma_Rw_lckRd(bma_Rw* pSelf) {
 	#if BMA_WIN_THRDS
 		AcquireSRWLockShared(pSelf);
 	#elif BMA_POSIX_THRDS
+		if (pthread_rwlock_rdlock(pSelf) != 0) {
+			bma_exit_err("pthread_rwlock_rdlock() failed");
+		}
 	#elif (BMA_HAS_THRDS == 0)
 		(void)pSelf;
 	#else
@@ -457,6 +484,9 @@ BMA_DEF void bma_Rw_unlckRd(bma_Rw* pSelf) {
 	#if BMA_WIN_THRDS
 		ReleaseSRWLockShared(pSelf);
 	#elif BMA_POSIX_THRDS
+		if (pthread_rwlock_unlock(pSelf) != 0) {
+			bma_exit_err("pthread_rwlock_unlock() failed");
+		}
 	#elif (BMA_HAS_THRDS == 0)
 		(void)pSelf;
 	#else
@@ -468,6 +498,9 @@ BMA_DEF void bma_Rw_lckWrt(bma_Rw* pSelf) {
 	#if BMA_WIN_THRDS
 		AcquireSRWLockExclusive(pSelf);
 	#elif BMA_POSIX_THRDS
+		if (pthread_rwlock_wrlock(pSelf) != 0) {
+			bma_exit_err("pthread_rwlock_wrlock() failed");
+		}
 	#elif (BMA_HAS_THRDS == 0)
 		(void)pSelf;
 	#else
@@ -479,6 +512,9 @@ BMA_DEF void bma_Rw_unlckWrt(bma_Rw* pSelf) {
 	#if BMA_WIN_THRDS
 		ReleaseSRWLockExclusive(pSelf);
 	#elif BMA_POSIX_THRDS
+		if (pthread_rwlock_unlock(pSelf) != 0) {
+			bma_exit_err("pthread_rwlock_unlock() failed");
+		}
 	#elif (BMA_HAS_THRDS == 0)
 		(void)pSelf;
 	#else
@@ -490,6 +526,9 @@ BMA_DEF void bma_Cnd_ctor(bma_Cnd *pSelf) {
 	#if BMA_WIN_THRDS
 		InitializeConditionVariable(pSelf);
 	#elif BMA_POSIX_THRDS
+		if (pthread_cond_init(pSelf, NULL) != 0) {
+			bma_exit_err("pthread_cond_init() failed");
+		}
 	#elif (BMA_HAS_THRDS == 0)
 		(void)pSelf;
 	#else
@@ -501,6 +540,9 @@ BMA_DEF void bma_Cnd_dtor(bma_Cnd *pSelf) {
 	#if BMA_WIN_THRDS
 	(void)pSelf; /* WinAPI doesn't need condvars to be destroyed funny enough */
 	#elif BMA_POSIX_THRDS
+		if (pthread_cond_destroy(pSelf) != 0) {
+			bma_exit_err("pthread_cond_destroy() failed");
+		}
 	#elif (BMA_HAS_THRDS == 0)
 		(void)pSelf;
 	#else
@@ -514,6 +556,9 @@ BMA_DEF void bma_Cnd_wait(bma_Cnd *pSelf, bma_Mtx *pMtx) {
 			bma_exit_err("SleepConditionVariableCS() failed");
 		}
 	#elif BMA_POSIX_THRDS
+		if (pthread_cond_wait(pSelf, pMtx) != 0) {
+			bma_exit_err("pthread_cond_wait() failed");
+		}
 	#elif (BMA_HAS_THRDS == 0)
 		(void)pSelf;
 		(void)pMtx;
@@ -526,6 +571,9 @@ BMA_DEF void bma_Cnd_sgnlOne(bma_Cnd *pSelf) {
 	#if BMA_WIN_THRDS
 		WakeConditionVariable(pSelf);
 	#elif BMA_POSIX_THRDS
+		if (pthread_cond_signal(pSelf) != 0) {
+			bma_exit_err("pthread_cond_signal() failed");
+		}
 	#elif (BMA_HAS_THRDS == 0)
 		(void)pSelf;
 	#else
@@ -537,6 +585,9 @@ BMA_DEF void bma_Cnd_sgnlAll(bma_Cnd *pSelf) {
 	#if BMA_WIN_THRDS
 		WakeAllConditionVariable(pSelf);
 	#elif BMA_POSIX_THRDS
+		if (pthread_cond_broadcast(pSelf) != 0) {
+			bma_exit_err("pthread_cond_broadcast() failed");
+		}
 	#elif (BMA_HAS_THRDS == 0)
 		(void)pSelf;
 	#else
@@ -564,8 +615,27 @@ static DWORD WINAPI bma_WinThrdFunc(LPVOID lpParam) {
 	return 0;
 }
 
-#endif
+#elif BMA_POSIX_THRDS
 
+typedef struct bma_PosixThrdParam {
+	bm_thrdfnc_t pFunc;
+	void *pUsrDta;
+} bma_PosixThrdParam;
+
+static void *bma_PosixThrdFunc(void *pParam_) {
+	bm_thrdfnc_t pFunc;
+	void *pUsrDta;
+	bma_PosixThrdParam *pParam = (bma_PosixThrdParam*)pParam_;
+	bma_assert(pParam != NULL);
+	pFunc = pParam->pFunc;
+	pUsrDta = pParam->pUsrDta;
+	bma_assert(pFunc != NULL);
+	bma_free(pParam);
+	(*pFunc)(pUsrDta);
+	return NULL;
+}
+
+#endif
 
 BMA_DEF void bma_Thrd_ctor(bma_Thrd* pSelf, bm_thrdfnc_t pFunc, void *pUsrDta) {
 	#if BMA_WIN_THRDS
@@ -583,6 +653,18 @@ BMA_DEF void bma_Thrd_ctor(bma_Thrd* pSelf, bm_thrdfnc_t pFunc, void *pUsrDta) {
 		}
 		*pSelf = hThread;
 	#elif BMA_POSIX_THRDS
+		pthread_t thread;
+		bma_PosixThrdParam *pParam;
+		bma_assert(pSelf != NULL);
+		bma_assert(pFunc != NULL);
+		pParam = bma_malloc(bma_PosixThrdParam);
+		pParam->pFunc = pFunc;
+		pParam->pUsrDta = pUsrDta;
+		if (pthread_create(&thread, NULL, &bma_PosixThrdFunc, pParam) != 0) {
+			bma_free(pParam);
+			bma_exit_err("pthread_create() failed");
+		}
+		*pSelf = thread;
 	#elif (BMA_HAS_THRDS == 0)
 		(void)pSelf;
 	#else
@@ -601,6 +683,11 @@ BMA_DEF void bma_Thrd_dtor(bma_Thrd* pSelf, bma_IMemAlloc *pAlloc) {
 		}
 		(void)CloseHandle(*pSelf);
 	#elif BMA_POSIX_THRDS
+		(void)pAlloc;
+		assert(pSelf != NULL);
+		if (pthread_join(*pSelf, NULL) != 0) {
+			bma_exit_err("pthread_join() on thread failed");
+		}
 	#elif (BMA_HAS_THRDS == 0)
 		(void)pSelf;
 	#else
@@ -616,6 +703,10 @@ BMA_DEF void bma_sleepMs(unsigned int ms) {
 		#endif
 		Sleep((DWORD)ms);
 	#elif BMA_POSIX_THRDS
+		struct timespec ts;
+		ts.tv_sec = (time_t)(ms / 1000);
+		ts.tv_nsec = (long)((ms % 1000) * 1000000);
+		clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, NULL);
 	#elif (BMA_HAS_THRDS == 0)
 		(void)pSelf;
 	#else

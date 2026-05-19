@@ -186,8 +186,8 @@ BMA_DEF void bma_LogPtr_dtor(bma_Log **ppLog, bma_IMemAlloc *pAlloc);
 BMA_DEF_VEC(bma_LogPtrVec, bma_Log*, (bma_dtor_t)&bma_LogPtr_dtor)
 
 struct bma_Log {
-	bma_StrN name;
-	bma_StrN fullName;
+	char *pFullName;
+	char *pName; /* points into pFullName and shared the same memory */
 	bma_Log *pParent;
 	bma_LogPtrVec children;
 };
@@ -199,8 +199,7 @@ BMA_DEF	void bma_Log_dtor(bma_Log *pSelf, bma_IMemAlloc *pAlloc) {
 	(void)pAlloc;
 	bma_LogPtrVec_dtor(&pSelf->children, NULL);
 	if (pSelf != g_pRoot) {
-		bma_free(pSelf->fullName.p);
-		bma_free(pSelf->name.p);
+		bma_free(pSelf->pFullName);
 	}
 #if BMA_DBG
 	memset(pSelf, 0xFF, sizeof(*pSelf));
@@ -219,10 +218,8 @@ BMA_DEF void bma_log_init(void) {
 	bma_Rw_ctor(&g_createLock);
 	bma_Rw_lckWrt(&g_createLock);
 	g_pRoot = bma_malloc(bma_Log);
-	g_pRoot->name.p = (char*)"";
-	g_pRoot->name.len = 0;
-	g_pRoot->fullName.p = (char*)"";
-	g_pRoot->fullName.len = 0;
+	g_pRoot->pFullName = (char*)"";
+	g_pRoot->pName = g_pRoot->pFullName;
 	g_pRoot->pParent = NULL;
 	bma_LogPtrVec_ctor(&g_pRoot->children);
 	bma_Rw_unlckWrt(&g_createLock);
@@ -242,19 +239,11 @@ static bma_bool_t bma_log_sameStr(const char *p0, size_t l0, const char *p1, siz
 	return (l0 == l1) && (memcmp(p0, p1, l0) == 0);
 }
 
-static void bma_Log_getFullName(bma_Log *pSelf, bma_StrBldr *pDst) {
-	if (pSelf->pParent != NULL) {
-		bma_Log_getFullName(pSelf->pParent, pDst);
-	}
-	if (bma_StrBldr_getSz(pDst) > 0) {
-		bma_StrBldr_appndChr(pDst, '.', 1u);
-	}
-	bma_StrBldr_appndStrN(pDst, pSelf->name.p, pSelf->name.len);
-}
-
 BMA_DEF bma_Log *bma_Log_getOrCreate(const char *pPath, size_t pathLen, bma_bool_t create) {
 	bma_bool_t end = BMA_FALSE;
 	bma_Log *pResult;
+	const char *pFullPath = pPath;
+	size_t fullPathLen = pathLen;
 	bma_assert(pPath != NULL);
 	bma_assert(g_pRoot != NULL);
 	pResult = g_pRoot;
@@ -276,7 +265,7 @@ BMA_DEF bma_Log *bma_Log_getOrCreate(const char *pPath, size_t pathLen, bma_bool
 		for (i=0; i<bma_LogPtrVec_getSz(&pResult->children); ++i) {
 			bma_Log *pChild = *bma_LogPtrVec_at(&pResult->children, i);
 			bma_assert(pChild != NULL);
-			if (bma_log_sameStr(pChild->name.p, pChild->name.len, pPath, l)) {
+			if (bma_log_sameStr(pChild->pName, strlen(pChild->pName), pPath, l)) {
 				pResult = pChild;
 				found = BMA_TRUE;
 				break;
@@ -284,17 +273,11 @@ BMA_DEF bma_Log *bma_Log_getOrCreate(const char *pPath, size_t pathLen, bma_bool
 		}
 		if (!found) {
 			bma_Log *pNew;
-			bma_StrBldr bldr;
 			if (!create) return NULL;
 			pNew = bma_malloc(bma_Log);
-			pNew->name.p = bma_strndup(pPath, l);
-			pNew->name.len = l;
+			pNew->pFullName = bma_strndup(pFullPath, fullPathLen);
+			pNew->pName = pNew->pFullName + (pPath - pFullPath);
 			pNew->pParent = pResult;
-			bma_StrBldr_ctor(&bldr);
-			bma_Log_getFullName(pNew, &bldr);
-			pNew->fullName.len = bma_StrBldr_getSz(&bldr);
-			pNew->fullName.p = bma_StrBldr_rlse(&bldr);
-			bma_StrBldr_dtor(&bldr, NULL);
 			bma_LogPtrVec_ctor(&pNew->children);
 			bma_LogPtrVec_appnd(&pResult->children, &pNew);
 			pResult = pNew;
@@ -332,7 +315,7 @@ BMA_DEF bma_bool_t bma_Log_isLoggable_impl_(bma_Log *pLog, bma_LogLevel level) {
 }
 
 static const char *bma_Log_stripPath(const char *pFileName) {
-	size_t l, n;
+	size_t l;
 	bma_assert(pFileName != NULL);
 	l = strlen(pFileName);
 	while (l-- > 0) {
@@ -345,12 +328,13 @@ static const char *bma_Log_stripPath(const char *pFileName) {
 
 BMA_DEF void bma_Log_log_impl_(bma_Log *pLog, bma_LogLevel level, const char *pFile, int line, const char *pFmt, ...) {
 	va_list ap;
+	(void)level;
 	/*
 	if (!bma_Log_isLoggable_impl_(pLog, level)) {
 		return;
 	}
 	*/
-	fprintf(stdout, "[%s] (file %s line %d): ", pLog->fullName.p, bma_Log_stripPath(pFile), line);
+	fprintf(stdout, "[%s] (file %s line %d): ", pLog->pFullName, bma_Log_stripPath(pFile), line);
 	va_start(ap, pFmt);
 	vfprintf(stdout, pFmt, ap);
 	fprintf(stdout, "\n");
@@ -403,13 +387,13 @@ void test_create(void) {
 	pLog2 = bma_Log_get("a.b");
 	BMA_EXPECT(pLog != NULL);
 	BMA_EXPECT(pLog == pLog2);
-	BMA_EXPECT(bma_log_sameStr(pLog->name.p, pLog->name.len, "b", 1));
+	BMA_EXPECT(strcmp(pLog->pName, "b") == 0);
 	pLog = pLog->pParent;
 	BMA_EXPECT(pLog != NULL);
-	BMA_EXPECT(bma_log_sameStr(pLog->name.p, pLog->name.len, "a", 1));
+	BMA_EXPECT(strcmp(pLog->pName, "a") == 0);
 	pLog = pLog->pParent;
 	BMA_EXPECT(pLog != NULL);
-	BMA_EXPECT(bma_log_sameStr(pLog->name.p, pLog->name.len, NULL, 0));
+	BMA_EXPECT(strcmp(pLog->pName, "") == 0);
 	bma_log_clnup();
 	BMA_EXPECT(g_pRoot == NULL);
 }

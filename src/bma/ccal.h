@@ -238,6 +238,7 @@ such as "static inline" or "declspec(dllimport)"
 
 #define bma_min(a, b) ((a) < (b) ? (a) : (b))
 #define bma_max(a, b) ((a) < (b) ? (a) : (b))
+#define bma_ary_sz(a) (sizeof(a)/sizeof(a[0]))
 
 typedef struct bma_IMemAlloc {
 	void *(*pRllc)(void *pSelf,
@@ -719,135 +720,7 @@ BMA_DEF void bma_StrBldr_appndDbl(bma_StrBldr *pSelf, double d);
 BMA_DEF void bma_StrBldr_appndBool(bma_StrBldr *pSelf, bma_bool_t b);
 BMA_DEF void bma_StrBldr_appndCdPntUtf8(bma_StrBldr *pSelf, unsigned long cdPnt);
 BMA_DEF void bma_StrBldr_clear(bma_StrBldr *pSelf);
-
-#ifdef _MSC_VER
-	#if _MSC_VER >= 1200 /* Visual Studio 6.0 or newer */
-		#include <intrin.h>
-		typedef long bma_atmc_t;
-		#define bma_atmc_inc(p) _InterlockedIncrement((volatile long*)(p))
-		#define bma_atmc_dec(p) _InterlockedDecrement((volatile long*)(p))
-		#define bma_atmc_cas(p, comp, exchg) _InterlockedCompareExchange((volatile long*)(p), (exchg), (comp))
-	#else
-		/* Windows.h does heavy namespace pollution, so we try to
-		   minimize that as much as possible */
-		#ifndef WIN32_LEAN_AND_MEAN
-			#define WIN32_LEAN_AND_MEAN /* Exclude rarely-used stuff from Windows headers */
-		#endif
-		#ifndef NOMINMAX
-			#define NOMINMAX /* Exclude min/max macros from Windows headers */
-		#endif
-		#include <Windows.h>
-		typedef LONG bma_atmc_t;
-		#define bma_atmc_inc(p) InterlockedIncrement((volatile LONG*)(p))
-		#define bma_atmc_dec(p) InterlockedDecrement((volatile LONG*)(p))
-		#define bma_atmc_cas(p, comp, exchg) InterlockedCompareExchange((volatile LONG*)(p), (exchg), (comp))
-	#endif
-#elif defined (__GNUC__) || defined (__clang__)
-	typedef int bma_atmc_t;
-	#define bma_atmc_inc(p) __atomic_add_fetch(p, 1, __ATOMIC_SEQ_CST)
-	#define bma_atmc_dec(p) __atomic_sub_fetch(p, 1, __ATOMIC_SEQ_CST)
-	bma_inline bma_atmc_t bma_atmc_cas_impl_(bma_atmc_t *p, bma_atmc_t comp, bma_atmc_t exchg) {
-		(void)__atomic_compare_exchange_n(p, &comp, exchg, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-		return comp;
-	}
-	#define bma_atmc_cas(p, comp, exchg) bma_atmc_cas_impl_(p, comp, exchg)
-#else
-	#error "No atomic increment/decrement implementation for this platform/compiler, please implement"
-#endif
-
-typedef struct bma_Shrd {
-	bma_atmc_t strongRefs;
-	bma_atmc_t weakRefs;
-	bma_atmc_t alive;
-	bma_dtor_t pDtor;
-	bma_IMemAlloc *pAlloc;
-#if BMA_DBG
-	const char *pType;
-#endif
-	bma_max_align_t aligner_;
-} bma_Shrd;
-
-
-#define BMA_SHRD_HDR_SZ (sizeof(bma_Shrd) - sizeof(bma_max_align_t))
-
-BMA_DEF bma_Shrd *BMA_DBG_SFFX(bma_Shrd_new_impl)(
-	size_t sz,
-	bma_dtor_t pDtor,
-	bma_IMemAlloc *pAlloc
-	BMA_DBG_OPT_PARAM(const char* pType)
-);
-
-#define bma_Shrd_new_ext(type, pDtor, pAlloc) \
-	BMA_DBG_SFFX(bma_Shrd_new_impl)(sizeof(type), pDtor, pAlloc BMA_DBG_OPT_PARAM(#type))
-
-#define bma_Shrd_new(type, pDtor) \
-	BMA_DBG_SFFX(bma_Shrd_new_impl)(sizeof(type), pDtor, bma_getDfltMemAlloc() BMA_DBG_OPT_PARAM(#type))
-
-#if BMA_DBG
-	BMA_DEF void *bma_Shrd_get_impl_D(bma_Shrd *pSelf, size_t typeSz, const char *pType);
-	#define bma_Shrd_get(pSelf, type) \
-		((type*)bma_Shrd_get_impl_D(pSelf, sizeof(type), #type))
-#else
-	#define bma_Shrd_get(pSelf, type) \
-		bma_lndr_cast(type, ((char*)pSelf) + BMA_SHRD_HDR_SZ)
-#endif
-
-BMA_DEF void bma_Shrd_inc(bma_Shrd *pSelf);
-BMA_DEF void bma_Shrd_dec(bma_Shrd *pSelf);
-
-typedef struct bma_Wk {
-	bma_Shrd target;
-} bma_Wk;
-
-BMA_DEF bma_Wk *bma_Wk_new(bma_Shrd *pShrd);
-BMA_DEF bma_Shrd *bma_Wk_lock(bma_Wk *pSelf);
-BMA_DEF void bma_Wk_inc(bma_Wk *pSelf);
-BMA_DEF void bma_Wk_dec(bma_Wk *pSelf);
-
-#define BMA_DEF_SHRD(name_, namewk_, datatype_, pDtor_) \
-	typedef struct name_ { \
-		bma_Shrd impl; \
-	} name_; \
-	\
-	bma_inline name_ *name_ ## _new_ext(bma_IMemAlloc *pAlloc) { \
-		return bma_lndr_cast(name_, bma_Shrd_new_ext(datatype_, pDtor_, pAlloc)); \
-	} \
-	\
-	bma_inline name_ *name_ ## _new() { \
-		return bma_lndr_cast(name_, bma_Shrd_new(datatype_, pDtor_)); \
-	} \
-	\
-	bma_inline datatype_ *name_ ## _get(name_ *pSelf) { \
-		return (datatype_*)bma_Shrd_get(&pSelf->impl, datatype_); \
-	} \
-	\
-	bma_inline void name_ ## _inc(name_ *pSelf) { \
-		bma_Shrd_inc(&pSelf->impl); \
-	} \
-	\
-	bma_inline void name_ ## _dec(name_ *pSelf) { \
-		bma_Shrd_dec(&pSelf->impl); \
-	} \
-	\
-	typedef struct namewk_ { \
-		bma_Wk impl; \
-	} namewk_; \
-	\
-	bma_inline namewk_ *namewk_ ## _new(name_ *pShrd) { \
-		return bma_lndr_cast(namewk_, bma_Wk_new(&pShrd->impl)); \
-	} \
-	\
-	bma_inline name_ *namewk_ ## _lock(namewk_ *pSelf) { \
-		return bma_lndr_cast(name_, bma_Wk_lock(&pSelf->impl)); \
-	} \
-	\
-	bma_inline void namewk_ ## _inc(namewk_ *pSelf) { \
-		bma_Wk_inc(&pSelf->impl); \
-	} \
-	\
-	bma_inline void namewk_ ## _dec(namewk_ *pSelf) { \
-		bma_Wk_dec(&pSelf->impl); \
-	}
+		
 
 typedef struct bma_StrTreeNodeHdr_ bma_StrTreeNodeHdr_;
 
@@ -1720,6 +1593,7 @@ BMA_DEF void bma_StrBldr_appndStr(bma_StrBldr *pSelf, const char *p) {
 	bma_assert(pSelf != NULL);
 	bma_assert(p != NULL);
 	l = strlen(p);
+	if (l == 0) return;
 	bma_StrBldr_rsrv(pSelf, l);
 	memcpy(pSelf->pStr + pSelf->size, p, l + 1u);
 	pSelf->size += l;
@@ -1728,6 +1602,7 @@ BMA_DEF void bma_StrBldr_appndStr(bma_StrBldr *pSelf, const char *p) {
 BMA_DEF void bma_StrBldr_appndStrN(bma_StrBldr *pSelf, const char *p, size_t len) {
 	bma_assert(pSelf != NULL);
 	bma_assert(p != NULL);
+	if (len == 0) return;
 	bma_StrBldr_rsrv(pSelf, len);
 	memcpy(pSelf->pStr + pSelf->size, p, len);
 	pSelf->size += len;
@@ -1738,6 +1613,7 @@ BMA_DEF void bma_StrBldr_appndChr(bma_StrBldr *pSelf, int c, size_t count) {
 	size_t i;
 	char* p;
 	bma_assert(pSelf != NULL);
+	if (count == 0) return;
 	bma_StrBldr_rsrv(pSelf, count);
 	p = pSelf->pStr + pSelf->size;
 	for (i=0; i<count; ++i) {
@@ -1807,113 +1683,6 @@ BMA_DEF void bma_StrBldr_clear(bma_StrBldr *pSelf) {
 		pSelf->size = 0;
 	}
 
-}
-
-BMA_DEF bma_Shrd *BMA_DBG_SFFX(bma_Shrd_new_impl)(
-	size_t sz,
-	bma_dtor_t pDtor,
-	bma_IMemAlloc *pAlloc
-	BMA_DBG_OPT_PARAM(const char* pType)
-) {
-	bma_assert(sz > 0);
-	bma_assert(pAlloc != NULL);
-	bma_Shrd *p = (bma_Shrd*)(*pAlloc->pRllc)(pAlloc, NULL, BMA_SHRD_HDR_SZ + sz, NULL);
-	p->strongRefs = 1;
-	p->weakRefs = 1;
-	p->alive = 1;
-	p->pDtor = pDtor;
-	p->pAlloc = pAlloc;
-#if BMA_DBG
-	p->pType = pType;
-#endif
-	return p;
-}
-
-#if BMA_DBG
-
-BMA_DEF void *bma_Shrd_get_impl_D(bma_Shrd *pSelf, size_t typeSz, const char *pType) {
-	bma_assert(pSelf != NULL);
-	bma_assert(pSelf->pType != NULL);
-	bma_assert(typeSz > 0);
-	bma_assert(strcmp(pType, pSelf->pType) == 0);
-	bma_assert(pSelf->weakRefs > 0);
-	bma_assert(pSelf->strongRefs > 0);
-	bma_assert(pSelf->alive > 0);
-	return ((char*)pSelf) + BMA_SHRD_HDR_SZ;
-}
-
-#endif
-
-BMA_DEF void bma_Shrd_inc(bma_Shrd *pSelf) {
-	bma_assert(pSelf != NULL);
-	bma_assert(pSelf->weakRefs > 0);
-	bma_assert(pSelf->strongRefs > 0);
-	(void)bma_atmc_inc(&pSelf->weakRefs);
-	(void)bma_atmc_inc(&pSelf->strongRefs);
-}
-
-BMA_DEF void bma_Shrd_dec(bma_Shrd *pSelf) {
-	bma_assert(pSelf != NULL);
-	bma_assert(pSelf->pAlloc != NULL);
-	bma_assert(pSelf->weakRefs > 0);
-	bma_assert(pSelf->strongRefs > 0);
-	if (bma_atmc_dec(&pSelf->strongRefs) == 0) {
-		if (bma_atmc_cas(&pSelf->alive, 1, 0) == 1) {
-			if (pSelf->pDtor != NULL) {
-				pSelf->pDtor(((char*)pSelf) + BMA_SHRD_HDR_SZ, pSelf->pAlloc);
-				pSelf->pDtor = NULL;
-			}
-		}
-	}
-	if (bma_atmc_dec(&pSelf->weakRefs) == 0) {
-		bma_IMemAlloc *pAlloc = pSelf->pAlloc;
-#if BMA_DBG
-		memset(pSelf, 0xFF, BMA_SHRD_HDR_SZ);
-#endif
-		(*pAlloc->pRllc)(pAlloc, pSelf, 0, NULL);
-	}
-}
-
-BMA_DEF bma_Wk *bma_Wk_new(bma_Shrd *pShrd) {
-	bma_assert(pShrd != NULL);
-	bma_Wk *pWk = bma_lndr_cast(bma_Wk, pShrd);
-	(void)bma_atmc_inc(&pWk->target.weakRefs);
-	return pWk;
-}
-
-BMA_DEF bma_Shrd *bma_Wk_lock(bma_Wk *pSelf) {
-	bma_atmc_t newStrngRefs;
-	bma_assert(pSelf != NULL);
-	(void)bma_atmc_inc(&pSelf->target.weakRefs); /* prevent object from being freed while we are locking it */
-	newStrngRefs = bma_atmc_inc(&pSelf->target.strongRefs);
-	if (newStrngRefs == 1) { /* was 0 before */
-		bma_Shrd_dec(&pSelf->target);
-		return NULL;
-	}
-	if (bma_atmc_cas(&pSelf->target.alive, 0, 0) == 0) {
-		bma_Shrd_dec(&pSelf->target);
-		return NULL;
-	}
-	return &pSelf->target;
-}
-
-BMA_DEF void bma_Wk_inc(bma_Wk *pSelf) {
-	bma_assert(pSelf != NULL);
-	bma_assert(pSelf->target.weakRefs > 0);
-	(void)bma_atmc_inc(&pSelf->target.weakRefs);
-}
-
-BMA_DEF void bma_Wk_dec(bma_Wk *pSelf) {
-	bma_assert(pSelf != NULL);
-	bma_assert(pSelf->target.pAlloc != NULL);
-	bma_assert(pSelf->target.weakRefs > 0);
-	if (bma_atmc_dec(&pSelf->target.weakRefs) == 0) {
-		bma_IMemAlloc *pAlloc = pSelf->target.pAlloc;
-#if BMA_DBG
-		memset(pSelf, 0xFF, BMA_SHRD_HDR_SZ);
-#endif
-		(*pAlloc->pRllc)(pAlloc, pSelf, 0, NULL);
-	}
 }
 
 struct bma_StrTreeNodeHdr_ {
@@ -2520,84 +2289,6 @@ void test_hashMap_manyElements(void) {
 	bma_HshMp_dtor(&h, NULL);
 }
 
-bma_bool_t g_shrdDtorRan = BMA_FALSE;
-
-void test_ShrdInt_dtor(void* p, bma_IMemAlloc *pAlloc) {
-	(void)pAlloc;
-	BMA_EXPECT(*(int*)p == 42);
-	g_shrdDtorRan = BMA_TRUE;
-}
-
-BMA_DEF_SHRD(bma_TestShrdInt, bma_TestWkInt, int, &test_ShrdInt_dtor)
-
-void test_Shrd(void) {
-	bma_TestShrdInt *p, *p3;
-	bma_TestWkInt *p2;
-	g_shrdDtorRan = BMA_FALSE;
-	p = bma_TestShrdInt_new();
-	BMA_EXPECT(p != NULL);
-	BMA_EXPECT(p->impl.strongRefs == 1);
-	BMA_EXPECT(p->impl.weakRefs == 1);
-	BMA_EXPECT(p->impl.alive == 1);
-	BMA_EXPECT(p->impl.pDtor == &test_ShrdInt_dtor);
-	BMA_EXPECT(p->impl.pAlloc == bma_getDfltMemAlloc());
-	*bma_TestShrdInt_get(p) = 42;
-	BMA_EXPECT(*bma_TestShrdInt_get(p) == 42);
-	bma_TestShrdInt_dec(p);
-	BMA_EXPECT(g_shrdDtorRan);
-	g_shrdDtorRan = BMA_FALSE;
-	p = bma_TestShrdInt_new();
-	*bma_TestShrdInt_get(p) = 42;
-	bma_TestShrdInt_inc(p);
-	BMA_EXPECT(p->impl.strongRefs == 2);
-	BMA_EXPECT(p->impl.weakRefs == 2);
-	BMA_EXPECT(p->impl.alive == 1);
-	bma_TestShrdInt_dec(p);
-	BMA_EXPECT(p->impl.strongRefs == 1);
-	BMA_EXPECT(p->impl.weakRefs == 1);
-	BMA_EXPECT(p->impl.alive == 1);
-	BMA_EXPECT(!g_shrdDtorRan);
-	bma_TestShrdInt_dec(p);
-	BMA_EXPECT(g_shrdDtorRan);
-	g_shrdDtorRan = BMA_FALSE;
-	p = bma_TestShrdInt_new();
-	*bma_TestShrdInt_get(p) = 42;
-	p2 = bma_TestWkInt_new(p);
-	BMA_EXPECT(p->impl.strongRefs == 1);
-	BMA_EXPECT(p->impl.weakRefs == 2);
-	bma_TestShrdInt_dec(p);
-	BMA_EXPECT(g_shrdDtorRan);
-	g_shrdDtorRan = BMA_FALSE;
-	BMA_EXPECT(p->impl.strongRefs == 0);
-	BMA_EXPECT(p->impl.weakRefs == 1);
-	BMA_EXPECT(p->impl.alive == 0);
-	bma_TestWkInt_dec(p2);
-	p = bma_TestShrdInt_new();
-	*bma_TestShrdInt_get(p) = 42;
-	p2 = bma_TestWkInt_new(p);
-	BMA_EXPECT(p->impl.strongRefs == 1);
-	BMA_EXPECT(p->impl.weakRefs == 2);
-	p3 = bma_TestWkInt_lock(p2);
-	BMA_EXPECT(p3 != NULL);
-	BMA_EXPECT(p3 == p);
-	BMA_EXPECT(p->impl.strongRefs == 2);
-	BMA_EXPECT(p->impl.weakRefs == 3);
-	bma_TestWkInt_dec(p2);
-	BMA_EXPECT(p3->impl.strongRefs == 2);
-	BMA_EXPECT(p3->impl.weakRefs == 2);
-	bma_TestShrdInt_dec(p);
-	BMA_EXPECT(p3->impl.strongRefs == 1);
-	BMA_EXPECT(p3->impl.weakRefs == 1);
-	bma_TestWkInt_inc(p2);
-	BMA_EXPECT(p3->impl.strongRefs == 1);
-	BMA_EXPECT(p3->impl.weakRefs == 2);
-	bma_TestShrdInt_dec(p);
-	BMA_EXPECT(p3->impl.strongRefs == 0);
-	BMA_EXPECT(p3->impl.weakRefs == 1);
-	BMA_EXPECT(bma_TestWkInt_lock(p2) == NULL);
-	bma_TestWkInt_dec(p2);
-}
-
 void test_StrTree(void) {
 	bma_StrTree t;
 	int x, *p;
@@ -2665,7 +2356,6 @@ int main(int argc, char *argv[]) {
 	BMA_TEST(test_hashMap_constructDestruct);
 	BMA_TEST(test_hashMap_putGet);
 	BMA_TEST(test_hashMap_manyElements);
-	BMA_TEST(test_Shrd);
 	BMA_TEST(test_StrTree);
 
 	printf("All tests passed.\n");

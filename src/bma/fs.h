@@ -35,10 +35,11 @@ File system utilities
 	extern "C" {
 #endif
 
-BMA_DEF FILE *bma_fopen_utf8(const char *pPath);
-#define bma_fclose_utf8(pFile) fclose(pFile)
+BMA_DEF FILE *bma_fopen_rd(const char *pPath);
+BMA_DEF FILE *bma_fopen_wrt(const char *pPath);
 
-BMA_DEF bma_bool_t bma_readWholeFile(const char *pPath, bma_StrBldr *pOut);
+BMA_DEF bma_bool_t bma_rdFile(const char *pPath, bma_StrBldr *pOut);
+BMA_DEF bma_bool_t bma_wrtFile(const char *pPath, const char *pData, size_t dataSz);
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -97,7 +98,7 @@ static wchar_t *bma_fsStrWdup(const char *pStr) {
 
 #endif
 
-BMA_DEF FILE *bma_fopen_utf8(const char *pPath) {
+BMA_DEF FILE *bma_fopen_rd(const char *pPath) {
 	#ifdef _WIN32
 		wchar_t *pWidePath;
 		bma_assert(pPath != NULL);
@@ -105,7 +106,6 @@ BMA_DEF FILE *bma_fopen_utf8(const char *pPath) {
 		   so we use the wchar_t variant to get the file names right */
 		pWidePath = bma_fsStrWdup(pPath);
 		FILE *pFile = _wfopen(pWidePath, L"rb");
-		bma_free(pWideMode);
 		bma_free(pWidePath);
 		return pFile;
 	#else
@@ -114,7 +114,23 @@ BMA_DEF FILE *bma_fopen_utf8(const char *pPath) {
 	#endif
 }
 
-BMA_DEF bma_bool_t bma_readWholeFile(const char *pPath, bma_StrBldr *pOut) {
+BMA_DEF FILE *bma_fopen_wrt(const char *pPath) {
+	#ifdef _WIN32
+		wchar_t *pWidePath;
+		bma_assert(pPath != NULL);
+		/* Under windows, the default narrow encoding isn't UTF-8,
+		   so we use the wchar_t variant to get the file names right */
+		pWidePath = bma_fsStrWdup(pPath);
+		FILE *pFile = _wfopen(pWidePath, L"wb");
+		bma_free(pWidePath);
+		return pFile;
+	#else
+		bma_assert(pPath != NULL);
+		return fopen(pPath, "wb");
+	#endif
+}
+
+BMA_DEF bma_bool_t bma_rdFile(const char *pPath, bma_StrBldr *pOut) {
 	FILE *pFile;
 #ifdef _WIN32
 	long long fileSize;
@@ -125,10 +141,10 @@ BMA_DEF bma_bool_t bma_readWholeFile(const char *pPath, bma_StrBldr *pOut) {
 	size_t numRead;
 	bma_assert(pPath != NULL);
 	bma_assert(pOut != NULL);
-	pFile = bma_fopen_utf8(pPath);
+	pFile = bma_fopen_rd(pPath);
 	if (pFile == NULL) return BMA_FALSE;
 	if (fseek(pFile, 0, SEEK_END) != 0) {
-		bma_fclose_utf8(pFile);
+		(void)fclose(pFile);
 		return BMA_FALSE;
 	}
 #ifdef _WIN32
@@ -137,18 +153,30 @@ BMA_DEF bma_bool_t bma_readWholeFile(const char *pPath, bma_StrBldr *pOut) {
 	fileSize = ftell(pFile);
 #endif
 	if (fileSize < 0) {
-		bma_fclose_utf8(pFile);
+		(void)fclose(pFile);
 		return BMA_FALSE;
 	}
 	(void)fseek(pFile, 0L, SEEK_SET);
 	sFileSize = (size_t)fileSize;
 	bma_StrBldr_rsz(pOut, sFileSize);
 	numRead = fread((char*)bma_StrBldr_getStr(pOut), 1, sFileSize, pFile);
-	bma_fclose_utf8(pFile);
+	(void)fclose(pFile);
 	if (numRead != sFileSize) {
 		return BMA_FALSE;
 	}
 	return BMA_TRUE;
+}
+
+BMA_DEF bma_bool_t bma_wrtFile(const char *pPath, const char *pData, size_t dataSz) {
+	FILE *pFile;
+	size_t numWritten;
+	bma_assert(pPath != NULL);
+	bma_assert((pData != NULL) || (dataSz == 0));
+	pFile = bma_fopen_wrt(pPath);
+	if (pFile == NULL) return BMA_FALSE;
+	numWritten = fwrite(pData, 1, dataSz, pFile);
+	(void)fclose(pFile);
+	return (numWritten == dataSz);
 }
 
 #ifdef __cplusplus
@@ -190,9 +218,9 @@ void test_readWholeFile(void) {
 	bma_StrBldr b;
 	bma_StrBldr_ctor(&b);
 #ifdef _WIN32
-	BMA_EXPECT(bma_readWholeFile("C:\\Windows\\System32\\kernel32.dll", &b));
+	BMA_EXPECT(bma_rdFile("C:\\Windows\\System32\\kernel32.dll", &b));
 #else
-	BMA_EXPECT(bma_readWholeFile("/etc/hosts", &b));
+	BMA_EXPECT(bma_rdFile("/etc/hosts", &b));
 #endif
 	BMA_EXPECT(bma_StrBldr_getStr(&b) != NULL);
 	BMA_EXPECT(bma_StrBldr_getSz(&b) > 0);

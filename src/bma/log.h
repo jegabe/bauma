@@ -195,6 +195,7 @@ struct bma_Log {
 static bma_Rw g_createLock;
 static bma_Log *g_pRoot = NULL;
 static bma_IMemAlloc *g_pAlloc = NULL;
+static bma_bool_t g_stdOutIsTerminal = BMA_FALSE;
 
 BMA_DEF	void bma_Log_dtor(bma_Log *pSelf, bma_IMemAlloc *pAlloc) {
 	(void)pAlloc;
@@ -216,6 +217,11 @@ BMA_DEF void bma_LogPtr_dtor(bma_Log **ppLog, bma_IMemAlloc *pAlloc) {
 }
 
 BMA_DEF void bma_log_init_ext(bma_IMemAlloc *pAlloc) {
+#if BMA_WIN_THRDS
+	HANDLE hConsole;
+	DWORD mode;
+	BOOL isConsole;
+#endif
 	bma_assert(g_pRoot == NULL);
 	bma_assert(g_pAlloc == NULL);
 	bma_Rw_ctor(&g_createLock);
@@ -225,6 +231,23 @@ BMA_DEF void bma_log_init_ext(bma_IMemAlloc *pAlloc) {
 	g_pRoot->pName = (char*)"";
 	g_pRoot->pParent = NULL;
 	bma_LogPtrVec_ctor_ext(&g_pRoot->children, g_pAlloc);
+#if BMA_WIN_THRDS
+	/* By default, Windows console is neither UTF-8 nor color enabled. Let's fix that. */
+	hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+	mode = 0;
+	isConsole = GetConsoleMode(hConsole, &mode);
+	if (isConsole) {
+		/* Enable color rendering with ANSI escape sequences */
+		SetConsoleMode(hConsole, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+		g_stdOutIsTerminal = BMA_TRUE;
+		SetConsoleCP(CP_UTF8);
+		SetConsoleOutputCP(CP_UTF8);
+	}
+#elif BMA_POSIX_THRDS
+	if (isatty(STDOUT_FILENO) != 0) {
+		g_stdOutIsTerminal = BMA_TRUE;
+	}
+#endif
 	bma_Rw_unlckWrt(&g_createLock);
 }
 
@@ -235,6 +258,7 @@ BMA_DEF void bma_log_clnup(void) {
 	bma_free_ext(g_pAlloc, g_pRoot);
 	g_pRoot = NULL;
 	g_pAlloc = NULL;
+	g_stdOutIsTerminal = BMA_FALSE;
 	bma_Rw_unlckWrt(&g_createLock);
 	bma_Rw_dtor(&g_createLock, NULL);
 }

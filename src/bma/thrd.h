@@ -50,13 +50,15 @@ Bau 'ma's basic multithreading support
 /* OS headers needed */
 #if BMA_WIN_THRDS
 	/* Windows.h is tremendously huge. Trying to get it down a bit. */
-	#ifndef WIN32_LEAN_AND_MEAN
-		#define WIN32_LEAN_AND_MEAN
-		#define BMA_UNDEF_WIN32_LEAN_AND_MEAN
-	#endif
-	#ifndef NOMINMAX
-		#define NOMINMAX
-		#define BMA_UNDEF_NOMINMAX
+	#ifndef BMA_FULL_WINDOWS_H
+		#ifndef WIN32_LEAN_AND_MEAN
+			#define WIN32_LEAN_AND_MEAN
+			#define BMA_UNDEF_WIN32_LEAN_AND_MEAN
+		#endif
+		#ifndef NOMINMAX
+			#define NOMINMAX
+			#define BMA_UNDEF_NOMINMAX
+		#endif
 	#endif
 	#include <Windows.h>
 	/* Clean-up of temporary macro definitions */
@@ -69,6 +71,7 @@ Bau 'ma's basic multithreading support
 		#undef BMA_UNDEF_NOMINMAX
 	#endif
 #elif BMA_POSIX_THRDS
+	#include <unistd.h>
 	#include <time.h>
 	#include <pthread.h>
 #endif

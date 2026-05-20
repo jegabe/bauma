@@ -47,7 +47,8 @@ typedef unsigned char bma_LogLevel;
 
 typedef struct bma_Log bma_Log;
 
-BMA_DEF void bma_log_init(void);
+BMA_DEF void bma_log_init_ext(bma_IMemAlloc *pAlloc);
+#define bma_log_init() bma_log_init_ext(bma_getDfltMemAlloc())
 BMA_DEF void bma_log_clnup(void);
 BMA_DEF bma_Log *bma_Log_get_impl_(const char *pPath);
 BMA_DEF bma_bool_t bma_Log_isLoggable_impl_(bma_Log *pLog, bma_LogLevel level);
@@ -186,20 +187,20 @@ BMA_DEF void bma_LogPtr_dtor(bma_Log **ppLog, bma_IMemAlloc *pAlloc);
 BMA_DEF_VEC(bma_LogPtrVec, bma_Log*, (bma_dtor_t)&bma_LogPtr_dtor)
 
 struct bma_Log {
-	char *pFullName;
-	char *pName; /* points into pFullName and shared the same memory */
+	char *pName;
 	bma_Log *pParent;
 	bma_LogPtrVec children;
 };
 
 static bma_Rw g_createLock;
 static bma_Log *g_pRoot = NULL;
+static bma_IMemAlloc *g_pAlloc = NULL;
 
 BMA_DEF	void bma_Log_dtor(bma_Log *pSelf, bma_IMemAlloc *pAlloc) {
 	(void)pAlloc;
 	bma_LogPtrVec_dtor(&pSelf->children, NULL);
 	if (pSelf != g_pRoot) {
-		bma_free(pSelf->pFullName);
+		bma_free_ext(g_pAlloc, pSelf->pName);
 	}
 #if BMA_DBG
 	memset(pSelf, 0xFF, sizeof(*pSelf));
@@ -207,21 +208,23 @@ BMA_DEF	void bma_Log_dtor(bma_Log *pSelf, bma_IMemAlloc *pAlloc) {
 }
 
 BMA_DEF void bma_LogPtr_dtor(bma_Log **ppLog, bma_IMemAlloc *pAlloc) {
+	(void)pAlloc;
 	bma_assert(ppLog != NULL);
 	bma_assert(*ppLog != NULL);
-	bma_Log_dtor(*ppLog, pAlloc);
-	bma_free_ext(pAlloc, *ppLog);
+	bma_Log_dtor(*ppLog, NULL);
+	bma_free_ext(g_pAlloc, *ppLog);
 }
 
-BMA_DEF void bma_log_init(void) {
+BMA_DEF void bma_log_init_ext(bma_IMemAlloc *pAlloc) {
 	bma_assert(g_pRoot == NULL);
+	bma_assert(g_pAlloc == NULL);
 	bma_Rw_ctor(&g_createLock);
 	bma_Rw_lckWrt(&g_createLock);
-	g_pRoot = bma_malloc(bma_Log);
-	g_pRoot->pFullName = (char*)"";
-	g_pRoot->pName = g_pRoot->pFullName;
+	g_pAlloc = pAlloc;
+	g_pRoot = bma_malloc_ext(g_pAlloc, bma_Log);
+	g_pRoot->pName = (char*)"";
 	g_pRoot->pParent = NULL;
-	bma_LogPtrVec_ctor(&g_pRoot->children);
+	bma_LogPtrVec_ctor_ext(&g_pRoot->children, g_pAlloc);
 	bma_Rw_unlckWrt(&g_createLock);
 }
 
@@ -229,8 +232,9 @@ BMA_DEF void bma_log_clnup(void) {
 	bma_assert(g_pRoot != NULL);
 	bma_Rw_lckWrt(&g_createLock);
 	bma_Log_dtor(g_pRoot, NULL);
-	bma_free(g_pRoot);
+	bma_free_ext(g_pAlloc, g_pRoot);
 	g_pRoot = NULL;
+	g_pAlloc = NULL;
 	bma_Rw_unlckWrt(&g_createLock);
 	bma_Rw_dtor(&g_createLock, NULL);
 }
@@ -242,8 +246,6 @@ static bma_bool_t bma_log_sameStr(const char *p0, size_t l0, const char *p1, siz
 BMA_DEF bma_Log *bma_Log_getOrCreate(const char *pPath, size_t pathLen, bma_bool_t create) {
 	bma_bool_t end = BMA_FALSE;
 	bma_Log *pResult;
-	const char *pFullPath = pPath;
-	size_t fullPathLen = pathLen;
 	bma_assert(pPath != NULL);
 	bma_assert(g_pRoot != NULL);
 	pResult = g_pRoot;
@@ -274,11 +276,10 @@ BMA_DEF bma_Log *bma_Log_getOrCreate(const char *pPath, size_t pathLen, bma_bool
 		if (!found) {
 			bma_Log *pNew;
 			if (!create) return NULL;
-			pNew = bma_malloc(bma_Log);
-			pNew->pFullName = bma_strndup(pFullPath, fullPathLen);
-			pNew->pName = pNew->pFullName + (pPath - pFullPath);
+			pNew = bma_malloc_ext(g_pAlloc, bma_Log);
+			pNew->pName = bma_strndup_ext(pPath, l, g_pAlloc);
 			pNew->pParent = pResult;
-			bma_LogPtrVec_ctor(&pNew->children);
+			bma_LogPtrVec_ctor_ext(&pNew->children, g_pAlloc);
 			bma_LogPtrVec_appnd(&pResult->children, &pNew);
 			pResult = pNew;
 		}
@@ -326,19 +327,36 @@ static const char *bma_Log_stripPath(const char *pFileName) {
 	return pFileName;
 }
 
+static void bma_Log_getFullName(bma_Log *pLog, bma_StrBldr *pDst) {
+	bma_assert(pLog != NULL);
+	bma_assert(pDst != NULL);
+	if (pLog->pParent != NULL) {
+		bma_Log_getFullName(pLog->pParent, pDst);
+	}
+	if (bma_StrBldr_getSz(pDst) > 0) {
+		bma_StrBldr_appndChr(pDst, '.', 1u);
+	}
+	bma_StrBldr_appndStr(pDst, pLog->pName);
+}
+
 BMA_DEF void bma_Log_log_impl_(bma_Log *pLog, bma_LogLevel level, const char *pFile, int line, const char *pFmt, ...) {
 	va_list ap;
+	bma_StrBldr bldr;
 	(void)level;
 	/*
 	if (!bma_Log_isLoggable_impl_(pLog, level)) {
 		return;
 	}
 	*/
-	fprintf(stdout, "[%s] (file %s line %d): ", pLog->pFullName, bma_Log_stripPath(pFile), line);
+	bma_StrBldr_ctor_ext(&bldr, g_pAlloc);
+	bma_StrBldr_rsrv(&bldr, 128);
+	bma_Log_getFullName(pLog, &bldr);
+	fprintf(stdout, "[%s] (file %s line %d): ", bma_StrBldr_getStr(&bldr), bma_Log_stripPath(pFile), line);
 	va_start(ap, pFmt);
 	vfprintf(stdout, pFmt, ap);
 	fprintf(stdout, "\n");
 	va_end(ap);
+	bma_StrBldr_dtor(&bldr, NULL);
 }
 
 
@@ -380,6 +398,7 @@ void bma_test_exit_fail(const char *exp, const char *file, int line) {
 void test_create(void) {
 	bma_Log *pLog, *pLog2;
 	bma_log_init();
+	BMA_EXPECT(g_pAlloc == bma_getDfltMemAlloc());
 	pLog = bma_Log_get("");
 	BMA_EXPECT(pLog == g_pRoot);
 	BMA_EXPECT(pLog->pParent == NULL);
@@ -396,6 +415,7 @@ void test_create(void) {
 	BMA_EXPECT(strcmp(pLog->pName, "") == 0);
 	bma_log_clnup();
 	BMA_EXPECT(g_pRoot == NULL);
+	BMA_EXPECT(g_pAlloc == NULL);
 }
 
 void test_log(void) {

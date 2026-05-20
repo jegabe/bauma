@@ -218,6 +218,6 @@ int main(int argc, char *argv[]) {
 	return 0;
 }
 
-#endif /* BMA_CMDSL_TEST */
+#endif /* BMA_FS_TEST */
 
-#endif /* BMA_CMDSL_H_INCLUDED */
+#endif /* BMA_FS_H_INCLUDED */

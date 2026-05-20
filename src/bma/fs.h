@@ -35,7 +35,7 @@ File system utilities
 	extern "C" {
 #endif
 
-BMA_DEF FILE *bma_fopen_utf8(const char *pPath, const char *pMode);
+BMA_DEF FILE *bma_fopen_utf8(const char *pPath);
 #define bma_fclose_utf8(pFile) fclose(pFile)
 
 BMA_DEF bma_bool_t bma_readWholeFile(const char *pPath, bma_StrBldr *pOut);
@@ -97,24 +97,20 @@ static wchar_t *bma_fsStrWdup(const char *pStr) {
 
 #endif
 
-BMA_DEF FILE *bma_fopen_utf8(const char *pPath, const char *pMode) {
+BMA_DEF FILE *bma_fopen_utf8(const char *pPath) {
 	#ifdef _WIN32
 		wchar_t *pWidePath;
-		wchar_t *pWideMode;
 		bma_assert(pPath != NULL);
-		bma_assert(pMode != NULL);
 		/* Under windows, the default narrow encoding isn't UTF-8,
 		   so we use the wchar_t variant to get the file names right */
 		pWidePath = bma_fsStrWdup(pPath);
-		pWideMode = bma_fsStrWdup(pMode);
-		FILE *pFile = _wfopen(pWidePath, pWideMode);
+		FILE *pFile = _wfopen(pWidePath, L"rb");
 		bma_free(pWideMode);
 		bma_free(pWidePath);
 		return pFile;
 	#else
 		bma_assert(pPath != NULL);
-		bma_assert(pMode != NULL);
-		return fopen(pPath, pMode);
+		return fopen(pPath, "rb");
 	#endif
 }
 
@@ -129,7 +125,7 @@ BMA_DEF bma_bool_t bma_readWholeFile(const char *pPath, bma_StrBldr *pOut) {
 	size_t numRead;
 	bma_assert(pPath != NULL);
 	bma_assert(pOut != NULL);
-	pFile = bma_fopen_utf8(pPath, "rb");
+	pFile = bma_fopen_utf8(pPath);
 	if (pFile == NULL) return BMA_FALSE;
 	if (fseek(pFile, 0, SEEK_END) != 0) {
 		bma_fclose_utf8(pFile);

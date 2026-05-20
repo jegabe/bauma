@@ -1103,7 +1103,7 @@ BMA_DEF void bma_nsonToStr_ext(bma_StrBldr *pDst, bma_NsonNode *pNode, bma_NsonD
 	} /* extern "C" */
 #endif
 
-#endif /* BMA_NSON_IMPLEMENTATION */
+#endif /* BMA_NSON_IMPL */
 
 #ifdef BMA_NSON_TEST
 

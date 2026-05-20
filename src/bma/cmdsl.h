@@ -1376,7 +1376,7 @@ BMA_DEF void bma_Cmdsl_freeTmpStrBldr(bma_Cmdsl *pSelf, bma_StrBldr *pTmpStrBldr
 	} /* extern "C" */
 #endif
 
-#endif /* BMA_CMDSL_IMPLEMENTATION */
+#endif /* BMA_CMDSL_IMPL */
 
 #ifdef BMA_CMDSL_TEST
 

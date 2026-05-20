@@ -710,6 +710,7 @@ BMA_DEF void bma_StrBldr_dtor(bma_StrBldr *pSelf, bma_IMemAlloc *pAlloc);
 #define bma_StrBldr_getSz(pSelf) ((const size_t)((pSelf)->size))
 BMA_DEF char *bma_StrBldr_rlse(bma_StrBldr *pSelf);
 BMA_DEF void bma_StrBldr_rsrv(bma_StrBldr *pSelf, size_t num);
+BMA_DEF void bma_StrBldr_rsz(bma_StrBldr *pSelf, size_t newSz);
 BMA_DEF void bma_StrBldr_appndGnrc(bma_StrBldr *pSelf, size_t capIncrease, const char *pFmt, ...);
 BMA_DEF void bma_StrBldr_appndStr(bma_StrBldr *pSelf, const char *p);
 BMA_DEF void bma_StrBldr_appndStrN(bma_StrBldr *pSelf, const char *p, size_t len);
@@ -1561,6 +1562,35 @@ BMA_DEF void bma_StrBldr_rsrv(bma_StrBldr *pSelf, size_t num) {
 	else {
 		pSelf->pStr = (*pSelf->pAlloc->pRllc)(pSelf->pAlloc, pSelf->pStr, newCap + 1u, &realNewCap);
 	}
+	pSelf->cap = realNewCap - 1u;
+}
+
+BMA_DEF void bma_StrBldr_rsz(bma_StrBldr *pSelf, size_t newSz) {
+	size_t realNewCap;
+	bma_assert(pSelf != NULL);
+	bma_assert(pSelf->pAlloc != NULL);
+	if (newSz == 0) {
+		if (pSelf->pStr != BMA_NULLSTR) {
+			bma_free_ext(pSelf->pAlloc, pSelf->pStr);
+			pSelf->pStr = BMA_NULLSTR;
+		}
+		pSelf->size = 0;
+		pSelf->cap = 0;
+		return;
+	}
+	if (newSz <= pSelf->cap) {
+		pSelf->size = newSz;
+		pSelf->pStr[newSz] = '\0';
+		return;
+	}
+	if (pSelf->pStr == BMA_NULLSTR) {
+		pSelf->pStr = (*pSelf->pAlloc->pRllc)(pSelf->pAlloc, NULL, newSz + 1u, &realNewCap);
+	}
+	else {
+		pSelf->pStr = (*pSelf->pAlloc->pRllc)(pSelf->pAlloc, pSelf->pStr, newSz + 1u, &realNewCap);
+	}
+	pSelf->pStr[newSz] = '\0';
+	pSelf->size = newSz;
 	pSelf->cap = realNewCap - 1u;
 }
 

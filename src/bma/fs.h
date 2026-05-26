@@ -77,7 +77,7 @@ BMA_DEF bma_bool_t bma_wrtFile(const char *pPath, const char *pData, size_t data
 
 #ifdef _WIN32
 
-static wchar_t *bma_fsStrWdup(const char *pStr) {
+BMA_DEF wchar_t *bma_fsStrWdup(const char *pStr) {
 	size_t len;
 	int numChars;
 	wchar_t *pResult;

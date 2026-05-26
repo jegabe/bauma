@@ -299,7 +299,7 @@ BMA_DEF void bma_log_clnup(void) {
 	bma_Rw_dtor(&g_createLock, NULL);
 }
 
-static bma_bool_t bma_log_sameStr(const char *p0, size_t l0, const char *p1, size_t l1) {
+BMA_DEF bma_bool_t bma_log_sameStr(const char *p0, size_t l0, const char *p1, size_t l1) {
 	return (l0 == l1) && (memcmp(p0, p1, l0) == 0);
 }
 

@@ -1005,7 +1005,7 @@ BMA_DEF bma_bool_t bauam_cmdsl_isNonFunctionCallEscape(bma_Cmdsl *pSelf, bma_cmd
 
 BMA_DEF bma_ICmdslNode *bma_cmdsl_parseElement(bma_Cmdsl *pSelf, bma_cmdsl_ParseSrc* pStr, bma_StrBldr *pErrFormatter, bma_bool_t insideFunction);
 
-static char CMDSL_ERR_AT_OFFSET[] = "Err at offset ";
+static const char CMDSL_ERR_AT_OFFSET[] = "Err at offset ";
 
 BMA_DEF void bma_cmdsl_printErrAtOffs(bma_StrBldr *pErrFormatter, bma_cmdsl_ParseSrc* pStr, const char *pMsg) {
 	bma_StrBldr_appndStr(pErrFormatter, CMDSL_ERR_AT_OFFSET);

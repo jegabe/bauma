@@ -54,6 +54,8 @@ BMA_DEF bma_Log *bma_Log_get_impl_(const char *pPath);
 BMA_DEF bma_bool_t bma_Log_isLoggable_impl_(bma_Log *pLog, bma_LogLevel level);
 BMA_DEF void bma_Log_log_impl_(bma_Log *pLog, bma_LogLevel level, const char *pFile, int line, const char *pFmt, ...);
 
+BMA_DEF void bma_Log_addCnslSink(const char* pPath, bma_LogLevel level);
+
 #ifdef BMA_LOG_DISABLE
 
 #define bma_Log_get(pPath) ((bma_Log*)NULL)
@@ -176,6 +178,7 @@ BMA_DEF void bma_Log_log_impl_(bma_Log *pLog, bma_LogLevel level, const char *pF
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <time.h>
 #include <bma/thrd.h>
 
 #ifdef __cplusplus
@@ -186,10 +189,40 @@ BMA_DEF void bma_LogPtr_dtor(bma_Log **ppLog, bma_IMemAlloc *pAlloc);
 
 BMA_DEF_VEC(bma_LogPtrVec, bma_Log*, (bma_dtor_t)&bma_LogPtr_dtor)
 
+typedef struct bma_LogMsg {
+	bma_LogLevel level;
+	const char *pPath;
+	size_t pathLen;
+	const char *pFile;
+	size_t fileLen;
+	int line;
+	const char *pDateTime;
+	size_t dateTimeLen;
+	const char *pMsg;
+	size_t msgLen;
+} bma_LogMsg;
+
+typedef struct bma_LogSink {
+	void (*pDtor)(void* pThis, bma_IMemAlloc* pOptAlloc);
+	bma_LogLevel (*pGetMinLevel)(const void *pThis);
+	void (*pHandle)(void* pThis, bma_LogMsg *pMsg);
+} bma_LogSink;
+
+BMA_DEF void bma_LogSinkPtr_dtor(bma_LogSink **ppSink, bma_IMemAlloc *pAlloc) {
+	bma_assert(ppSink != NULL);
+	bma_assert(*ppSink != NULL);
+	(*ppSink)->pDtor(*ppSink, pAlloc);
+	bma_free_ext(pAlloc, *ppSink);
+}
+
+BMA_DEF_VEC(bma_LogSinkPtrVec, bma_LogSink*, (bma_dtor_t)&bma_LogSinkPtr_dtor)
+
 struct bma_Log {
 	char *pName;
 	bma_Log *pParent;
 	bma_LogPtrVec children;
+	bma_LogSinkPtrVec sinks;
+	bma_atmc_t minLevel;
 };
 
 static bma_Rw g_createLock;
@@ -199,6 +232,7 @@ static bma_bool_t g_stdOutIsTerminal = BMA_FALSE;
 
 BMA_DEF	void bma_Log_dtor(bma_Log *pSelf, bma_IMemAlloc *pAlloc) {
 	(void)pAlloc;
+	bma_LogSinkPtrVec_dtor(&pSelf->sinks, NULL);
 	bma_LogPtrVec_dtor(&pSelf->children, NULL);
 	if (pSelf != g_pRoot) {
 		bma_free_ext(g_pAlloc, pSelf->pName);
@@ -231,6 +265,8 @@ BMA_DEF void bma_log_init_ext(bma_IMemAlloc *pAlloc) {
 	g_pRoot->pName = (char*)"";
 	g_pRoot->pParent = NULL;
 	bma_LogPtrVec_ctor_ext(&g_pRoot->children, g_pAlloc);
+	bma_LogSinkPtrVec_ctor_ext(&g_pRoot->sinks, g_pAlloc);
+	g_pRoot->minLevel = (bma_atmc_t)BMA_LOG_LEVEL_OFF;
 #if BMA_WIN_THRDS
 	/* By default, Windows console is neither UTF-8 nor color enabled. Let's fix that. */
 	hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -305,6 +341,8 @@ BMA_DEF bma_Log *bma_Log_getOrCreate(const char *pPath, size_t pathLen, bma_bool
 			pNew->pParent = pResult;
 			bma_LogPtrVec_ctor_ext(&pNew->children, g_pAlloc);
 			bma_LogPtrVec_appnd(&pResult->children, &pNew);
+			bma_LogSinkPtrVec_ctor_ext(&pNew->sinks, g_pAlloc);
+			pNew->minLevel = (bma_atmc_t)BMA_LOG_LEVEL_OFF;
 			pResult = pNew;
 		}
 		if (!end) {
@@ -334,24 +372,26 @@ BMA_DEF bma_Log *bma_Log_get_impl_(const char *pPath) {
 }
 
 BMA_DEF bma_bool_t bma_Log_isLoggable_impl_(bma_Log *pLog, bma_LogLevel level) {
-	(void)pLog;
-	(void)level;
-	return BMA_TRUE;
+	bma_atmc_t currLvl = bma_atmc_cas(&pLog->minLevel, 0, 0);
+	bma_bool_t result = (bma_bool_t)(level >= (bma_LogLevel)currLvl);
+	return result;
 }
 
-static const char *bma_Log_stripPath(const char *pFileName) {
-	size_t l;
+BMA_DEF const char *bma_Log_stripPath(const char *pFileName, size_t *pOutFileNameLen) {
+	size_t l, n;
 	bma_assert(pFileName != NULL);
-	l = strlen(pFileName);
+	l = n = strlen(pFileName);
 	while (l-- > 0) {
 		if (pFileName[l] == '/' || pFileName[l] == '\\') {
+			*pOutFileNameLen = (n - l) - 1u;
 			return &pFileName[l + 1u];
 		}
 	}
+	*pOutFileNameLen = n;
 	return pFileName;
 }
 
-static void bma_Log_getFullName(bma_Log *pLog, bma_StrBldr *pDst) {
+BMA_DEF void bma_Log_getFullName(bma_Log *pLog, bma_StrBldr *pDst) {
 	bma_assert(pLog != NULL);
 	bma_assert(pDst != NULL);
 	if (pLog->pParent != NULL) {
@@ -363,26 +403,178 @@ static void bma_Log_getFullName(bma_Log *pLog, bma_StrBldr *pDst) {
 	bma_StrBldr_appndStr(pDst, pLog->pName);
 }
 
-BMA_DEF void bma_Log_log_impl_(bma_Log *pLog, bma_LogLevel level, const char *pFile, int line, const char *pFmt, ...) {
-	va_list ap;
-	bma_StrBldr bldr;
-	(void)level;
-	/*
-	if (!bma_Log_isLoggable_impl_(pLog, level)) {
-		return;
+BMA_DEF void bma_Log_callSinks(bma_Log *pLog, bma_LogMsg *pMsg) {
+	size_t i;
+	bma_assert(pLog != NULL);
+	bma_assert(pMsg != NULL);
+	if (pLog->pParent != NULL) {
+		bma_Log_callSinks(pLog->pParent, pMsg);
 	}
-	*/
-	bma_StrBldr_ctor_ext(&bldr, g_pAlloc);
-	bma_StrBldr_rsrv(&bldr, 128);
-	bma_Log_getFullName(pLog, &bldr);
-	fprintf(stdout, "[%s] (file %s line %d): ", bma_StrBldr_getStr(&bldr), bma_Log_stripPath(pFile), line);
-	va_start(ap, pFmt);
-	vfprintf(stdout, pFmt, ap);
-	fprintf(stdout, "\n");
-	va_end(ap);
-	bma_StrBldr_dtor(&bldr, NULL);
+	for (i=0; i<bma_LogSinkPtrVec_getSz(&pLog->sinks); ++i) {
+		bma_LogSink *pSink = *bma_LogSinkPtrVec_at(&pLog->sinks, i);
+		(*pSink->pHandle)(pSink, pMsg);
+	}
 }
 
+BMA_DEF void bma_Log_log_impl_(bma_Log *pLog, bma_LogLevel level, const char *pFile, int line, const char *pFmt, ...) {
+	va_list ap;
+	bma_StrBldr pathBldr;
+	bma_StrBldr msgBldr;
+	time_t currTime;
+	struct tm tmBuf;
+	struct tm *currTmStrct;
+	char timeBuf[32];
+	bma_LogMsg msg;
+	int i;
+	bma_atmc_t currLvl = bma_atmc_cas(&pLog->minLevel, 0, 0);
+	if (level < (bma_LogLevel)currLvl) {
+		/* fast exit important to be performant when log level not reached */
+		return;
+	}
+	currTime = time(NULL);
+	/* Now, format once and then pass to all sinks. Saves time at the sinks */
+	bma_StrBldr_ctor_ext(&pathBldr, g_pAlloc);
+	bma_StrBldr_rsrv(&pathBldr, 128);
+	bma_Log_getFullName(pLog, &pathBldr);
+	bma_StrBldr_ctor_ext(&msgBldr, g_pAlloc);
+	bma_StrBldr_rsz(&msgBldr, 255);
+	for (;;) {
+		va_start(ap, pFmt);
+		i = vsnprintf((char*)bma_StrBldr_getStr(&msgBldr), (bma_StrBldr_getSz(&msgBldr)) + 1u, pFmt, ap);
+		va_end(ap);
+		if (i < 0) bma_exit_err("vsnprintf() failed");
+		if ((size_t)i <= bma_StrBldr_getSz(&msgBldr)) {
+			if ((size_t)i < bma_StrBldr_getSz(&msgBldr)) {
+				bma_StrBldr_rsz(&msgBldr, (size_t)i);
+			}
+			break;
+		}
+		/* else, buffer was too small: */
+		bma_StrBldr_rsz(&msgBldr, (size_t)i + 1u);
+		/* and try again */
+	}
+	memset(&msg, 0, sizeof(msg));
+	msg.level = level;
+	msg.pPath = bma_StrBldr_getStr(&pathBldr);
+	msg.pathLen = bma_StrBldr_getSz(&pathBldr);	
+	msg.pFile = bma_Log_stripPath(pFile, &msg.fileLen);
+	msg.line = line;
+#if BMA_WIN_THRDS
+	if (localtime_s(&tmBuf, &currTime) != 0) bma_exit_err("localtime_s() failed");
+	currTmStrct = &tmBuf;
+#elif BMA_POSIX_THRDS
+	currTmStrct = localtime_r(&currTime, &tmBuf);
+	if (currTmStrct == NULL) bma_exit_err("localtime_r() failed");
+#else /* old thread-unsafe C89 API */
+	currTmStrct = localtime(&currTime);
+	if (currTmStrct == NULL) bma_exit_err("localtime() failed");
+	(void)tmBuf;
+#endif
+	msg.dateTimeLen = strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%dT%H:%M:%S", currTmStrct);
+	bma_assert(msg.dateTimeLen > 0);
+	bma_assert(msg.dateTimeLen == strlen(timeBuf));
+	msg.pDateTime = timeBuf;
+	msg.pMsg = bma_StrBldr_getStr(&msgBldr);
+	msg.msgLen = bma_StrBldr_getSz(&msgBldr);
+	bma_Rw_lckRd(&g_createLock); /* to safely iterate sinks and parent loggers */
+	bma_Log_callSinks(pLog, &msg);
+	bma_Rw_unlckRd(&g_createLock);
+	bma_StrBldr_dtor(&msgBldr, NULL);
+	bma_StrBldr_dtor(&pathBldr, NULL);
+}
+
+BMA_DEF void bma_Log_reclcLvl(bma_Log *pLog, bma_LogLevel lvl) {
+	size_t i;
+	for (i=0; i<bma_LogSinkPtrVec_getSz(&pLog->sinks); ++i) {
+		bma_LogLevel sinkLvl;
+		bma_LogSink *pSink = *bma_LogSinkPtrVec_at(&pLog->sinks, i);
+		bma_assert(pSink != NULL);
+		sinkLvl = (pSink->pGetMinLevel)(pSink);
+		if (sinkLvl < lvl) {
+			lvl = sinkLvl;
+		}
+	}
+	(void)bma_atmc_exchg(&pLog->minLevel, (bma_atmc_t)lvl);
+	for (i=0; i<bma_LogPtrVec_getSz(&pLog->children); ++i)
+	{
+		bma_Log *pChild = *bma_LogPtrVec_at(&pLog->children, i);
+		bma_assert(pChild != NULL);
+		bma_Log_reclcLvl(pChild, lvl);
+	}
+}
+
+BMA_DEF void bma_Log_reclcLvls(void) {
+	assert(g_pRoot != NULL);
+	/* read-lock g_createLock for safe iteration over sub-loggers and sinks */
+	bma_Rw_lckRd(&g_createLock);
+	bma_Log_reclcLvl(g_pRoot, BMA_LOG_LEVEL_OFF);
+	bma_Rw_unlckRd(&g_createLock);
+}
+
+typedef struct bma_LogCnslSink {
+	bma_LogSink base;
+	bma_LogLevel level;
+} bma_LogCnslSink;
+
+BMA_DEF void bma_LogCnslSink_dtor(bma_LogCnslSink *pSelf, bma_IMemAlloc *pAlloc) {
+	(void)pSelf;
+	(void)pAlloc;
+}
+
+BMA_DEF bma_LogLevel bma_LogCnslSink_getLevel(const void *pSelf_) {
+	const bma_LogCnslSink *pSelf = (const bma_LogCnslSink*)pSelf_;
+	bma_assert(pSelf != NULL);
+	return pSelf->level;
+}
+
+BMA_DEF void bma_LogCnslSink_handle(void *pSelf_, bma_LogMsg *pMsg) {
+	bma_LogCnslSink *pSelf = (bma_LogCnslSink*)pSelf_;
+	bma_assert(pSelf != NULL);
+	bma_assert(pMsg != NULL);
+	if (pMsg->level < pSelf->level) return;
+	printf("[");
+	switch (pMsg->level) {
+		case BMA_LOG_LEVEL_DEBUG:
+			if (g_stdOutIsTerminal) printf("\x1b[34m"); /* blue */
+			printf("DEBUG");
+			break;
+		case BMA_LOG_LEVEL_INFO:
+			if (g_stdOutIsTerminal) printf("\x1b[32m"); /* green */
+			printf("INFO");
+			break;
+		case BMA_LOG_LEVEL_WARN:
+			if (g_stdOutIsTerminal) printf("\x1b[33m"); /* yellow */
+			printf("WARN");
+			break;
+		case BMA_LOG_LEVEL_ERROR:
+			if (g_stdOutIsTerminal) printf("\x1b[31m"); /* red */
+			printf("ERROR");
+			break;
+		case BMA_LOG_LEVEL_FATAL:
+			if (g_stdOutIsTerminal) printf("\x1b[31m"); /* red */
+			printf("FATAL");
+			break;
+		default:
+			break;
+	}
+	if (g_stdOutIsTerminal) printf("\x1b[0m"); /* reset color */
+	printf(" path %s] (%s, file %s, line %d): %s\n", pMsg->pPath, pMsg->pDateTime, pMsg->pFile, pMsg->line, pMsg->pMsg);
+}
+
+BMA_DEF void bma_Log_addCnslSink(const char* pPath, bma_LogLevel level) {
+	bma_LogCnslSink *pSink;
+	bma_Log *pLog = bma_Log_get(pPath);
+	bma_assert(pLog != NULL);
+	pSink = bma_malloc_ext(g_pAlloc, bma_LogCnslSink);
+	pSink->base.pDtor = (bma_dtor_t)&bma_LogCnslSink_dtor;
+	pSink->base.pGetMinLevel = &bma_LogCnslSink_getLevel;
+	pSink->base.pHandle = &bma_LogCnslSink_handle;
+	pSink->level = level;
+	bma_Rw_lckWrt(&g_createLock);
+	bma_LogSinkPtrVec_appnd(&pLog->sinks, (bma_LogSink**)&pSink);
+	bma_Rw_unlckWrt(&g_createLock);
+	bma_Log_reclcLvls();
+}
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -446,6 +638,7 @@ void test_log(void) {
 	bma_Log *pLog;
 	bma_log_init();
 	pLog = bma_Log_get("a.b");
+	bma_Log_addCnslSink("", BMA_LOG_LEVEL_DEBUG);
 	bma_Log_info_1(pLog, "The magic number %d", 42);
 	bma_log_clnup();
 	BMA_EXPECT(g_pRoot == NULL);

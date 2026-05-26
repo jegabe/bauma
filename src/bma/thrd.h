@@ -86,6 +86,7 @@ Bau 'ma's basic multithreading support
 	#define bma_atmc_inc(p) InterlockedIncrement((volatile LONG*)(p))
 	#define bma_atmc_dec(p) InterlockedDecrement((volatile LONG*)(p))
 	#define bma_atmc_cas(p, comp, exchg) InterlockedCompareExchange((volatile LONG*)(p), (exchg), (comp))
+	#define bma_atmc_exchg(p, val) InterlockedExchange((volatile LONG*)(p), val)
 #elif defined (__GNUC__) || defined (__clang__) /* Independent of OS, theres a compiler intrinsic */
 	typedef int bma_atmc_t;
 	#define bma_atmc_inc(p) __atomic_add_fetch(p, 1, __ATOMIC_SEQ_CST)
@@ -95,6 +96,7 @@ Bau 'ma's basic multithreading support
 		return comp;
 	}
 	#define bma_atmc_cas(p, comp, exchg) bma_atmc_cas_impl_(p, comp, exchg)
+	#define bma_atmc_exchg(p, val) __atomic_exchange_n(p, val, __ATOMIC_SEQ_CST)
 #else
 	#undef BMA_HAS_THRDS
 	#undef BMA_WIN_THRDS

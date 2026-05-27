@@ -30,9 +30,16 @@ File system utilities
 */
 #include <stdio.h>
 #include <bma/ccal.h>
+#include <bma/utils.h>
 
 #ifdef __cplusplus
 	extern "C" {
+#endif
+
+#ifdef _WIN32
+	#define BMA_FS_SEP '\\'
+#else
+	#define BMA_FS_SEP '/'
 #endif
 
 BMA_DEF FILE *bma_fopen_rd(const char *pPath);
@@ -40,6 +47,8 @@ BMA_DEF FILE *bma_fopen_wrt(const char *pPath);
 
 BMA_DEF bma_bool_t bma_rdFile(const char *pPath, bma_StrBldr *pOut);
 BMA_DEF bma_bool_t bma_wrtFile(const char *pPath, const char *pData, size_t dataSz);
+
+BMA_DEF bma_bool_t bma_getHomeDir(bma_StrBldr* pOut);
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -75,36 +84,13 @@ BMA_DEF bma_bool_t bma_wrtFile(const char *pPath, const char *pData, size_t data
 	extern "C" {
 #endif
 
-#ifdef _WIN32
-
-BMA_DEF wchar_t *bma_fsStrWdup(const char *pStr) {
-	size_t len;
-	int numChars;
-	wchar_t *pResult;
-	bma_IMemAlloc *pAlloc = bma_getDfltMemAlloc();
-	len = strlen(pStr);
-	if (len == 0) {
-		pResult = (*pAlloc->pRllc)(pAlloc, NULL, sizeof(wchar_t), NULL);
-		*pResult = L'\0';
-		return pResult;
-	}
-	numChars = MultiByteToWideChar(CP_UTF8, 0, pStr, (int)len, NULL, 0);
-	if (numChars <= 0) bma_exit_err("MultiByteToWideChar failed");
-	pResult = (*pAlloc->pRllc)(pAlloc, NULL, (size_t)((numChars + 1) * sizeof(wchar_t)), NULL);
-	(void)MultiByteToWideChar(CP_UTF8, 0, pStr, (int)len, pResult, numChars);
-	pResult[numChars] = L'\0';
-	return pResult;
-}
-
-#endif
-
 BMA_DEF FILE *bma_fopen_rd(const char *pPath) {
 	#ifdef _WIN32
 		wchar_t *pWidePath;
 		bma_assert(pPath != NULL);
 		/* Under windows, the default narrow encoding isn't UTF-8,
 		   so we use the wchar_t variant to get the file names right */
-		pWidePath = bma_fsStrWdup(pPath);
+		pWidePath = bma_strWdup(pPath);
 		FILE *pFile = _wfopen(pWidePath, L"rb");
 		bma_free(pWidePath);
 		return pFile;
@@ -120,7 +106,7 @@ BMA_DEF FILE *bma_fopen_wrt(const char *pPath) {
 		bma_assert(pPath != NULL);
 		/* Under windows, the default narrow encoding isn't UTF-8,
 		   so we use the wchar_t variant to get the file names right */
-		pWidePath = bma_fsStrWdup(pPath);
+		pWidePath = bma_strWdup(pPath);
 		FILE *pFile = _wfopen(pWidePath, L"wb");
 		bma_free(pWidePath);
 		return pFile;
@@ -179,6 +165,39 @@ BMA_DEF bma_bool_t bma_wrtFile(const char *pPath, const char *pData, size_t data
 	return (numWritten == dataSz);
 }
 
+BMA_DEF bma_bool_t bma_getHomeDir(bma_StrBldr* pOut) {
+	#ifdef _WIN32
+		DWORD res;
+		size_t i;
+		wchar_t *pContent;
+		char *p;
+		bma_IMemAlloc *pAlloc = bma_getDfltMemAlloc();
+		const wchar_t *const kNames[] = {
+			L"HOME", L"USERPROFILE"
+		};
+		for(i=0; i<bma_ary_sz(kNames); ++i) {
+			const wchar_t *pName = kNames[i];
+			res = GetEnvironmentVariableW(pName, NULL, 0);
+			if (res == 0) continue;
+			pContent = (*pAlloc->pRllc)(pAlloc, NULL, (size_t)res * sizeof(wchar_t), NULL);
+			(void)GetEnvironmentVariableW(pName, pContent, res);
+			p = bma_wStrDup(pContent);
+			(void)(*pAlloc->pRllc)(pAlloc, pContent, 0, NULL);
+			bma_StrBldr_appndStr(pOut, p);
+			(void)(*pAlloc->pRllc)(pAlloc, p, 0, NULL);
+			return BMA_TRUE;
+		}
+		return BMA_FALSE;
+	#else
+		const char *p;
+		bma_assert(pOut != NULL);
+		p = getenv("HOME");
+		if (p == NULL) return BMA_FALSE;
+		bma_StrBldr_appndStr(pOut, p);
+		return BMA_TRUE;
+	#endif
+}
+
 #ifdef __cplusplus
 	} /* extern "C" */
 #endif
@@ -227,6 +246,15 @@ void test_readWholeFile(void) {
 	bma_StrBldr_dtor(&b, NULL);
 }
 
+void test_getHomeDir(void) {
+	bma_StrBldr bldr;
+	bma_bool_t result;
+	bma_StrBldr_ctor(&bldr);
+	result = bma_getHomeDir(&bldr);
+	BMA_EXPECT(result);
+	BMA_EXPECT(bma_StrBldr_getSz(&bldr) > 0);
+	bma_StrBldr_dtor(&bldr, NULL);
+}
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -236,6 +264,7 @@ int main(int argc, char *argv[]) {
 	(void)argc;
 	(void)argv;
 	BMA_TEST(test_readWholeFile);
+	BMA_TEST(test_getHomeDir);
 
 	printf("All tests passed.\n");
 	fflush(stdout);

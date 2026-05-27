@@ -587,6 +587,10 @@ BMA_DEF void bma_Log_addCnslSink(const char* pPath, bma_LogLevel level) {
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#if defined(_WIN32) && !defined(NDEBUG)
+	#define _CRTDBG_MAP_ALLOC
+	#include <crtdbg.h>
+#endif
 
 #ifdef __cplusplus
 	extern "C" {
@@ -649,6 +653,10 @@ void test_log(void) {
 #endif
 
 int main(int argc, char *argv[]) {
+#if defined(_WIN32) && !defined(NDEBUG)
+	int flags_ = _CrtSetDbgFlag(_CRTDBG_REPORT_FLAG);
+	_CrtSetDbgFlag(flags_ | _CRTDBG_ALLOC_MEM_DF | _CRTDBG_CHECK_ALWAYS_DF | _CRTDBG_LEAK_CHECK_DF);
+#endif
 	(void)argc;
 	(void)argv;
 	BMA_TEST(test_create);

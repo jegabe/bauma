@@ -37,9 +37,9 @@ File system utilities
 #endif
 
 #ifdef _WIN32
-	#define BMA_FS_SEP '\\'
+	#define BMA_FS_SEP "\\"
 #else
-	#define BMA_FS_SEP '/'
+	#define BMA_FS_SEP "/"
 #endif
 
 BMA_DEF FILE *bma_fopen_rd(const char *pPath);

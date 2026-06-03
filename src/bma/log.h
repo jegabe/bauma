@@ -47,9 +47,9 @@ typedef unsigned char bma_LogLevel;
 
 typedef struct bma_Log bma_Log;
 
-BMA_DEF void bma_log_init_ext(bma_IMemAlloc *pAlloc);
-#define bma_log_init() bma_log_init_ext(bma_getDfltMemAlloc())
-BMA_DEF void bma_log_clnup(void);
+BMA_DEF void bma_Log_init_ext(bma_IMemAlloc *pAlloc);
+#define bma_Log_init() bma_Log_init_ext(bma_getDfltMemAlloc())
+BMA_DEF void bma_Log_clnup(void);
 BMA_DEF bma_Log *bma_Log_get_impl_(const char *pPath);
 BMA_DEF bma_bool_t bma_Log_isLoggable_impl_(bma_Log *pLog, bma_LogLevel level);
 BMA_DEF void bma_Log_log_impl_(bma_Log *pLog, bma_LogLevel level, const char *pFile, int line, const char *pFmt, ...);
@@ -250,7 +250,7 @@ BMA_DEF void bma_LogPtr_dtor(bma_Log **ppLog, bma_IMemAlloc *pAlloc) {
 	bma_free_ext(g_pAlloc, *ppLog);
 }
 
-BMA_DEF void bma_log_init_ext(bma_IMemAlloc *pAlloc) {
+BMA_DEF void bma_Log_init_ext(bma_IMemAlloc *pAlloc) {
 #if BMA_WIN_THRDS
 	HANDLE hConsole;
 	DWORD mode;
@@ -287,7 +287,7 @@ BMA_DEF void bma_log_init_ext(bma_IMemAlloc *pAlloc) {
 	bma_Rw_unlckWrt(&g_createLock);
 }
 
-BMA_DEF void bma_log_clnup(void) {
+BMA_DEF void bma_Log_clnup(void) {
 	bma_assert(g_pRoot != NULL);
 	bma_Rw_lckWrt(&g_createLock);
 	bma_Log_dtor(g_pRoot, NULL);
@@ -299,7 +299,7 @@ BMA_DEF void bma_log_clnup(void) {
 	bma_Rw_dtor(&g_createLock, NULL);
 }
 
-BMA_DEF bma_bool_t bma_log_sameStr(const char *p0, size_t l0, const char *p1, size_t l1) {
+BMA_DEF bma_bool_t bma_Log_sameStr(const char *p0, size_t l0, const char *p1, size_t l1) {
 	return (l0 == l1) && (memcmp(p0, p1, l0) == 0);
 }
 
@@ -327,7 +327,7 @@ BMA_DEF bma_Log *bma_Log_getOrCreate(const char *pPath, size_t pathLen, bma_bool
 		for (i=0; i<bma_LogPtrVec_getSz(&pResult->children); ++i) {
 			bma_Log *pChild = *bma_LogPtrVec_at(&pResult->children, i);
 			bma_assert(pChild != NULL);
-			if (bma_log_sameStr(pChild->pName, strlen(pChild->pName), pPath, l)) {
+			if (bma_Log_sameStr(pChild->pName, strlen(pChild->pName), pPath, l)) {
 				pResult = pChild;
 				found = BMA_TRUE;
 				break;
@@ -342,7 +342,7 @@ BMA_DEF bma_Log *bma_Log_getOrCreate(const char *pPath, size_t pathLen, bma_bool
 			bma_LogPtrVec_ctor_ext(&pNew->children, g_pAlloc);
 			bma_LogPtrVec_appnd(&pResult->children, &pNew);
 			bma_LogSinkPtrVec_ctor_ext(&pNew->sinks, g_pAlloc);
-			pNew->minLevel = (bma_atmc_t)BMA_LOG_LEVEL_OFF;
+			pNew->minLevel = pNew->pParent->minLevel;
 			pResult = pNew;
 		}
 		if (!end) {
@@ -617,7 +617,7 @@ void bma_test_exit_fail(const char *exp, const char *file, int line) {
 
 void test_create(void) {
 	bma_Log *pLog, *pLog2;
-	bma_log_init();
+	bma_Log_init();
 	BMA_EXPECT(g_pAlloc == bma_getDfltMemAlloc());
 	pLog = bma_Log_get("");
 	BMA_EXPECT(pLog == g_pRoot);
@@ -633,18 +633,18 @@ void test_create(void) {
 	pLog = pLog->pParent;
 	BMA_EXPECT(pLog != NULL);
 	BMA_EXPECT(strcmp(pLog->pName, "") == 0);
-	bma_log_clnup();
+	bma_Log_clnup();
 	BMA_EXPECT(g_pRoot == NULL);
 	BMA_EXPECT(g_pAlloc == NULL);
 }
 
 void test_log(void) {
 	bma_Log *pLog;
-	bma_log_init();
+	bma_Log_init();
 	pLog = bma_Log_get("a.b");
 	bma_Log_addCnslSink("", BMA_LOG_LEVEL_DEBUG);
 	bma_Log_info_1(pLog, "The magic number %d", 42);
-	bma_log_clnup();
+	bma_Log_clnup();
 	BMA_EXPECT(g_pRoot == NULL);
 }
 

@@ -354,6 +354,9 @@ BMA_DEF char *bma_strndup_ext(const char* p, size_t n, bma_IMemAlloc *pAlloc);
 
 BMA_DEF void *bma_memmem(const void *pHayStack, size_t hayStackSize, const void *pNeedle, size_t needleSize);
 
+BMA_DEF bma_bool_t bma_strtsWth(const char *pStr, const char* pPrefix);
+BMA_DEF bma_bool_t bma_endsWth(const char *pStr, const char* pSuffix);
+
 /*!
 \brief A string that knows its length and isn't necessarily
 null terminated. Useful for hash map keys where null terminated strings
@@ -707,6 +710,16 @@ BMA_DEF void bma_StrBldr_ctor_ext(bma_StrBldr *pSelf, bma_IMemAlloc *pAlloc);
 #define bma_StrBldr_ctor(pSelf) bma_StrBldr_ctor_ext((pSelf), bma_getDfltMemAlloc())
 BMA_DEF void bma_StrBldr_dtor(bma_StrBldr *pSelf, bma_IMemAlloc *pAlloc);
 #define bma_StrBldr_getStr(pSelf) ((const char* const)((pSelf)->pStr))
+
+#if BMA_DBG
+	BMA_DEF char bma_StrBldr_at_impl_D(bma_StrBldr *pSelf, size_t index);
+	#define bma_StrBldr_at(pSelf, index) \
+		bma_StrBldr_at_impl_D(pSelf, index)
+#else
+	#define bma_StrBldr_at(pSelf, index) \
+		((const char)(pSelf)->pStr[index])
+#endif
+
 #define bma_StrBldr_getSz(pSelf) ((const size_t)((pSelf)->size))
 BMA_DEF char *bma_StrBldr_rlse(bma_StrBldr *pSelf);
 BMA_DEF void bma_StrBldr_rsrv(bma_StrBldr *pSelf, size_t num);
@@ -721,7 +734,9 @@ BMA_DEF void bma_StrBldr_appndDbl(bma_StrBldr *pSelf, double d);
 BMA_DEF void bma_StrBldr_appndBool(bma_StrBldr *pSelf, bma_bool_t b);
 BMA_DEF void bma_StrBldr_appndCdPntUtf8(bma_StrBldr *pSelf, unsigned long cdPnt);
 BMA_DEF void bma_StrBldr_clear(bma_StrBldr *pSelf);
-		
+BMA_DEF bma_bool_t bma_StrBldr_strtsWth(bma_StrBldr *pSelf, const char* pStr);
+BMA_DEF bma_bool_t bma_StrBldr_endsWth(bma_StrBldr *pSelf, const char* pStr);
+
 
 typedef struct bma_StrTreeNodeHdr_ bma_StrTreeNodeHdr_;
 
@@ -1029,6 +1044,30 @@ BMA_DEF void *bma_memmem(const void *pHayStack, size_t hayStackSize, const void 
 		++p;
 	}
 	return NULL;
+}
+
+BMA_DEF bma_bool_t bma_strtsWth(const char *pStr, const char* pPrefix) {
+	size_t strLen, prefixLen;
+	bma_assert(pStr != NULL);
+	bma_assert(pPrefix != NULL);
+	prefixLen = strlen(pPrefix);
+	strLen = strlen(pStr);
+	if (prefixLen > strLen) {
+		return BMA_FALSE;
+	}
+	return (memcmp(pStr, pPrefix, prefixLen) == 0);
+}
+
+BMA_DEF bma_bool_t bma_endsWth(const char *pStr, const char* pSuffix) {
+	size_t strLen, suffixLen;
+	bma_assert(pStr != NULL);
+	bma_assert(pSuffix != NULL);
+	suffixLen = strlen(pSuffix);
+	strLen = strlen(pStr);
+	if (suffixLen > strLen) {
+		return BMA_FALSE;
+	}
+	return (memcmp(pStr + strLen - suffixLen, pSuffix, suffixLen) == 0);
 }
 
 BMA_DEF size_t bma_StrN_hash(const bma_StrN *pSelf) {
@@ -1517,6 +1556,17 @@ BMA_DEF void bma_StrBldr_dtor(bma_StrBldr *pSelf, bma_IMemAlloc *pAlloc) {
 #endif
 }
 
+#if BMA_DBG
+
+BMA_DEF char bma_StrBldr_at_impl_D(bma_StrBldr *pSelf, size_t index) {
+	bma_assert(pSelf != NULL);
+	bma_assert(pSelf->pStr != NULL);
+	bma_assert(index < pSelf->size);
+	return pSelf->pStr[index];
+}
+
+#endif
+
 BMA_DEF char *bma_StrBldr_rlse(bma_StrBldr *pSelf) {
 	char *p;
 	bma_assert(pSelf != NULL);
@@ -1713,6 +1763,24 @@ BMA_DEF void bma_StrBldr_clear(bma_StrBldr *pSelf) {
 		pSelf->size = 0;
 	}
 
+}
+
+BMA_DEF bma_bool_t bma_StrBldr_strtsWth(bma_StrBldr *pSelf, const char* pStr) {
+	size_t l;
+	bma_assert(pSelf != NULL);
+	bma_assert(pStr != NULL);
+	l = strlen(pStr);
+	if (l > pSelf->size) return BMA_FALSE;
+	return (memcmp(pSelf->pStr, pStr, l) == 0);
+}
+
+BMA_DEF bma_bool_t bma_StrBldr_endsWth(bma_StrBldr *pSelf, const char* pStr) {
+	size_t l;
+	bma_assert(pSelf != NULL);
+	bma_assert(pStr != NULL);
+	l = strlen(pStr);
+	if (l > pSelf->size) return BMA_FALSE;
+	return (memcmp(pSelf->pStr + pSelf->size - l, pStr, l) == 0);
 }
 
 struct bma_StrTreeNodeHdr_ {

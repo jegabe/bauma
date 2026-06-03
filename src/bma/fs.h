@@ -49,6 +49,8 @@ BMA_DEF bma_bool_t bma_rdFile(const char *pPath, bma_StrBldr *pOut);
 BMA_DEF bma_bool_t bma_wrtFile(const char *pPath, const char *pData, size_t dataSz);
 
 BMA_DEF bma_bool_t bma_getHomeDir(bma_StrBldr* pOut);
+BMA_DEF void bma_entrPth(bma_StrBldr *pPath, const char *pSubDir);
+BMA_DEF bma_bool_t bma_leavPth(bma_StrBldr *pPath);
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -196,6 +198,29 @@ BMA_DEF bma_bool_t bma_getHomeDir(bma_StrBldr* pOut) {
 		bma_StrBldr_appndStr(pOut, p);
 		return BMA_TRUE;
 	#endif
+}
+
+BMA_DEF void bma_entrPth(bma_StrBldr *pPath, const char *pSubDir) {
+	bma_assert(pPath != NULL);
+	bma_assert(pSubDir != NULL);
+	if (!bma_StrBldr_endsWth(pPath, BMA_FS_SEP) && !bma_strtsWth(pSubDir, BMA_FS_SEP)) {
+		bma_StrBldr_appndStr(pPath, BMA_FS_SEP);
+	}
+	bma_StrBldr_appndStr(pPath, pSubDir);
+}
+
+BMA_DEF bma_bool_t bma_leavPth(bma_StrBldr *pPath) {
+	size_t i;
+	bma_assert(pPath != NULL);
+	i = bma_StrBldr_getSz(pPath);
+	while (i-- > 0) {
+		char c = bma_StrBldr_at(pPath, i);
+		if (c == BMA_FS_SEP[0]) {
+			bma_StrBldr_rsz(pPath, i);
+			return BMA_TRUE;
+		}
+	}
+	return BMA_FALSE;
 }
 
 #ifdef __cplusplus

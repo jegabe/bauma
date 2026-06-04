@@ -187,7 +187,7 @@ BMA_DEF double bma_nsonGetDouble_ext(bma_NsonNode *pNode, const char *pPath, dou
 #define bma_nsonGetDouble(pNode, pPath) bma_nsonGetDouble_ext((pNode), (pPath), -DBL_MAX, DBL_MAX, 0.0, NULL)
 
 BMA_DEF bma_bool_t bma_nsonGetString_ext(bma_StrBldr *pDst, bma_NsonNode *pNode, const char *pPath, const char *pDefaultWhenNotFound);
-#define bma_nsonGetString(pNode, pPath) bma_nsonGetString_ext((*pDst), (pNode), (pPath), "")
+#define bma_nsonGetString(pDst, pNode, pPath) bma_nsonGetString_ext((pDst), (pNode), (pPath), "")
 
 BMA_DEF void bma_nsonToStr_ext(bma_StrBldr *pDst, bma_NsonNode *pNode, bma_NsonDialect dialect, bma_bool_t pretty, const char *pIndent);
 #define bma_nsonToStr(pDst, pNode) bma_nsonToStr_ext((pDst), (pNode), BMA_NSON_DIALECT_JSON, BMA_TRUE, "\t")
@@ -912,11 +912,11 @@ BMA_DEF bma_bool_t bma_nsonGetString_ext(bma_StrBldr *pDst, bma_NsonNode *pNode,
 		return BMA_FALSE;
 	}
 	switch(pSubNode->type) {
-		case BMA_NSON_NODE_TYPE_BOOL:   bma_StrBldr_appndBool(pDst, pNode->value.b);    break;
-		case BMA_NSON_NODE_TYPE_SGND:   bma_StrBldr_appndSgnd(pDst, pNode->value.si);   break;
-		case BMA_NSON_NODE_TYPE_UNSGND: bma_StrBldr_appndUnsgnd(pDst, pNode->value.ui); break;
-		case BMA_NSON_NODE_TYPE_DBL:    bma_StrBldr_appndDbl(pDst, pNode->value.d);     break;
-		case BMA_NSON_NODE_TYPE_STR:    bma_StrBldr_appndStr(pDst, pNode->value.p);     break;
+		case BMA_NSON_NODE_TYPE_BOOL:   bma_StrBldr_appndBool(pDst, pSubNode->value.b);    break;
+		case BMA_NSON_NODE_TYPE_SGND:   bma_StrBldr_appndSgnd(pDst, pSubNode->value.si);   break;
+		case BMA_NSON_NODE_TYPE_UNSGND: bma_StrBldr_appndUnsgnd(pDst, pSubNode->value.ui); break;
+		case BMA_NSON_NODE_TYPE_DBL:    bma_StrBldr_appndDbl(pDst, pSubNode->value.d);     break;
+		case BMA_NSON_NODE_TYPE_STR:    bma_StrBldr_appndStr(pDst, pSubNode->value.p);     break;
 		default: {
 			bma_StrBldr_appndStr(pDst, pDefaultWhenNotFound);
 			return BMA_FALSE;

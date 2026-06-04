@@ -49,8 +49,9 @@ BMA_DEF bma_bool_t bma_rdFile(const char *pPath, bma_StrBldr *pOut);
 BMA_DEF bma_bool_t bma_wrtFile(const char *pPath, const char *pData, size_t dataSz);
 
 BMA_DEF bma_bool_t bma_getHomeDir(bma_StrBldr* pOut);
-BMA_DEF void bma_entrPth(bma_StrBldr *pPath, const char *pSubDir);
-BMA_DEF bma_bool_t bma_leavPth(bma_StrBldr *pPath);
+BMA_DEF void bma_entrPth(bma_StrBldr *pPath, const char *pSubPth);
+BMA_DEF bma_bool_t bma_leavPth(bma_StrBldr *pSubPth);
+BMA_DEF bma_bool_t bma_isFile(const char *pPath);
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -59,6 +60,7 @@ BMA_DEF bma_bool_t bma_leavPth(bma_StrBldr *pPath);
 #ifdef BMA_FS_IMPL
 
 #ifdef _WIN32
+	#define BMA_FS_WIN32 1
 	/* Windows.h is tremendously huge. Trying to get it down a bit. */
 	#ifndef BMA_FULL_WINDOWS_H
 		#ifndef WIN32_LEAN_AND_MEAN
@@ -80,6 +82,13 @@ BMA_DEF bma_bool_t bma_leavPth(bma_StrBldr *pPath);
 		#undef NOMINMAX
 		#undef BMA_UNDEF_NOMINMAX
 	#endif
+#elif defined(__linux__) || defined(__gnu_linux__) || \
+      defined(__APPLE__) || defined(__MACH__) || \
+      defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
+	#define BMA_FS_POSIX 1
+	#include <sys/stat.h>
+#else
+	#error "Unsupported platform"
 #endif
 
 #ifdef __cplusplus
@@ -87,7 +96,7 @@ BMA_DEF bma_bool_t bma_leavPth(bma_StrBldr *pPath);
 #endif
 
 BMA_DEF FILE *bma_fopen_rd(const char *pPath) {
-	#ifdef _WIN32
+	#if BMA_FS_WIN32
 		wchar_t *pWidePath;
 		bma_assert(pPath != NULL);
 		/* Under windows, the default narrow encoding isn't UTF-8,
@@ -96,14 +105,16 @@ BMA_DEF FILE *bma_fopen_rd(const char *pPath) {
 		FILE *pFile = _wfopen(pWidePath, L"rb");
 		bma_free(pWidePath);
 		return pFile;
-	#else
+	#elif BMA_FS_POSIX
 		bma_assert(pPath != NULL);
 		return fopen(pPath, "rb");
+	#else
+		#error "Unsupported platform"
 	#endif
 }
 
 BMA_DEF FILE *bma_fopen_wrt(const char *pPath) {
-	#ifdef _WIN32
+	#if BMA_FS_WIN32
 		wchar_t *pWidePath;
 		bma_assert(pPath != NULL);
 		/* Under windows, the default narrow encoding isn't UTF-8,
@@ -112,15 +123,17 @@ BMA_DEF FILE *bma_fopen_wrt(const char *pPath) {
 		FILE *pFile = _wfopen(pWidePath, L"wb");
 		bma_free(pWidePath);
 		return pFile;
-	#else
+	#elif BMA_FS_POSIX
 		bma_assert(pPath != NULL);
 		return fopen(pPath, "wb");
+	#else
+		#error "Unsupported platform"
 	#endif
 }
 
 BMA_DEF bma_bool_t bma_rdFile(const char *pPath, bma_StrBldr *pOut) {
 	FILE *pFile;
-#ifdef _WIN32
+#if BMA_FS_WIN32
 	long long fileSize;
 #else
 	long fileSize;
@@ -135,7 +148,7 @@ BMA_DEF bma_bool_t bma_rdFile(const char *pPath, bma_StrBldr *pOut) {
 		(void)fclose(pFile);
 		return BMA_FALSE;
 	}
-#ifdef _WIN32
+#if BMA_FS_WIN32
 	fileSize = _ftelli64(pFile);
 #else	
 	fileSize = ftell(pFile);
@@ -168,7 +181,7 @@ BMA_DEF bma_bool_t bma_wrtFile(const char *pPath, const char *pData, size_t data
 }
 
 BMA_DEF bma_bool_t bma_getHomeDir(bma_StrBldr* pOut) {
-	#ifdef _WIN32
+	#if BMA_FS_WIN32
 		DWORD res;
 		size_t i;
 		wchar_t *pContent;
@@ -200,27 +213,57 @@ BMA_DEF bma_bool_t bma_getHomeDir(bma_StrBldr* pOut) {
 	#endif
 }
 
-BMA_DEF void bma_entrPth(bma_StrBldr *pPath, const char *pSubDir) {
+BMA_DEF void bma_entrPth(bma_StrBldr *pPath, const char *pSubPth) {
 	bma_assert(pPath != NULL);
-	bma_assert(pSubDir != NULL);
-	if (!bma_StrBldr_endsWth(pPath, BMA_FS_SEP) && !bma_strtsWth(pSubDir, BMA_FS_SEP)) {
+	bma_assert(pSubPth != NULL);
+	if (!bma_StrBldr_endsWth(pPath, BMA_FS_SEP) && !bma_strtsWth(pSubPth, BMA_FS_SEP)) {
 		bma_StrBldr_appndStr(pPath, BMA_FS_SEP);
 	}
-	bma_StrBldr_appndStr(pPath, pSubDir);
+	bma_StrBldr_appndStr(pPath, pSubPth);
 }
 
-BMA_DEF bma_bool_t bma_leavPth(bma_StrBldr *pPath) {
+BMA_DEF bma_bool_t bma_leavPth(bma_StrBldr *pSubPth) {
 	size_t i;
-	bma_assert(pPath != NULL);
-	i = bma_StrBldr_getSz(pPath);
+	bma_assert(pSubPth != NULL);
+	i = bma_StrBldr_getSz(pSubPth);
 	while (i-- > 0) {
-		char c = bma_StrBldr_at(pPath, i);
+		char c = bma_StrBldr_at(pSubPth, i);
 		if (c == BMA_FS_SEP[0]) {
-			bma_StrBldr_rsz(pPath, i);
+			bma_StrBldr_rsz(pSubPth, i);
 			return BMA_TRUE;
 		}
 	}
 	return BMA_FALSE;
+}
+
+BMA_DEF bma_bool_t bma_isFile(const char *pPath) {
+#if BMA_FS_WIN32
+	wchar_t *pWidePath;
+	DWORD attr;
+	bma_assert(pPath != NULL);
+	pWidePath = bma_strWdup(pPath);
+	DWORD attr = GetFileAttributesW(pWidePath);
+	bma_free(pWidePath);
+	if (attr == INVALID_FILE_ATTRIBUTES) {
+		return BMA_FALSE;
+	}
+	if (attr & FILE_ATTRIBUTE_DIRECTORY) {
+		return BMA_FALSE;
+	}
+	return BMA_TRUE;
+#elif BMA_FS_POSIX
+	struct stat st;
+	bma_assert(pPath != NULL);
+	if (stat(pPath, &st) != 0) {
+		return BMA_FALSE;
+	}
+	if (S_ISREG(st.st_mode)) {
+		return BMA_TRUE;
+	}
+	return BMA_FALSE;
+#else
+	#error "Unsupported platform"
+#endif
 }
 
 #ifdef __cplusplus

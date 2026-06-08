@@ -303,8 +303,8 @@ static const bma_CmdLnPosArgDef kPosOnlyCmdLnPosArgs[] = {
 };
 
 static const bma_CmdLnCmdDef kPosOnlyCmdLnDef = {
-	 /* pName */   ""
-	,/* pDesc */   "The command"
+	 /* pName      */ ""
+	,/* pDesc      */ "The command"
 	,/* enumOffs   */ 0 /* no tagged enum in output struct */
 	,/* enumVal    */ 0 /* not used */
 	,/* pSubCmds   */ NULL /* no sub-commands*/

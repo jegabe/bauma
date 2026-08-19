@@ -60,21 +60,14 @@ typedef unsigned int bma_CmdLineOptType;
 #define BMA_CMDLN_OPT_TYPE_STR        ((bma_CmdLineOptType)5)
 #define BMA_CMDLN_OPT_TYPE_STR_VEC    ((bma_CmdLineOptType)6)
 
-typedef struct bma_CmdLnPosArgDef {
-	bma_CmdLineOptType type;
-	const char *pDesc;
-	bma_bool_t reqred;
-	size_t memOffs;
-} bma_CmdLnPosArgDef;
-
-typedef struct bma_CmdLnOptArgDef {
+typedef struct bma_CmdLnArgDef {
 	bma_CmdLineOptType type;
 	const char *pShort;
 	const char *pLong;
 	const char *pDesc;
 	bma_bool_t reqred;
 	size_t memOffs;
-} bma_CmdLnOptArgDef;
+} bma_CmdLnArgDef;
 
 typedef struct bma_CmdLnCmdDef {
 	const char *pName;
@@ -83,10 +76,8 @@ typedef struct bma_CmdLnCmdDef {
 	unsigned int enumVal; /* value to be set in the output struct at that offset*/
 	const struct bma_CmdLnCmdDef *pSubCmds;
 	size_t numSubCmds;
-	const struct bma_CmdLnPosArgDef *pPosArgs;
-	size_t numPosArgs;
-	const struct bma_CmdLnOptArgDef *pOptArgs;
-	size_t numOptArgs;
+	const struct bma_CmdLnArgDef *pArgs;
+	size_t numArgs;
 } bma_CmdLnCmdDef;
 
 BMA_DEF bma_bool_t bma_CmdLn_parse(int argc, char **argv, const bma_CmdLnCmdDef *pDef, void *pOutStruct);
@@ -158,34 +149,40 @@ BMA_DEF bma_bool_t bma_CmdLn_parse(int argc, char **argv, const bma_CmdLnCmdDef 
 			return BMA_FALSE;
 		}
 	}
-	/* Scan positional arguments */
+	/* Scan arguments */
 	firstArg = i;
-	for (j=0; j<pCurrDef->numPosArgs; ++j) {
-		const bma_CmdLnPosArgDef *pPosArgDef = &pCurrDef->pPosArgs[j];
-		for (i=firstArg; i<argc; ++i) {
-			const char *pArg = argv[i];
+	for (j=0; j<pCurrDef->numArgs; ++j) {
+		const bma_CmdLnArgDef *pArgDef = &pCurrDef->pArgs[j];
+		for (i=firstArg; i<(argc-1); ++i) {
+			const char *pArgKey = argv[i];
 			bma_bool_t found = BMA_FALSE;
-			if (!bma_strtsWth(pArg, "--") && !bma_strtsWth(pArg, "-")) {
-				switch(pPosArgDef->type) {
+			if ((bma_strtsWth(pArgKey, "--") && (strcmp(pArgKey + 2, pArgDef->pLong) == 0)) ||
+			    (bma_strtsWth(pArgKey, "-") && (strcmp(pArgKey + 1, pArgDef->pShort) == 0))) {
+				const char *pArgValue = argv[i+1];
+				found = BMA_TRUE;
+				switch(pArgDef->type) {
 					case BMA_CMDLN_OPT_TYPE_BOOL: {
-						if (!bma_CmdLn_strCaseEq(pArg, "true") && !bma_CmdLn_strCaseEq(pArg, "false")) {
-							fprintf(stderr, "Expected boolean value for argument '%s', got '%s'\n", pPosArgDef->pDesc, pArg);
+						bma_bool_t isTrue = BMA_FALSE;
+						bma_bool_t isFalse = BMA_FALSE;
+						isTrue = bma_CmdLn_strCaseEq(pArgValue, "true");
+						if (!isTrue) isFalse = bma_CmdLn_strCaseEq(pArgValue, "false");
+						if ((!isTrue) && (!isFalse)) {
+							fprintf(stderr, "Expected boolean value for argument '%s', got '%s'\n", pArgDef->pDesc, pArgKey);
 							return BMA_FALSE;
 						}
-						bma_bool_t b = bma_CmdLn_strCaseEq(pArg, "true");
-						bma_bool_t *pField = bma_lndr_cast(bma_bool_t, ((char*)pOutStruct) + pPosArgDef->memOffs);
-						*pField = b;
+						bma_bool_t *pField = bma_lndr_cast(bma_bool_t, ((char*)pOutStruct) + pArgDef->memOffs);
+						*pField = isTrue;
 						break;
 					}
 					case BMA_CMDLN_OPT_TYPE_INT: {
 						char *endPtr;
 						errno = 0;
-						long l = strtol(pArg, &endPtr, 10);
+						long l = strtol(pArgValue, &endPtr, 10);
 						if ((*endPtr != '\0') || (errno == ERANGE) || (l < INT_MIN) || (l > INT_MAX)) {
-							fprintf(stderr, "Expected integer value for argument '%s', got '%s'\n", pPosArgDef->pDesc, pArg);
+							fprintf(stderr, "Expected integer value for argument '%s', got '%s'\n", pArgDef->pDesc, pArgValue);
 							return BMA_FALSE;
 						}
-						int *pField = bma_lndr_cast(int, ((char*)pOutStruct) + pPosArgDef->memOffs);
+						int *pField = bma_lndr_cast(int, ((char*)pOutStruct) + pArgDef->memOffs);
 						*pField = (int)l;
 						break;
 					}
@@ -193,49 +190,39 @@ BMA_DEF bma_bool_t bma_CmdLn_parse(int argc, char **argv, const bma_CmdLnCmdDef 
 						char *endPtr;
 						errno = 0;
 						#ifdef ULLONG_MAX
-							unsigned long long l = strtoull(pArg, &endPtr, 10);
+							unsigned long long l = strtoull(pArgValue, &endPtr, 10);
 						#else
-							unsigned long l = strtoul(pArg, &endPtr, 10);
+							unsigned long l = strtoul(pArgValue, &endPtr, 10);
 						#endif
 						if ((*endPtr != '\0') || (errno == ERANGE) || (l > ((size_t)-1))) {
-							fprintf(stderr, "Expected size_t value for argument '%s', got '%s'\n", pPosArgDef->pDesc, pArg);
+							fprintf(stderr, "Expected size_t value for argument '%s', got '%s'\n", pArgDef->pDesc, pArgValue);
 							return BMA_FALSE;
 						}
-						size_t *pField = bma_lndr_cast(size_t, ((char*)pOutStruct) + pPosArgDef->memOffs);
+						size_t *pField = bma_lndr_cast(size_t, ((char*)pOutStruct) + pArgDef->memOffs);
 						*pField = (size_t)l;
 						break;
 					}
 					case BMA_CMDLN_OPT_TYPE_STR: {
-						char **pField = bma_lndr_cast(char*, ((char*)pOutStruct) + pPosArgDef->memOffs);
+						char **pField = bma_lndr_cast(char*, ((char*)pOutStruct) + pArgDef->memOffs);
 						if (*pField == NULL) {
-							fprintf(stderr, "Target field for argument '%s', must not be NULL", pPosArgDef->pDesc);
+							fprintf(stderr, "Target field for argument '%s', must not be NULL", pArgDef->pDesc);
 						}
 						bma_free(*pField);
-						*pField = bma_strdup(pArg);
+						*pField = bma_strdup(pArgValue);
 						break;
 					}
 					default: {
-						fprintf(stderr, "'%s': only types INT, SIZE_T and STR are supported for positional arguments, no vectors\n", pPosArgDef->pDesc);
+						fprintf(stderr, "'%s': only types INT, SIZE_T and STR are supported for positional arguments, no vectors\n", pArgDef->pDesc);
 						return BMA_FALSE;
 					}
 				}
-				found = BMA_TRUE;
-				break;
 			}
-			if (!found && pPosArgDef->reqred) {
-				fprintf(stderr, "Expected positional argument '%s'\n", pPosArgDef->pDesc);
+			if (!found && pArgDef->reqred) {
+				fprintf(stderr, "Expected positional argument '%s'\n", pArgDef->pDesc);
 				return BMA_FALSE;
 			}
 		}
 	}
-
-		if (bma_strtsWth(bma_StrBldr *pSelf, const char *pStr))
-
-		if (firstArg + i >= argc) {
-			fprintf(stderr, "Expected positional argument '%s'\n", pCurrDef->pPosArgs[i].pDesc);
-			return BMA_FALSE;
-		}
-
 	return BMA_TRUE;
 }
 
@@ -282,51 +269,41 @@ void bma_test_exit_fail(const char *exp, const char *file, int line) {
 
 /* Simple use case: No sub-(sub-) commands, only positional arguments */
 
-typedef struct OnlyPosArgs {
-	char *pInputFile;
-	char *pOutputFile;
-} OnlyPosArgs;
+typedef struct SimpleArgs {
+	char *pStr;
+} SimpleArgs;
 
-static const bma_CmdLnPosArgDef kPosOnlyCmdLnPosArgs[] = {
+static const bma_CmdLnArgDef kSimpleArgs[] = {
 	{
-	 /* type    */ BMA_CMDLN_OPT_TYPE_STR
-	,/* pDesc   */ "Input file path"
-	,/* reqred  */ BMA_TRUE
-	,/* memOffs */ offsetof(OnlyPosArgs, pInputFile)
-	}
-	,{
-	 /* type    */ BMA_CMDLN_OPT_TYPE_STR
-	,/* pDesc   */ "Output file path"
-	,/* reqred  */ BMA_FALSE
-	,/* memOffs */ offsetof(OnlyPosArgs, pOutputFile)
+		 /* type    */ BMA_CMDLN_OPT_TYPE_STR
+		,/* pShort  */ "s"
+		,/* pLong   */ "str"
+		,/* pDesc   */ "String parameter"
+		,/* reqred  */ BMA_TRUE
+		,/* memOffs */ offsetof(SimpleArgs, pStr)
 	}
 };
 
-static const bma_CmdLnCmdDef kPosOnlyCmdLnDef = {
+static const bma_CmdLnCmdDef kSimpleArgsDef = {
 	 /* pName      */ ""
 	,/* pDesc      */ "The command"
 	,/* enumOffs   */ 0 /* no tagged enum in output struct */
 	,/* enumVal    */ 0 /* not used */
 	,/* pSubCmds   */ NULL /* no sub-commands*/
 	,/* numSubCmds */ 0
-	,/* pPosArgs   */ kPosOnlyCmdLnPosArgs
-	,/* numPosArgs */ bma_ary_sz(kPosOnlyCmdLnPosArgs)
-	,/* pOptArgs   */ NULL
-	,/* numOptArgs */ 0
+	,/* pArgs   */ kSimpleArgs
+	,/* numArgs */ bma_ary_sz(kSimpleArgs)
 };
 
-void test_onlyPosArgs(void) {
+void test_simpleArgsShort(void) {
 	bma_bool_t couldParse;
-	OnlyPosArgs target;
-	char *argv[] = {"prog", "input.txt", "output.txt", NULL};
-	target.pInputFile = bma_strdup("");
-	target.pOutputFile = bma_strdup("");
-	couldParse = bma_CmdLn_parse((int)(bma_ary_sz(argv) - 1u), argv, &kPosOnlyCmdLnDef, &target);
+	SimpleArgs target;
+	char *argv[] = {"prog", "-s", "StringContent", NULL};
+	target.pStr = bma_strdup("");
+	couldParse = bma_CmdLn_parse((int)(bma_ary_sz(argv) - 1u), argv, &kSimpleArgsDef, &target);
 	BMA_EXPECT(couldParse);
-	BMA_EXPECT(strcmp(target.pInputFile, "input.txt") == 0);
-	BMA_EXPECT(strcmp(target.pOutputFile, "output.txt") == 0);
-	bma_free(target.pOutputFile);
-	bma_free(target.pInputFile);
+	BMA_EXPECT(strcmp(target.pStr, "StringContent") == 0);
+	bma_free(target.pStr);
 }
 
 #ifdef __cplusplus
@@ -336,7 +313,7 @@ void test_onlyPosArgs(void) {
 int main(int argc, char *argv[]) {
 	(void)argc;
 	(void)argv;
-	BMA_TEST(test_onlyPosArgs);
+	BMA_TEST(test_simpleArgsShort);
 
 	printf("All tests passed.\n");
 	fflush(stdout);

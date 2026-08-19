@@ -2422,6 +2422,7 @@ void test_StrTree(void) {
 	BMA_EXPECT(bma_StrTree_rmv(&t, "a.b.d", int, NULL));
 	BMA_EXPECT(bma_StrTree_rmv(&t, "a.e", int, NULL));
 	BMA_EXPECT(bma_StrTree_rmv(&t, "f", int, NULL));
+	BMA_EXPECT(bma_StrTree_rmv(&t, "", int, NULL));
 	BMA_EXPECT(!bma_StrTree_rmv(&t, "", int, NULL));
 	bma_StrTree_dtor(&t, NULL);
 }

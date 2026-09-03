@@ -242,7 +242,7 @@ BMA_DEF bma_bool_t bma_isFile(const char *pPath) {
 	DWORD attr;
 	bma_assert(pPath != NULL);
 	pWidePath = bma_strWdup(pPath);
-	DWORD attr = GetFileAttributesW(pWidePath);
+	attr = GetFileAttributesW(pWidePath);
 	bma_free(pWidePath);
 	if (attr == INVALID_FILE_ATTRIBUTES) {
 		return BMA_FALSE;

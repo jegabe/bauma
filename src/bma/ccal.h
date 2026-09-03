@@ -63,6 +63,12 @@ containg the function definitions, which can be linked afterwards.
 	#endif
 #endif
 
+#if BMA_DBG
+	#define BMA_DBG_OPT_PARAM(x) , x
+#else
+	#define BMA_DBG_OPT_PARAM(x)
+#endif
+
 /* Detect old vs. new compilers */
 #if defined(__cplusplus) && (__cplusplus >= 201103L)
 	#define BMA_MDRN_C 1
@@ -391,15 +397,8 @@ typedef struct bma_Vec {
 #endif
 } bma_Vec;
 
-#if BMA_DBG
-	#define BMA_DBG_SFFX(x) x ## _D
-	#define BMA_DBG_OPT_PARAM(x) , x
-#else
-	#define BMA_DBG_SFFX(x) x
-	#define BMA_DBG_OPT_PARAM(x)
-#endif
 
-BMA_DEF void BMA_DBG_SFFX(bma_Vec_ctor_impl)(
+BMA_DEF void bma_Vec_ctor_impl(
 	bma_Vec *pSelf,
 	size_t elemSize, 
 	bma_dtor_t pElemDtor,
@@ -408,7 +407,7 @@ BMA_DEF void BMA_DBG_SFFX(bma_Vec_ctor_impl)(
 );
 
 #define bma_Vec_ctor_ext(pSelf, type, pElemDtor, pAlloc) \
-	BMA_DBG_SFFX(bma_Vec_ctor_impl)( \
+	bma_Vec_ctor_impl( \
 		pSelf, \
 		sizeof(type), \
 		pElemDtor, \
@@ -417,7 +416,7 @@ BMA_DEF void BMA_DBG_SFFX(bma_Vec_ctor_impl)(
 	)
 
 #define bma_Vec_ctor(pSelf, type, pElemDtor) \
-	BMA_DBG_SFFX(bma_Vec_ctor_impl)( \
+	bma_Vec_ctor_impl( \
 		pSelf, \
 		sizeof(type), \
 		pElemDtor, \
@@ -429,14 +428,14 @@ BMA_DEF void bma_Vec_dtor(bma_Vec *pSelf, bma_IMemAlloc *pAlloc);
 
 BMA_DEF void bma_Vec_rsrv(bma_Vec *pSelf, size_t num);
 
-BMA_DEF void BMA_DBG_SFFX(bma_Vec_appnd_impl)(
+BMA_DEF void bma_Vec_appnd_impl(
 	bma_Vec *pSelf,
 	void *pElem
 	BMA_DBG_OPT_PARAM(const char* pType)
 );
 
 #define bma_Vec_appnd(pSelf, type, pElem) \
-	BMA_DBG_SFFX(bma_Vec_appnd_impl)( \
+	bma_Vec_appnd_impl( \
 		pSelf, \
 		pElem \
 		BMA_DBG_OPT_PARAM(#type) \
@@ -462,12 +461,12 @@ BMA_DEF void BMA_DBG_SFFX(bma_Vec_appnd_impl)(
 
 BMA_DEF void bma_Vec_each(bma_Vec *pSelf, bma_each_t pFunc, void *pOptUsrDta);
 
-BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_Vec_rmv_impl)(bma_Vec *pSelf,
+BMA_DEF bma_bool_t bma_Vec_rmv_impl(bma_Vec *pSelf,
                                                   size_t index,
                                                   void *pOptRmvdElem
                                                   BMA_DBG_OPT_PARAM(const char* pType));
 #define bma_Vec_rmv(pSelf, index, pOptRmvdElem, type) \
-	BMA_DBG_SFFX(bma_Vec_rmv_impl)(pSelf, index, pOptRmvdElem BMA_DBG_OPT_PARAM(#type))
+	bma_Vec_rmv_impl(pSelf, index, pOptRmvdElem BMA_DBG_OPT_PARAM(#type))
 
 BMA_DEF void bma_Vec_clear(bma_Vec *pSelf);
 
@@ -569,7 +568,7 @@ typedef struct bma_HshMp {
 #endif
 } bma_HshMp;
 
-BMA_DEF void BMA_DBG_SFFX(bma_HshMp_ctor_impl)(
+BMA_DEF void bma_HshMp_ctor_impl(
 	bma_HshMp *pSelf,
 	size_t keySz,
 	size_t valueSz,
@@ -583,7 +582,7 @@ BMA_DEF void BMA_DBG_SFFX(bma_HshMp_ctor_impl)(
 );
 
 #define bma_HshMp_ctor_ext(pSelf, keyType, valueType, pKeyDtor, pValueDtor, pKeyHsh, pKeyEq, pAlloc) \
-	BMA_DBG_SFFX(bma_HshMp_ctor_impl)( \
+	bma_HshMp_ctor_impl( \
 		pSelf, \
 		sizeof(keyType), \
 		sizeof(valueType), \
@@ -597,7 +596,7 @@ BMA_DEF void BMA_DBG_SFFX(bma_HshMp_ctor_impl)(
 	)
 
 #define bma_HshMp_ctor(pSelf, keyType, valueType, pKeyDtor, pValueDtor, pKeyHsh, pKeyEq) \
-	BMA_DBG_SFFX(bma_HshMp_ctor_impl)( \
+	bma_HshMp_ctor_impl( \
 		pSelf, \
 		sizeof(keyType), \
 		sizeof(valueType), \
@@ -614,7 +613,7 @@ BMA_DEF void bma_HshMp_dtor(bma_HshMp *pSelf, bma_IMemAlloc *pAlloc);
 
 #define bma_HshMp_getSz(pSelf) ((const size_t)((pSelf)->size))
 
-BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_HshMp_put_impl)(
+BMA_DEF bma_bool_t bma_HshMp_put_impl(
 	bma_HshMp *pSelf,
 	void *pKey,
 	void *pValue
@@ -623,13 +622,13 @@ BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_HshMp_put_impl)(
 );
 
 #define bma_HshMp_put(pSelf, pKey, pValue, keyType, valueType) \
-	BMA_DBG_SFFX(bma_HshMp_put_impl)(pSelf, \
+	bma_HshMp_put_impl(pSelf, \
 	                                 pKey, \
 	                                 pValue \
 	                                 BMA_DBG_OPT_PARAM(#keyType) \
 	                                 BMA_DBG_OPT_PARAM(#valueType))
 
-BMA_DEF void* BMA_DBG_SFFX(bma_HshMp_get_impl)(
+BMA_DEF void* bma_HshMp_get_impl(
 	bma_HshMp *pSelf,
 	const void *pKey
 	BMA_DBG_OPT_PARAM(const char* pKeyType)
@@ -637,12 +636,12 @@ BMA_DEF void* BMA_DBG_SFFX(bma_HshMp_get_impl)(
 );
 
 #define bma_HshMp_get(pSelf, pKey, keyType, valueType) \
-	((valueType*)BMA_DBG_SFFX(bma_HshMp_get_impl)(pSelf, \
+	((valueType*)bma_HshMp_get_impl(pSelf, \
 	                                              pKey \
 	                                              BMA_DBG_OPT_PARAM(#keyType) \
 	                                              BMA_DBG_OPT_PARAM(#valueType)))
 
-BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_HshMp_rmv_impl)(
+BMA_DEF bma_bool_t bma_HshMp_rmv_impl(
 	bma_HshMp *pSelf,
 	const void *pKey,
 	void *pOptOutValue
@@ -651,7 +650,7 @@ BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_HshMp_rmv_impl)(
 );
 
 #define bma_HshMp_rmv(pSelf, pKey, keyType, pOptOutValue, valueType) \
-	BMA_DBG_SFFX(bma_HshMp_rmv_impl)(pSelf, \
+	bma_HshMp_rmv_impl(pSelf, \
 	                                 pKey, \
 	                                 pOptOutValue \
 	                                 BMA_DBG_OPT_PARAM(#keyType)\
@@ -750,7 +749,7 @@ typedef struct bma_StrTree {
 #endif
 } bma_StrTree;
 
-BMA_DEF void BMA_DBG_SFFX(bma_StrTree_ctor_impl)(
+BMA_DEF void bma_StrTree_ctor_impl(
 	bma_StrTree *pSelf,
 	char sep,
 	size_t elemSz,
@@ -760,7 +759,7 @@ BMA_DEF void BMA_DBG_SFFX(bma_StrTree_ctor_impl)(
 );
 
 #define bma_StrTree_ctor_ext(pSelf, sep, type, pElemDtor, pAlloc) \
-	BMA_DBG_SFFX(bma_StrTree_ctor_impl)( \
+	bma_StrTree_ctor_impl( \
 		pSelf, \
 		sep, \
 		sizeof(type), \
@@ -770,7 +769,7 @@ BMA_DEF void BMA_DBG_SFFX(bma_StrTree_ctor_impl)(
 	)
 
 #define bma_StrTree_ctor(pSelf, sep, type, pElemDtor) \
-	BMA_DBG_SFFX(bma_StrTree_ctor_impl)( \
+	bma_StrTree_ctor_impl( \
 		pSelf, \
 		sep, \
 		sizeof(type), \
@@ -781,7 +780,7 @@ BMA_DEF void BMA_DBG_SFFX(bma_StrTree_ctor_impl)(
 
 BMA_DEF void bma_StrTree_dtor(bma_StrTree *pSelf, bma_IMemAlloc *pAlloc);
 
-BMA_DEF void *BMA_DBG_SFFX(bma_StrTree_put_impl)(
+BMA_DEF void *bma_StrTree_put_impl(
 	bma_StrTree *pSelf,
 	const char *pPath,
 	void *pValue
@@ -789,21 +788,21 @@ BMA_DEF void *BMA_DBG_SFFX(bma_StrTree_put_impl)(
 );
 
 #define bma_StrTree_put(pSelf, pPath, type, pValue) \
-	(type*)BMA_DBG_SFFX(bma_StrTree_put_impl)(pSelf, \
+	(type*)bma_StrTree_put_impl(pSelf, \
 	                                          pPath, \
 	                                          pValue \
 	                                          BMA_DBG_OPT_PARAM(#type))
 
-BMA_DEF void *BMA_DBG_SFFX(bma_StrTree_get_impl)(
+BMA_DEF void *bma_StrTree_get_impl(
 	bma_StrTree *pSelf,
 	const char *pPath
 	BMA_DBG_OPT_PARAM(const char *pType)
 );
 
 #define bma_StrTree_get(pSelf, pPath, type) \
-	((type*)BMA_DBG_SFFX(bma_StrTree_get_impl)(pSelf, pPath BMA_DBG_OPT_PARAM(#type)))
+	((type*)bma_StrTree_get_impl(pSelf, pPath BMA_DBG_OPT_PARAM(#type)))
 
-BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_StrTree_rmv_impl)(
+BMA_DEF bma_bool_t bma_StrTree_rmv_impl(
 	bma_StrTree *pSelf,
 	const char *pPath,
 	void *pOptOutValue
@@ -811,7 +810,7 @@ BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_StrTree_rmv_impl)(
 );
 
 #define bma_StrTree_rmv(pSelf, pPath, type, pOptOutValue) \
-	BMA_DBG_SFFX(bma_StrTree_rmv_impl)(pSelf, pPath, pOptOutValue BMA_DBG_OPT_PARAM(#type))
+	bma_StrTree_rmv_impl(pSelf, pPath, pOptOutValue BMA_DBG_OPT_PARAM(#type))
 
 #define BMA_DEF_STRTREE(name_, sep_, type_, pElemDtor_) \
 	\
@@ -1101,7 +1100,7 @@ BMA_DEF void bma_StrN_dtor(bma_StrN *pSelf, bma_IMemAlloc *pAlloc) {
 	bma_free_ext(pAlloc, pSelf->p);
 }
 		
-BMA_DEF void BMA_DBG_SFFX(bma_Vec_ctor_impl)(
+BMA_DEF void bma_Vec_ctor_impl(
 	bma_Vec *pSelf,
 	size_t elemSize, 
 	bma_dtor_t pElemDtor,
@@ -1152,7 +1151,7 @@ BMA_DEF void bma_Vec_rsrv(bma_Vec *pSelf, size_t num) {
 	pSelf->pData = bma_realloc_impl(pSelf->pAlloc, pSelf->pData, pSelf->elemSz, newCap, &pSelf->cap);
 }
 
-BMA_DEF void BMA_DBG_SFFX(bma_Vec_appnd_impl)(
+BMA_DEF void bma_Vec_appnd_impl(
 	bma_Vec *pSelf,
 	void *pElem
 	BMA_DBG_OPT_PARAM(const char* pType)
@@ -1198,7 +1197,7 @@ BMA_DEF void bma_Vec_each(bma_Vec *pSelf, bma_each_t pFunc, void *pOptUsrDta) {
 	}
 }
 
-BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_Vec_rmv_impl)(bma_Vec *pSelf,
+BMA_DEF bma_bool_t bma_Vec_rmv_impl(bma_Vec *pSelf,
                                                   size_t index,
                                                   void *pOptRmvdElem
                                                   BMA_DBG_OPT_PARAM(const char* pType)) {
@@ -1251,7 +1250,7 @@ typedef union bma_HshMpBcktHrdSz_ {
 
 #define BMA_HSHMP_BCKT_HDR_SZ sizeof(bma_HshMpBcktHrdSz_)
 
-BMA_DEF void BMA_DBG_SFFX(bma_HshMp_ctor_impl)(
+BMA_DEF void bma_HshMp_ctor_impl(
 	bma_HshMp *pSelf,
 	size_t keySz,
 	size_t valueSz,
@@ -1384,7 +1383,7 @@ BMA_DEF void bma_HshMp_reserve(bma_HshMp *pSelf, size_t num) {
 	pSelf->numBckts = newNumOfBuckets;
 }
 
-BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_HshMp_put_impl)(
+BMA_DEF bma_bool_t bma_HshMp_put_impl(
 	bma_HshMp *pSelf,
 	void *pKey,
 	void *pValue
@@ -1449,7 +1448,7 @@ BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_HshMp_put_impl)(
 	return BMA_TRUE;
 }
 		
-BMA_DEF void* BMA_DBG_SFFX(bma_HshMp_get_impl)(
+BMA_DEF void* bma_HshMp_get_impl(
 	bma_HshMp *pSelf,
 	const void *pKey
 	BMA_DBG_OPT_PARAM(const char* pKeyType)
@@ -1480,7 +1479,7 @@ BMA_DEF void* BMA_DBG_SFFX(bma_HshMp_get_impl)(
 	return NULL;
 }
 
-BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_HshMp_rmv_impl)(
+BMA_DEF bma_bool_t bma_HshMp_rmv_impl(
 	                        bma_HshMp *pSelf,
 	                        const void *pKey,
 	                        void *pOptOutValue
@@ -1793,7 +1792,7 @@ struct bma_StrTreeNodeHdr_ {
 
 #define BMA_STRTREE_NODE_HDR_SZ (sizeof(bma_StrTreeNodeHdr_) - sizeof(bma_max_align_t))
 
-BMA_DEF void BMA_DBG_SFFX(bma_StrTree_ctor_impl)(
+BMA_DEF void bma_StrTree_ctor_impl(
 	bma_StrTree *pSelf,
 	char sep,
 	size_t elemSz,
@@ -1890,7 +1889,7 @@ BMA_DEF bma_StrTreeNodeHdr_ *bma_StrTree_findNode(bma_StrTree *pSelf, const char
 	return pNode;
 }
 
-BMA_DEF void *BMA_DBG_SFFX(bma_StrTree_put_impl)(
+BMA_DEF void *bma_StrTree_put_impl(
 	bma_StrTree *pSelf,
 	const char *pPath,
 	void *pValue
@@ -1956,7 +1955,7 @@ BMA_DEF void *BMA_DBG_SFFX(bma_StrTree_put_impl)(
 	return pElem;
 }
 
-BMA_DEF void *BMA_DBG_SFFX(bma_StrTree_get_impl)(
+BMA_DEF void *bma_StrTree_get_impl(
 	bma_StrTree *pSelf,
 	const char *pPath
 	BMA_DBG_OPT_PARAM(const char *pType)
@@ -1972,7 +1971,7 @@ BMA_DEF void *BMA_DBG_SFFX(bma_StrTree_get_impl)(
 	return ((char*)pNode) + BMA_STRTREE_NODE_HDR_SZ;
 }
 
-BMA_DEF bma_bool_t BMA_DBG_SFFX(bma_StrTree_rmv_impl)(
+BMA_DEF bma_bool_t bma_StrTree_rmv_impl(
 	bma_StrTree *pSelf,
 	const char *pPath,
 	void *pOptOutValue

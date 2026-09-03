@@ -134,7 +134,7 @@ typedef struct bma_Shrd {
 
 #define BMA_SHRD_HDR_SZ (sizeof(bma_Shrd) - sizeof(bma_max_align_t))
 
-BMA_DEF bma_Shrd *BMA_DBG_SFFX(bma_Shrd_new_impl)(
+BMA_DEF bma_Shrd *bma_Shrd_new_impl(
 	size_t sz,
 	bma_dtor_t pDtor,
 	bma_IMemAlloc *pAlloc
@@ -142,10 +142,10 @@ BMA_DEF bma_Shrd *BMA_DBG_SFFX(bma_Shrd_new_impl)(
 );
 
 #define bma_Shrd_new_ext(type, pDtor, pAlloc) \
-	BMA_DBG_SFFX(bma_Shrd_new_impl)(sizeof(type), pDtor, pAlloc BMA_DBG_OPT_PARAM(#type))
+	bma_Shrd_new_impl(sizeof(type), pDtor, pAlloc BMA_DBG_OPT_PARAM(#type))
 
 #define bma_Shrd_new(type, pDtor) \
-	BMA_DBG_SFFX(bma_Shrd_new_impl)(sizeof(type), pDtor, bma_getDfltMemAlloc() BMA_DBG_OPT_PARAM(#type))
+	bma_Shrd_new_impl(sizeof(type), pDtor, bma_getDfltMemAlloc() BMA_DBG_OPT_PARAM(#type))
 
 #if BMA_DBG
 	BMA_DEF void *bma_Shrd_get_impl_D(bma_Shrd *pSelf, size_t typeSz, const char *pType);
@@ -278,7 +278,7 @@ BMA_DEF void bma_sleepMs(unsigned int ms);
 	extern "C" {
 #endif
 
-BMA_DEF bma_Shrd *BMA_DBG_SFFX(bma_Shrd_new_impl)(
+BMA_DEF bma_Shrd *bma_Shrd_new_impl(
 	size_t sz,
 	bma_dtor_t pDtor,
 	bma_IMemAlloc *pAlloc

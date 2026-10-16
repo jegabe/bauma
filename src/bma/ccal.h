@@ -52,7 +52,8 @@ containg the function definitions, which can be linked afterwards.
 */
 
 #include <stddef.h> /* for size_t, NULL and stuff */
-#include <limits.h> /* For size limits */
+#include <limits.h> /* for size limits */
+#include <stdarg.h> /* for va_list, va_start, va_end */
 
 /* Define this before including when something else is needed */
 #ifndef BMA_DBG
@@ -63,22 +64,50 @@ containg the function definitions, which can be linked afterwards.
 	#endif
 #endif
 
+/* Optional parameters only present in debug builds */
 #if BMA_DBG
 	#define BMA_DBG_OPT_PARAM(x) , x
 #else
 	#define BMA_DBG_OPT_PARAM(x)
 #endif
 
-/* Detect old vs. new compilers */
+/* Detect old vs. new langugage standards. C99 and C++11 and
+   newer are considered "modern" */
 #if defined(__cplusplus) && (__cplusplus >= 201103L)
 	#define BMA_MDRN_C 1
-#elif (!defined(__cplusplus)) && (__STDC_VERSION__ >= 199901L)
+#elif ((!defined(__cplusplus)) && (__STDC_VERSION__ >= 199901L))
+	#define BMA_MDRN_C 1
+#elif (defined(_MSC_VER) && (_MSC_VER >= 1900))
+	/* _MSVC defines its __STDC_VERSION__ lower than it needs to be: VS2015 basically supports modern C */
 	#define BMA_MDRN_C 1
 #else
 	#define BMA_MDRN_C 0 /* old compilers */
 #endif
 
-/* Find fitting bool data type */
+/* OS detection */
+
+#if defined(__MSDOS__) || defined(MSDOS) || defined(_MSDOS)
+	#define BMA_IS_DOS 1
+#else
+	#define BMA_IS_DOS 0
+#endif
+
+#ifdef _WIN32
+	#define BMA_IS_WINDOWS 1
+#else
+	#define BMA_IS_WINDOWS 0
+#endif
+
+#if defined (__unix__) || defined(__unix) || defined(unix) || \
+    defined(__linux__) || defined(__gnu_linux__) || \
+    defined(__APPLE__) || defined(__MACH__) || \
+    defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
+	#define BMA_IS_POSIX 1
+#else
+	#define BMA_IS_POSIX 0
+#endif
+
+/* Boolean data type */
 #ifdef __cplusplus
 	typedef bool bma_bool_t;
 #else /* C */
@@ -142,6 +171,40 @@ containg the function definitions, which can be linked afterwards.
 	#endif
 #endif
 
+/* Max. value of size_t data type */
+#ifdef SIZE_MAX
+	#define BMA_SIZE_MAX SIZE_MAX
+#elif defined(_WIN64)
+	#define BMA_SIZE_MAX (0xFFFFFFFFFFFFFFFF)
+#elif defined(_WIN32) /* but not _WIN64 */
+	#define BMA_SIZE_MAX (0xFFFFFFFF)
+#elif defined(__SIZEOF_POINTER__)
+	#if ((__SIZEOF_POINTER__ * CHAR_BIT) == 64)
+		#define BMA_SIZE_MAX (0xFFFFFFFFFFFFFFFF)
+	#elif ((__SIZEOF_POINTER__ * CHAR_BIT) == 32)
+		#define BMA_SIZE_MAX (0xFFFFFFFF)
+	#elif ((__SIZEOF_POINTER__ * CHAR_BIT) == 16)
+		#define BMA_SIZE_MAX (0xFFFF)
+	#else
+		#error "Can't determine SIZE_MAX for this __SIZEOF_POINTER__, please fix"
+	#endif
+#else
+	#error "Can't determine SIZE_MAX for this platform, please fix"
+#endif
+
+/* What prefix to use to printf a size_t */
+#if BMA_MDRN_C
+	#define BMA_SIZE_T_PRFX "z"
+#elif (BMA_SIZE_MAX == UINT_MAX)
+	#define BMA_SIZE_T_PRFX ""
+#elif (BMA_SIZE_MAX == ULONG_MAX)
+	#define BMA_SIZE_T_PRFX "l"
+#elif defined(ULLONG_MAX) && (BMA_SIZE_MAX == ULLONG_MAX)
+	#define BMA_SIZE_T_PRFX "ll"
+#else
+	#error "Can't determine printf specifier of size_t for this platform, please fix"
+#endif
+
 /* Find type with max. alignment requirements*/
 #ifdef __cplusplus
 	#if BMA_MDRN_C /* C++11 or newer */
@@ -173,48 +236,43 @@ containg the function definitions, which can be linked afterwards.
 #endif
 
 /* Support for suppression of maybe unused static inline functions */
-#if defined(__cplusplus) && __cplusplus >= 201703L
+#if (defined(__cplusplus) && __cplusplus >= 201703L)
 	#define bma_maybe_unused [[maybe_unused]]
-#elif defined(__GNUC__) || defined(__clang__)
+#elif (defined(__GNUC__) && (__GNUC__ >= 3))
+	#define bma_maybe_unused __attribute__((unused))
+#elif defined(__clang__)
 	#define bma_maybe_unused __attribute__((unused))
 #else /* Unknown compiler */
 	#define bma_maybe_unused
 #endif
 
-/* Support for static inline functions, if the compiler supports it.
-   For old or unknown compilers, it just resolves into a normal static function
-   which might produce slower and bloatier code, but it will still
-   compile and work just fine */
-#ifdef __GNUC__
-	#if ((__GNUC__ > 3) || ((__GNUC__ == 3 && __GNUC_MINOR__ >= 1)))
-		#define bma_inline bma_maybe_unused static inline __attribute__((always_inline))
-	/* C99 or any C++ has inline keyword */
-	#elif defined(__cplusplus) || (defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L))
-		#define bma_inline bma_maybe_unused static inline
-	#else
-		#define bma_inline bma_maybe_unused static
-	#endif
-#elif defined(__clang__)
-	#define bma_inline bma_maybe_unused static inline __attribute__((always_inline))
-#elif defined(_MSC_VER)
-	#if _MSC_VER >= 1200 /* Visual Studio 6.0 or newer */
-		#define bma_inline bma_maybe_unused static __forceinline
-	/* C99 or any C++ has inline keyword */
-	#elif defined(__cplusplus) || (defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L))
-		#define bma_inline bma_maybe_unused static inline
-	#else
-		#define bma_inline bma_maybe_unused static
-	#endif
-#else /* any other compiler */
-	/* C99 or any C++ has inline keyword */
-	#if defined(__cplusplus) || (defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L))
-		#define bma_inline bma_maybe_unused static inline
-	#else
-		#define bma_inline bma_maybe_unused static
-	#endif
+#ifdef __cplusplus
+	#define BMA_COMPILER_SUPPORTS_INLINE 1
+#elif (defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L))
+	#define BMA_COMPILER_SUPPORTS_INLINE 1
+#elif (defined(__GNUC__) && ((__GNUC__ > 3) || ((__GNUC__ == 3 && __GNUC_MINOR__ >= 1))))
+	#define BMA_COMPILER_SUPPORTS_INLINE 1
+#elif defined (__clang__)
+	#define BMA_COMPILER_SUPPORTS_INLINE 1
+#elif (defined(_MSC_VER) && (_MSC_VER >= 1200))
+	#define BMA_COMPILER_SUPPORTS_INLINE 1
+#else
+	#define BMA_COMPILER_SUPPORTS_INLINE 0
 #endif
 
-/*! For %g to printf double' that don't loose precision when re-parsed */
+/*
+Support for static inline functions, if the compiler supports it.
+For old or unknown compilers, it just resolves into a normal static function
+which might produce slower and bloatier code, but it will still
+compile and work just fine
+*/
+#if BMA_COMPILER_SUPPORTS_INLINE
+	#define bma_inline static inline
+#else
+	#define bma_inline static
+#endif
+
+/*! For %g to printf double's that don't loose precision when re-parsed from string */
 #define BMA_DBL_DEC_PRECSN_STR "17"
 
 /*!
@@ -351,6 +409,33 @@ BMA_DEF char* bma_strdup_ext(const char* p, bma_IMemAlloc *pAlloc);
 \param alloc Memory allocator to be used
 */
 BMA_DEF char *bma_strndup_ext(const char* p, size_t n, bma_IMemAlloc *pAlloc);
+
+/*
+\brief Determines how big a buffer must be to printf into it, INCLUDING the null terminator, and returns that size.
+       In case of errors, the application is terminated. This function won't return any size less than 1.
+\param pFmt A null-terminated string describing a printf format
+\param args A variadic argument list initialized by va_start
+\return A suitable buffer size for doing a sprintf() or snprintf()
+*/
+BMA_DEF size_t bma_printfSz(const char* pFmt, va_list args);
+
+/*
+\brief Determines the needed buffer size for printing, allocates it using the default memory
+       allocator, prints into the allocated buffer (inclusive NULL terminator) and returns
+       the allocated buffer with the printed string
+\param pAlloc The memory allocator to use
+\param pFmt A null-terminated string describing a printf format
+\return A null-terminated string (which must be freed after use) containing the content
+*/
+BMA_DEF char* bma_strPrintf_ext(bma_IMemAlloc *pAlloc, const char* pFmt, ...);
+
+/*
+\brief Same as bma_strPrintf_ext but using the default mem allocator
+       Can't use a macro here because old-style C doesn't support variadic macros yet.
+\param pFmt A null-terminated string describing a printf format
+\return A null-terminated string (which must be freed after use) containing the content
+*/
+BMA_DEF char* bma_strPrintf(const char* pFmt, ...);
 
 /*!
 \brief Short-hand of bma_strdup_ext() using the default allocator
@@ -850,20 +935,16 @@ BMA_DEF bma_bool_t bma_StrTree_rmv_impl(
 
 #ifdef BMA_CCAL_IMPL
 
+#include <assert.h>
 #include <string.h> /* for all kind of memory and string things */
 #include <stdarg.h> /* for variadic functions */
+#include <stdlib.h>
+#include <stdio.h>
+
 #ifdef bma_ccal_cstm_assert
 	#define bma_assert(x) bma_ccal_cstm_assert(x)
 #else
-	#include <assert.h>
 	#define bma_assert(x) assert(x)
-#endif
-#ifndef bma_cstm_memhndlr
-	#include <stdlib.h> /* for malloc(), free(), exit() etc. */
-#endif
-#ifndef bma_cstm_exit_err
-	#include <stdio.h> /* to print to stderr before leaving */
-	#include <stdlib.h> /* for malloc(), free(), exit() etc. */
 #endif
 
 #ifdef __cplusplus
@@ -1028,6 +1109,113 @@ BMA_DEF char* bma_strndup_ext(const char* p, size_t n, bma_IMemAlloc *pAlloc) {
 	c[n] = '\0';
 	return c;
 }
+
+BMA_DEF size_t bma_printfSz(const char* pFmt, va_list args) {
+#if BMA_MDRN_C
+	int result = vsnprintf(NULL, 0, pFmt, args);
+	if (result < 0) {
+		bma_exit_err("vsnprintf() in bma_printfSz failed");
+	}
+	return ((size_t)result) + 1u;
+#else
+	/* vsnprintf not available, so do throw-away formatting to nul device
+           using vprintf to determine how many chars are printed */
+	#if (BMA_IS_WINDOWS || BMA_IS_DOS)
+		#define BMA_PRINTF_NULL_DEVICE "NUL"
+	#elif BMA_IS_POSIX
+		#define BMA_PRINTF_NULL_DEVICE "/dev/null"
+	#else
+		#error "Can't determine null device for current platform in bma_printfSz"
+	#endif
+	int result;
+	FILE *pNullDev = fopen(BMA_PRINTF_NULL_DEVICE, "wb");
+	if (pNullDev == NULL) {
+		bma_exit_err("Failed to open null device in bma_printfSz");
+	}
+	result = vfprintf(pNullDev, pFmt, args);
+	(void)fclose(pNullDev);
+	if (result < 0) {
+		bma_exit_err("vfprintf() in bma_printfSz failed");
+	}
+	return ((size_t)result) + 1u;
+	#undef BMA_PRINTF_NULL_DEVICE
+#endif
+}
+
+BMA_DEF char* bma_strVPrintf_ext(bma_IMemAlloc *pAlloc, const char* pFmt, va_list args) {
+	size_t bufSz;
+	char *pBuf;
+	int numPrinted;
+	bma_assert(pAlloc != NULL);
+	bufSz = bma_printfSz(pFmt, args); /* includes null terminator */
+	pBuf = (char*)((*pAlloc->pRllc)(pAlloc, NULL, bufSz, NULL));
+#if BMA_MDRN_C
+	numPrinted = vsnprintf(pBuf, bufSz, pFmt, args);
+#else
+	numPrinted = vsprintf(pBuf, pFmt, args);
+#endif
+	if (numPrinted < 0) {
+		bma_exit_err("vs(n)printf failed in bma_strPrintf_ext");
+	}
+	if ((((size_t)numPrinted) + 1U) > bufSz) {
+		bma_exit_err("vs(n)printf buffer overflow in bma_strPrintf_ext");
+	}
+	return pBuf;
+}
+
+BMA_DEF char* bma_strPrintf_ext(bma_IMemAlloc *pAlloc, const char* pFmt, ...) {
+	size_t bufSz;
+	va_list ap;
+	char *pBuf;
+	int numPrinted;
+	bma_assert(pAlloc != NULL);
+	va_start(ap, pFmt);
+	bufSz = bma_printfSz(pFmt, ap); /* includes null terminator */
+	va_end(ap);
+	pBuf = (char*)((*pAlloc->pRllc)(pAlloc, NULL, bufSz, NULL));
+	va_start(ap, pFmt);
+#if BMA_MDRN_C
+	numPrinted = vsnprintf(pBuf, bufSz, pFmt, ap);
+#else
+	numPrinted = vsprintf(pBuf, pFmt, ap);
+#endif
+	va_end(ap);
+	if (numPrinted < 0) {
+		bma_exit_err("vs(n)printf failed in bma_strPrintf_ext");
+	}
+	if ((((size_t)numPrinted) + 1U) > bufSz) {
+		bma_exit_err("vs(n)printf buffer overflow in bma_strPrintf_ext");
+	}
+	return pBuf;
+}
+
+BMA_DEF char* bma_strPrintf(const char* pFmt, ...) {
+	size_t bufSz;
+	va_list ap;
+	char *pBuf;
+	int numPrinted;
+	bma_IMemAlloc* pAlloc = bma_getDfltMemAlloc();
+	bma_assert(pAlloc != NULL);
+	va_start(ap, pFmt);
+	bufSz = bma_printfSz(pFmt, ap); /* includes null terminator */
+	va_end(ap);
+	pBuf = (char*)((*pAlloc->pRllc)(pAlloc, NULL, bufSz, NULL));
+	va_start(ap, pFmt);
+#if BMA_MDRN_C
+	numPrinted = vsnprintf(pBuf, bufSz, pFmt, ap);
+#else
+	numPrinted = vsprintf(pBuf, pFmt, ap);
+#endif
+	va_end(ap);
+	if (numPrinted < 0) {
+		bma_exit_err("vs(n)printf failed in bma_strPrintf_ext");
+	}
+	if ((((size_t)numPrinted) + 1U) > bufSz) {
+		bma_exit_err("vs(n)printf buffer overflow in bma_strPrintf_ext");
+	}
+	return pBuf;
+}
+
 
 BMA_DEF void *bma_memmem(const void *pHayStack, size_t hayStackSize, const void *pNeedle, size_t needleSize) {
 	const unsigned char *h = (const unsigned char *)pHayStack;
@@ -2061,6 +2249,22 @@ void test_strdup(void) {
 	bma_free(p);
 }
 
+void test_strPrintf_ext(void) {
+	char* p;
+	p = bma_strPrintf_ext(bma_getDfltMemAlloc(), "Hello %s %d", "World", 42);
+	BMA_EXPECT(p != NULL);
+	BMA_EXPECT(strcmp(p, "Hello World 42") == 0);
+	bma_free(p);
+}
+
+void test_strPrintf(void) {
+	char* p;
+	p = bma_strPrintf("Hello %s %d", "World", 42);
+	BMA_EXPECT(p != NULL);
+	BMA_EXPECT(strcmp(p, "Hello World 42") == 0);
+	bma_free(p);
+}
+
 typedef struct Ints {
 	int *items;
 	size_t size;
@@ -2434,6 +2638,8 @@ int main(int argc, char *argv[]) {
 	(void)argc;
 	(void)argv;
 	BMA_TEST(test_strdup);
+	BMA_TEST(test_strPrintf_ext);
+	BMA_TEST(test_strPrintf);
 	BMA_TEST(test_vector_construct);
 	BMA_TEST(test_vector_append);
 	BMA_TEST(test_vector_at);

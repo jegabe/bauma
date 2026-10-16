@@ -30,13 +30,11 @@ Bau 'ma's basic multithreading support
 */
 #include <bma/ccal.h>
 
-#ifdef _WIN32
+#if BMA_IS_WINDOWS
 	#define BMA_HAS_THRDS 1
 	#define BMA_WIN_THRDS 1
 	#define BMA_POSIX_THRDS 0
-#elif defined(__linux__) || defined(__gnu_linux__) || \
-      defined(__APPLE__) || defined(__MACH__) || \
-      defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
+#elif BMA_IS_POSIX	
 	/* POSIX */
 	#define BMA_HAS_THRDS 1
 	#define BMA_WIN_THRDS 0
@@ -49,27 +47,7 @@ Bau 'ma's basic multithreading support
 
 /* OS headers needed */
 #if BMA_WIN_THRDS
-	/* Windows.h is tremendously huge. Trying to get it down a bit. */
-	#ifndef BMA_FULL_WINDOWS_H
-		#ifndef WIN32_LEAN_AND_MEAN
-			#define WIN32_LEAN_AND_MEAN
-			#define BMA_UNDEF_WIN32_LEAN_AND_MEAN
-		#endif
-		#ifndef NOMINMAX
-			#define NOMINMAX
-			#define BMA_UNDEF_NOMINMAX
-		#endif
-	#endif
-	#include <Windows.h>
-	/* Clean-up of temporary macro definitions */
-	#ifdef BMA_UNDEF_WIN32_LEAN_AND_MEAN
-		#undef WIN32_LEAN_AND_MEAN
-		#undef BMA_UNDEF_WIN32_LEAN_AND_MEAN
-	#endif
-	#ifdef BMA_UNDEF_NOMINMAX
-		#undef NOMINMAX
-		#undef BMA_UNDEF_NOMINMAX
-	#endif
+	#include <bma/win.h>
 #elif BMA_POSIX_THRDS
 	#include <unistd.h>
 	#include <time.h>

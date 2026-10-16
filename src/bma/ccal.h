@@ -808,7 +808,7 @@ BMA_DEF void bma_StrBldr_dtor(bma_StrBldr *pSelf, bma_IMemAlloc *pAlloc);
 BMA_DEF char *bma_StrBldr_rlse(bma_StrBldr *pSelf);
 BMA_DEF void bma_StrBldr_rsrv(bma_StrBldr *pSelf, size_t num);
 BMA_DEF void bma_StrBldr_rsz(bma_StrBldr *pSelf, size_t newSz);
-BMA_DEF void bma_StrBldr_appndGnrc(bma_StrBldr *pSelf, size_t capIncrease, const char *pFmt, ...);
+BMA_DEF void bma_StrBldr_appndPrnt(bma_StrBldr *pSelf, const char *pFmt, ...);
 BMA_DEF void bma_StrBldr_appndStr(bma_StrBldr *pSelf, const char *p);
 BMA_DEF void bma_StrBldr_appndStrN(bma_StrBldr *pSelf, const char *p, size_t len);
 BMA_DEF void bma_StrBldr_appndChr(bma_StrBldr *pSelf, int c, size_t count);
@@ -1831,26 +1831,29 @@ BMA_DEF void bma_StrBldr_rsz(bma_StrBldr *pSelf, size_t newSz) {
 	pSelf->cap = realNewCap - 1u;
 }
 
-BMA_DEF void bma_StrBldr_appndGnrc(bma_StrBldr *pSelf, size_t capIncrease, const char *pFmt, ...) {
+BMA_DEF void bma_StrBldr_appndPrnt(bma_StrBldr *pSelf, const char *pFmt, ...) {
 	va_list ap;
+	size_t num;
 	int numPrinted;
 	bma_assert(pSelf != NULL);
-	bma_assert(capIncrease > 0);
-	bma_StrBldr_rsrv(pSelf, capIncrease);
-	++capIncrease; /* reserve aways allocates one byte more */
+	va_start(ap, pFmt);
+	num = bma_printfSz(pFmt, ap);
+	va_end(ap);
+	bma_assert(num >= 1u); /* see doc. of bma_printfSz */
+	bma_StrBldr_rsrv(pSelf, (num - 1u)); /* rsrv adds one */
 	va_start(ap, pFmt);
 #if BMA_MDRN_C
-	numPrinted = vsnprintf(pSelf->pStr + pSelf->size, capIncrease, pFmt, ap);
+	numPrinted = vsnprintf(pSelf->pStr + pSelf->size, num, pFmt, ap);
 #else
 	numPrinted = vsprintf(pSelf->pStr + pSelf->size, pFmt, ap);
 #endif
 	va_end(ap);
 	if (numPrinted < 0) {
-		bma_exit_err("vs(n)printf returned negative value in bma_StrBldr_appndGnrc");
+		bma_exit_err("vs(n)printf returned negative value in bma_StrBldr_appndPrnt");
 	}
-	bma_assert((size_t)numPrinted < capIncrease);
-	if ((size_t)numPrinted >= capIncrease) {
-		bma_exit_err("Too small capIncrease in bma_StrBldr_appndGnrc, memory may be corrupted");
+	bma_assert((size_t)numPrinted < num);
+	if ((size_t)numPrinted >= num) {
+		bma_exit_err("Too small capIncrease in bma_StrBldr_appndPrnt, memory may be corrupted");
 	}
 	pSelf->size += (size_t)numPrinted;
 }
@@ -1891,15 +1894,15 @@ BMA_DEF void bma_StrBldr_appndChr(bma_StrBldr *pSelf, int c, size_t count) {
 }
 
 BMA_DEF void bma_StrBldr_appndSgnd(bma_StrBldr *pSelf, bma_intmax_t i) {
-	bma_StrBldr_appndGnrc(pSelf, BMA_UINTMAX_MAX_DEC_LEN, "%" BMA_INTMAX_PRFX "d", i);
+	bma_StrBldr_appndPrnt(pSelf, "%" BMA_INTMAX_PRFX "d", i);
 }
 
 BMA_DEF void bma_StrBldr_appndUnsgnd(bma_StrBldr *pSelf, bma_uintmax_t i) {
-	bma_StrBldr_appndGnrc(pSelf, BMA_UINTMAX_MAX_DEC_LEN, "%" BMA_INTMAX_PRFX "u", i);
+	bma_StrBldr_appndPrnt(pSelf, "%" BMA_INTMAX_PRFX "u", i);
 }
 
 BMA_DEF void bma_StrBldr_appndDbl(bma_StrBldr *pSelf, double d) {
-	bma_StrBldr_appndGnrc(pSelf, BMA_DBL_PRNT_NUM, "%." BMA_DBL_DEC_PRECSN_STR "g" , d);
+	bma_StrBldr_appndPrnt(pSelf, "%." BMA_DBL_DEC_PRECSN_STR "g" , d);
 }
 
 BMA_DEF void bma_StrBldr_appndBool(bma_StrBldr *pSelf, bma_bool_t b) {
@@ -1949,7 +1952,6 @@ BMA_DEF void bma_StrBldr_clear(bma_StrBldr *pSelf) {
 		pSelf->pStr[0] = '\0';
 		pSelf->size = 0;
 	}
-
 }
 
 BMA_DEF bma_bool_t bma_StrBldr_strtsWth(bma_StrBldr *pSelf, const char* pStr) {
@@ -2428,10 +2430,10 @@ void test_stringBuilder_reserve(void) {
 	bma_StrBldr_dtor(&sb, NULL);
 }
 
-void test_stringBuilder_appendGeneric(void) {
+void test_stringBuilder_appendPrint(void) {
 	bma_StrBldr sb;
 	bma_StrBldr_ctor(&sb);
-	bma_StrBldr_appndGnrc(&sb, 3u, "%d", 123);
+	bma_StrBldr_appndPrnt(&sb, "%d", 123);
 	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&sb), "123") == 0);
 	bma_StrBldr_dtor(&sb, NULL);
 }
@@ -2649,7 +2651,7 @@ int main(int argc, char *argv[]) {
 	BMA_TEST(test_stringBuilder_construct);
 	BMA_TEST(test_stringBuilder_release);
 	BMA_TEST(test_stringBuilder_reserve);
-	BMA_TEST(test_stringBuilder_appendGeneric);
+	BMA_TEST(test_stringBuilder_appendPrint);
 	BMA_TEST(test_stringBuilder_appendStr);
 	BMA_TEST(test_stringBuilder_appendStrWithLen);
 	BMA_TEST(test_stringBuilder_appendChar);

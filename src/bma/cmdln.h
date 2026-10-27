@@ -50,6 +50,13 @@ by the user
 	extern "C" {
 #endif
 
+/* Vector type for parsed integer-vector parameters 	*/
+BMA_DEF_VEC(bma_CmdLnIntVec, int, NULL);
+/* Vector type for parsed size_t-vector parameters 	*/
+BMA_DEF_VEC(bma_CmdLnSizeTVec, size_t, NULL);
+/* Vector type for parsed string-vector parameters 	*/
+BMA_DEF_VEC(bma_CmdLnStrVec, char*, &bma_memblck_dtor);	
+
 /*! \brief Type of command line options */
 typedef unsigned int bma_CmdLineOptType;
 
@@ -59,10 +66,10 @@ typedef unsigned int bma_CmdLineOptType;
 #define BMA_CMDLN_OPT_TYPE_BOOL       ((bma_CmdLineOptType)1)
 /*! \brief Integer parameter with an integer argument following the parameter name, like "--intParam 42" */
 #define BMA_CMDLN_OPT_TYPE_INT        ((bma_CmdLineOptType)2)
-/*! \brief Vector of integers (bma_Vec). If "reqred" flag is set,
+/*! \brief Vector of integers (bma_CmdLnIntVec). If "reqred" flag is set,
            minimum one occurence is requird. Example "--intVec 1 --intVec 2"
 	   If the target field isn't initialized (all bytes zero),
-	   it will be constructed using bma_Vec_ctor targetting data type "int" */
+	   it will be constructed using bma_CmdLnIntVec_ctor */
 #define BMA_CMDLN_OPT_TYPE_INT_VEC    ((bma_CmdLineOptType)3)
 /*! \brief Same as BMA_CMDLN_OPT_TYPE_INT but targetting size_t values */
 #define BMA_CMDLN_OPT_TYPE_SIZE_T     ((bma_CmdLineOptType)4)
@@ -144,15 +151,37 @@ BMA_DEF bma_bool_t bma_CmdLn_strCaseEq(const char *pStr1, const char *pStr2) {
 	return BMA_TRUE;
 }
 
+BMA_DEF bma_bool_t bma_CmdLn_vecHasStr(bma_CmdLnStrVec *pVec, const char *pStr) {
+	size_t i;
+	for (i=0; i<bma_CmdLnStrVec_getSz(pVec); ++i) {
+		const char *pExisting = *bma_CmdLnStrVec_at(pVec, i);
+		if (strcmp(pExisting, pStr) == 0) {
+			return BMA_TRUE;
+		}
+	}
+	return BMA_FALSE;
+}
+
+BMA_DEF void bma_CmdLn_addStrToVec(bma_CmdLnStrVec *pVec, const char *pStr) {
+	char *p;
+	if (bma_CmdLn_vecHasStr(pVec, pStr)) return;
+	p = bma_strdup(pStr);
+	bma_CmdLnStrVec_appnd(pVec, &p);
+}
+
 BMA_DEF bma_bool_t bma_CmdLn_parse(int argc, char **argv, const bma_CmdLnCmdDef *pDef, void *pOutStruct) {
 	int i = 1;
 	int firstArg;
 	size_t j;
+	bma_bool_t result = BMA_FALSE;
 	const bma_CmdLnCmdDef *pCurrDef;
+	bma_CmdLnStrVec detectedArgs;
 	bma_assert(argc > 0);
 	bma_assert(argv != NULL);
 	bma_assert(pDef != NULL);
 	bma_assert(pOutStruct != NULL);
+	bma_CmdLnStrVec_ctor(&detectedArgs);
+
 	pCurrDef = pDef;
 	/* Find the correct sub-command, if any. */
 	while(pCurrDef->numSubCmds > 0) {
@@ -177,99 +206,168 @@ BMA_DEF bma_bool_t bma_CmdLn_parse(int argc, char **argv, const bma_CmdLnCmdDef 
 		}
 		if (!foundSubCmd) {
 			fprintf(stderr, "Unknown sub-command '%s'\n", pArg);
-			return BMA_FALSE;
+			goto out;
 		}
 	}
 	/* Scan arguments */
 	firstArg = i;
-	for (j=0; j<pCurrDef->numArgs; ++j) {
-		const bma_CmdLnArgDef *pArgDef = &pCurrDef->pArgs[j];
-		bma_bool_t found = BMA_FALSE;
-		for (i=firstArg; (i<(argc-1)) && (!found); i += 2) {
-			const char *pArgKey = argv[i];
-			bma_assert(pArgDef->pLong != NULL);
-			if ((bma_strtsWth(pArgKey, "--") && (strcmp(pArgKey + 2, pArgDef->pLong) == 0)) ||
-			    (bma_strtsWth(pArgKey, "-") && (pArgDef->pShort != NULL) &&  (strcmp(pArgKey + 1, pArgDef->pShort) == 0))) {
-				const char *pArgValue = argv[i+1];
-				found = BMA_TRUE;
-				switch(pArgDef->type) {
-					case BMA_CMDLN_OPT_TYPE_BOOL: {
-						bma_bool_t isTrue = BMA_FALSE;
-						bma_bool_t isFalse = BMA_FALSE;
-						isTrue = bma_CmdLn_strCaseEq(pArgValue, "true");
-						if (!isTrue) isFalse = bma_CmdLn_strCaseEq(pArgValue, "false");
-						if ((!isTrue) && (!isFalse)) {
-							fprintf(stderr, "Expected boolean value for argument '%s', got '%s'\n", pArgDef->pDesc, pArgKey);
-							return BMA_FALSE;
-						}
-						bma_bool_t *pField = bma_lndr_cast(bma_bool_t, ((char*)pOutStruct) + pArgDef->memOffs);
-						*pField = isTrue;
-						break;
-					}
-					case BMA_CMDLN_OPT_TYPE_INT: {
-						char *endPtr;
-						errno = 0;
-						long l = strtol(pArgValue, &endPtr, 10);
-						if ((*endPtr != '\0') || (errno == ERANGE) || (l < INT_MIN) || (l > INT_MAX)) {
-							fprintf(stderr, "Expected integer value for argument '%s', got '%s'\n", pArgDef->pDesc, pArgValue);
-							return BMA_FALSE;
-						}
-						int *pField = bma_lndr_cast(int, ((char*)pOutStruct) + pArgDef->memOffs);
-						*pField = (int)l;
-						break;
-					}
-					case BMA_CMDLN_OPT_TYPE_INT_VEC: {
-						char *endPtr;
-						errno = 0;
-						long l = strtol(pArgValue, &endPtr, 10);
-						int j;
-						if ((*endPtr != '\0') || (errno == ERANGE) || (l < INT_MIN) || (l > INT_MAX)) {
-							fprintf(stderr, "Expected integer value for argument '%s', got '%s'\n", pArgDef->pDesc, pArgValue);
-							return BMA_FALSE;
-						}
-						j = (int)l;
-						bma_Vec *pField = bma_lndr_cast(bma_Vec, ((char*)pOutStruct) + pArgDef->memOffs);
-						if (bma_CmdLn_isFieldNull(pField, sizeof(bma_Vec))) {
-							bma_Vec_ctor(pField, int, NULL);
-						}
-						bma_Vec_appnd(pField, int, &j);
-						break;
-					}
-					case BMA_CMDLN_OPT_TYPE_SIZE_T: {
-						char *endPtr;
-						errno = 0;
-						#ifdef ULLONG_MAX
-							unsigned long long l = strtoull(pArgValue, &endPtr, 10);
-						#else
-							unsigned long l = strtoul(pArgValue, &endPtr, 10);
-						#endif
-						if ((*endPtr != '\0') || (errno == ERANGE) || (l > ((size_t)-1))) {
-							fprintf(stderr, "Expected size_t value for argument '%s', got '%s'\n", pArgDef->pDesc, pArgValue);
-							return BMA_FALSE;
-						}
-						size_t *pField = bma_lndr_cast(size_t, ((char*)pOutStruct) + pArgDef->memOffs);
-						*pField = (size_t)l;
-						break;
-					}
-					case BMA_CMDLN_OPT_TYPE_STR: {
-						char **pField = bma_lndr_cast(char*, ((char*)pOutStruct) + pArgDef->memOffs);
-						bma_free(*pField);
-						*pField = bma_strdup(pArgValue);
-						break;
-					}
-					default: {
-						fprintf(stderr, "'%s': only types INT, SIZE_T and STR are supported for positional arguments, no vectors\n", pArgDef->pDesc);
-						return BMA_FALSE;
-					}
-				}
+	for (i=firstArg; i<argc; i++) {
+		const char *pArgKey = argv[i];
+		bma_bool_t isLong = bma_strtsWth(pArgKey, "--");
+		bma_bool_t isShort = bma_strtsWth(pArgKey, "-") && !isLong;
+		const char *pArgValue = NULL;
+		if (!isLong && !isShort) {
+			fprintf(stderr, "Expected option starting with '-' or '--', got '%s'\n", pArgKey);
+			goto out;
+		}
+		if (isLong) {
+			pArgKey += 2; /* Skip the "--" prefix */
+		}
+		else {
+			pArgKey += 1; /* Skip the "-" prefix */
+		}
+		const bma_CmdLnArgDef *pFoundArgDef = NULL;
+		for (j=0; j<pCurrDef->numArgs; ++j) {
+			const bma_CmdLnArgDef *pArgDef = &pCurrDef->pArgs[j];
+			if ((isLong && (strcmp(pArgKey, pArgDef->pLong) == 0)) ||
+			    (isShort && (pArgDef->pShort != NULL) && (strcmp(pArgKey, pArgDef->pShort) == 0))) {
+				pFoundArgDef = pArgDef;
+				break;
 			}
 		}
-		if (!found && pArgDef->reqred) {
-			fprintf(stderr, "Mandatory argument '%s' not found.\n", pArgDef->pDesc);
-			return BMA_FALSE;
+		if (pFoundArgDef == NULL) {
+			fprintf(stderr, "Unknown option '%s'\n", argv[i]);
+			goto out;
+		}
+		bma_CmdLn_addStrToVec(&detectedArgs, pFoundArgDef->pLong);
+		if (pFoundArgDef->type != BMA_CMDLN_OPT_TYPE_FLAG) { /* Flags have no value, each other type has a value*/
+			if (i + 1 >= argc) {
+				fprintf(stderr, "Expected value for argument '%s'\n", pFoundArgDef->pDesc);
+				goto out;
+			}
+			pArgValue = argv[i + 1];
+		}
+		switch(pFoundArgDef->type) {
+			case BMA_CMDLN_OPT_TYPE_FLAG: {
+				bma_bool_t *pField = bma_lndr_cast(bma_bool_t, ((char*)pOutStruct) + pFoundArgDef->memOffs);
+				*pField = BMA_TRUE;
+				break;
+			}
+			case BMA_CMDLN_OPT_TYPE_BOOL: {
+				bma_bool_t isTrue = BMA_FALSE;
+				bma_bool_t isFalse = BMA_FALSE;
+				isTrue = bma_CmdLn_strCaseEq(pArgValue, "true");
+				if (!isTrue) isFalse = bma_CmdLn_strCaseEq(pArgValue, "false");
+				if ((!isTrue) && (!isFalse)) {
+					fprintf(stderr, "Expected boolean value for argument '%s', got '%s'\n", pFoundArgDef->pDesc, pArgValue);
+					goto out;
+				}
+				bma_bool_t *pField = bma_lndr_cast(bma_bool_t, ((char*)pOutStruct) + pFoundArgDef->memOffs);
+				*pField = isTrue;
+				break;
+			}
+			case BMA_CMDLN_OPT_TYPE_INT: {
+				char *endPtr;
+				errno = 0;
+				long l = strtol(pArgValue, &endPtr, 10);
+				if ((*endPtr != '\0') || (errno == ERANGE) || (l < INT_MIN) || (l > INT_MAX)) {
+					fprintf(stderr, "Expected integer value for argument '%s', got '%s'\n", pFoundArgDef->pDesc, pArgValue);
+					goto out;
+				}
+				int *pField = bma_lndr_cast(int, ((char*)pOutStruct) + pFoundArgDef->memOffs);
+				*pField = (int)l;
+				break;
+			}
+			case BMA_CMDLN_OPT_TYPE_INT_VEC: {
+				char *endPtr;
+				errno = 0;
+				long l = strtol(pArgValue, &endPtr, 10);
+				int k;
+				if ((*endPtr != '\0') || (errno == ERANGE) || (l < INT_MIN) || (l > INT_MAX)) {
+					fprintf(stderr, "Expected integer value for argument '%s', got '%s'\n", pFoundArgDef->pDesc, pArgValue);
+					goto out;
+				}
+				k = (int)l;
+				bma_CmdLnIntVec *pField = bma_lndr_cast(bma_CmdLnIntVec, ((char*)pOutStruct) + pFoundArgDef->memOffs);
+				if (bma_CmdLn_isFieldNull(pField, sizeof(*pField))) {
+					bma_CmdLnIntVec_ctor(pField);
+				}
+				bma_CmdLnIntVec_appnd(pField, &k);
+				break;
+			}
+			case BMA_CMDLN_OPT_TYPE_SIZE_T: {
+				char *endPtr;
+				errno = 0;
+				#ifdef ULLONG_MAX
+					unsigned long long l = strtoull(pArgValue, &endPtr, 10);
+				#else
+					unsigned long l = strtoul(pArgValue, &endPtr, 10);
+				#endif
+				if ((*endPtr != '\0') || (errno == ERANGE) || (l > BMA_SIZE_MAX)) {
+					fprintf(stderr, "Expected size_t value for argument '%s', got '%s'\n", pFoundArgDef->pDesc, pArgValue);
+					goto out;
+				}
+				size_t *pField = bma_lndr_cast(size_t, ((char*)pOutStruct) + pFoundArgDef->memOffs);
+				*pField = (size_t)l;
+				break;
+			}
+			case BMA_CMDLN_OPT_TYPE_SIZE_T_VEC: {
+				char *endPtr;
+				errno = 0;
+				#ifdef ULLONG_MAX
+					unsigned long long l = strtoull(pArgValue, &endPtr, 10);
+				#else
+					unsigned long l = strtoul(pArgValue, &endPtr, 10);
+				#endif
+				size_t k;
+				if ((*endPtr != '\0') || (errno == ERANGE) || (l > BMA_SIZE_MAX)) {
+					fprintf(stderr, "Expected size_t value for argument '%s', got '%s'\n", pFoundArgDef->pDesc, pArgValue);
+					goto out;
+				}
+				k = (size_t)l;
+				bma_CmdLnSizeTVec *pField = bma_lndr_cast(bma_CmdLnSizeTVec, ((char*)pOutStruct) + pFoundArgDef->memOffs);
+				if (bma_CmdLn_isFieldNull(pField, sizeof(*pField))) {
+					bma_CmdLnSizeTVec_ctor(pField);
+				}
+				bma_CmdLnSizeTVec_appnd(pField, &k);
+				break;
+			}
+			case BMA_CMDLN_OPT_TYPE_STR: {
+				char **pField = bma_lndr_cast(char*, ((char*)pOutStruct) + pFoundArgDef->memOffs);
+				bma_free(*pField);
+				*pField = bma_strdup(pArgValue);
+				break;
+			}
+			case BMA_CMDLN_OPT_TYPE_STR_VEC: {
+				bma_CmdLnStrVec *pField = bma_lndr_cast(bma_CmdLnStrVec, ((char*)pOutStruct) + pFoundArgDef->memOffs);
+				char *pStr;
+				if (bma_CmdLn_isFieldNull(pField, sizeof(*pField))) {
+					bma_CmdLnStrVec_ctor(pField);
+				}
+				pStr = bma_strdup(pArgValue);
+				bma_CmdLnStrVec_appnd(pField, &pStr);
+				break;
+			}
+			default: {
+				fprintf(stderr, "'%s': only types INT, SIZE_T and STR are supported for positional arguments, no vectors\n", pFoundArgDef->pDesc);
+				goto out;
+			}
+		}
+		if (pArgValue != NULL) {
+			++i; /* Skip the value argument */
 		}
 	}
-	return BMA_TRUE;
+	for (j=0; j<pCurrDef->numArgs; ++j) {
+		const bma_CmdLnArgDef *pArgDef = &pCurrDef->pArgs[j];
+		if (pArgDef->reqred && !bma_CmdLn_vecHasStr(&detectedArgs, pArgDef->pLong)) {
+			fprintf(stderr, "Mandatory argument '%s' not found.\n", pArgDef->pDesc);
+			goto out;
+		}
+	}
+	result = BMA_TRUE;
+out:
+	bma_CmdLnStrVec_dtor(&detectedArgs, NULL);
+	return result;
 }
 
 BMA_DEF void bma_CmdLn_parseOrExit(int argc, char **argv, const bma_CmdLnCmdDef *pDef, void *pOutStruct) {
@@ -334,6 +432,7 @@ void bma_test_exit_fail(const char *exp, const char *file, int line) {
 /* Simple use case: No sub-(sub-) commands, only positional arguments */
 
 typedef struct SimpleArgs {
+	bma_bool_t f; /* Flag parameter */
 	bma_bool_t b;
 	int i;
 	size_t s;
@@ -342,6 +441,14 @@ typedef struct SimpleArgs {
 
 static const bma_CmdLnArgDef kSimpleArgs[] = {
 	{
+		 /* type    */ BMA_CMDLN_OPT_TYPE_FLAG
+		,/* pShort  */ "f"
+		,/* pLong   */ "flag"
+		,/* pDesc   */ "Flag parameter"
+		,/* reqred  */ BMA_TRUE
+		,/* memOffs */ offsetof(SimpleArgs, f)
+	}
+	,{
 		 /* type    */ BMA_CMDLN_OPT_TYPE_BOOL
 		,/* pShort  */ "b"
 		,/* pLong   */ "bool"
@@ -390,7 +497,8 @@ void test_simpleArgsShort(void) {
 	bma_bool_t couldParse;
 	SimpleArgs target;
 	char *argv[] = {
-		 "prog" 
+		 "prog"
+		,"-f"
 		,"-b"
 		,"TrUe"
 		,"-i"
@@ -412,9 +520,9 @@ void test_simpleArgsShort(void) {
 }
 
 typedef struct VecArgs {
-	bma_Vec iv; /* Vector of integers */
-	bma_Vec zv; /* Vector of size_t   */
-	bma_Vec sv; /* Vector of strings  */
+	bma_CmdLnIntVec   iv; /* Vector of integers */
+	bma_CmdLnSizeTVec zv; /* Vector of size_t   */
+	bma_CmdLnStrVec   sv; /* Vector of strings  */
 } VecArgs;
 
 static const bma_CmdLnArgDef kVecArgs[] = {
@@ -481,10 +589,20 @@ void test_vecArgsShort(void) {
 	memset(&target, 0, sizeof(target));
 	couldParse = bma_CmdLn_parse((int)(bma_ary_sz(argv) - 1u), argv, &kVecArgsDef, &target);
 	BMA_EXPECT(couldParse);
-	BMA_EXPECT(bma_Vec_getSz(&target.iv) == 3u);
-	BMA_EXPECT(*bma_Vec_at(&target.iv, 0, int) == 1);
-	BMA_EXPECT(*bma_Vec_at(&target.iv, 1, int) == 2);
-	BMA_EXPECT(*bma_Vec_at(&target.iv, 2, int) == 3);
+	BMA_EXPECT(bma_CmdLnIntVec_getSz(&target.iv) == 3u);
+	BMA_EXPECT(*bma_CmdLnIntVec_at(&target.iv, 0) == 1);
+	BMA_EXPECT(*bma_CmdLnIntVec_at(&target.iv, 1) == 2);
+	BMA_EXPECT(*bma_CmdLnIntVec_at(&target.iv, 2) == 3);
+	BMA_EXPECT(bma_CmdLnSizeTVec_getSz(&target.zv) == 3u);
+	BMA_EXPECT(*bma_CmdLnSizeTVec_at(&target.zv, 0) == 4);
+	BMA_EXPECT(*bma_CmdLnSizeTVec_at(&target.zv, 1) == 5);
+	BMA_EXPECT(*bma_CmdLnSizeTVec_at(&target.zv, 2) == 6);
+	BMA_EXPECT(bma_CmdLnStrVec_getSz(&target.sv) == 2u);
+	BMA_EXPECT(strcmp(*bma_CmdLnStrVec_at(&target.sv, 0), "Hello") == 0);
+	BMA_EXPECT(strcmp(*bma_CmdLnStrVec_at(&target.sv, 1), "World") == 0);
+	bma_CmdLnStrVec_dtor(&target.sv, NULL);
+	bma_CmdLnSizeTVec_dtor(&target.zv, NULL);
+	bma_CmdLnIntVec_dtor(&target.iv, NULL);
 }
 
 

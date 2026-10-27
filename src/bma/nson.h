@@ -757,7 +757,7 @@ BMA_DEF bma_NsonNode *bma_nsonGet(bma_NsonNode *pNode, const char *pPath) {
 			idx = strtoul(tmp, NULL, 10);
 #endif
 			if (errno != 0) return NULL;
-			if (idx > ((size_t)-1)) return NULL;
+			if (idx > BMA_SIZE_MAX) return NULL;
 			if (pNode->type != BMA_NSON_NODE_TYPE_ARR) return NULL;
 			if (idx > bma_NsonNodePtrVec_getSz(&pNode->value.v)) return NULL;
 			pNode = *bma_NsonNodePtrVec_at(&pNode->value.v, (size_t)idx);

@@ -439,6 +439,11 @@ typedef struct SimpleArgs {
 	char *pStr;
 } SimpleArgs;
 
+void SimpleArgs_dtor(SimpleArgs *p, bma_IMemAlloc *pAlloc) {
+	(void)pAlloc;
+	bma_free(p->pStr);
+}
+
 static const bma_CmdLnArgDef kSimpleArgs[] = {
 	{
 		 /* type    */ BMA_CMDLN_OPT_TYPE_FLAG
@@ -516,7 +521,33 @@ void test_simpleArgsShort(void) {
 	BMA_EXPECT(target.i == 42);
 	BMA_EXPECT(target.s == 43);
 	BMA_EXPECT(strcmp(bma_CmdLn_getStr(target.pStr), "Hello") == 0);
-	bma_free(target.pStr);
+	SimpleArgs_dtor(&target, NULL);
+}
+
+void test_simpleArgsLong(void) {
+	bma_bool_t couldParse;
+	SimpleArgs target;
+	char *argv[] = {
+		 "prog"
+		,"--bool"
+		,"TrUe"
+		,"--str"
+		,"Hello"
+		,"--flag"
+		,"--size"
+		,"43"
+		,"--int"
+		,"42"
+		,NULL
+	};
+	memset(&target, 0, sizeof(target));
+	couldParse = bma_CmdLn_parse((int)(bma_ary_sz(argv) - 1u), argv, &kSimpleArgsDef, &target);
+	BMA_EXPECT(couldParse);
+	BMA_EXPECT(target.b);
+	BMA_EXPECT(target.i == 42);
+	BMA_EXPECT(target.s == 43);
+	BMA_EXPECT(strcmp(bma_CmdLn_getStr(target.pStr), "Hello") == 0);
+	SimpleArgs_dtor(&target, NULL);
 }
 
 typedef struct VecArgs {
@@ -524,6 +555,13 @@ typedef struct VecArgs {
 	bma_CmdLnSizeTVec zv; /* Vector of size_t   */
 	bma_CmdLnStrVec   sv; /* Vector of strings  */
 } VecArgs;
+
+void VecArgs_dtor(VecArgs *p, bma_IMemAlloc *pAlloc) {
+	(void)pAlloc;
+	bma_CmdLnStrVec_dtor(&p->sv, NULL);
+	bma_CmdLnSizeTVec_dtor(&p->zv, NULL);
+	bma_CmdLnIntVec_dtor(&p->iv, NULL);
+}
 
 static const bma_CmdLnArgDef kVecArgs[] = {
 	{
@@ -600,11 +638,48 @@ void test_vecArgsShort(void) {
 	BMA_EXPECT(bma_CmdLnStrVec_getSz(&target.sv) == 2u);
 	BMA_EXPECT(strcmp(*bma_CmdLnStrVec_at(&target.sv, 0), "Hello") == 0);
 	BMA_EXPECT(strcmp(*bma_CmdLnStrVec_at(&target.sv, 1), "World") == 0);
-	bma_CmdLnStrVec_dtor(&target.sv, NULL);
-	bma_CmdLnSizeTVec_dtor(&target.zv, NULL);
-	bma_CmdLnIntVec_dtor(&target.iv, NULL);
+	VecArgs_dtor(&target, NULL);
 }
 
+void test_vecArgsLong(void) {
+	bma_bool_t couldParse;
+	VecArgs target;
+	char *argv[] = {
+		 "prog" 
+		,"--int"
+		,"1"
+		,"--size"
+		,"4"
+		,"--str"
+		,"Hello"
+		,"--int"
+		,"2"
+		,"--size"
+		,"5"
+		,"--int"
+		,"3"
+		,"--size"
+		,"6"
+		,"--str"
+		,"World"
+		,NULL
+	};
+	memset(&target, 0, sizeof(target));
+	couldParse = bma_CmdLn_parse((int)(bma_ary_sz(argv) - 1u), argv, &kVecArgsDef, &target);
+	BMA_EXPECT(couldParse);
+	BMA_EXPECT(bma_CmdLnIntVec_getSz(&target.iv) == 3u);
+	BMA_EXPECT(*bma_CmdLnIntVec_at(&target.iv, 0) == 1);
+	BMA_EXPECT(*bma_CmdLnIntVec_at(&target.iv, 1) == 2);
+	BMA_EXPECT(*bma_CmdLnIntVec_at(&target.iv, 2) == 3);
+	BMA_EXPECT(bma_CmdLnSizeTVec_getSz(&target.zv) == 3u);
+	BMA_EXPECT(*bma_CmdLnSizeTVec_at(&target.zv, 0) == 4);
+	BMA_EXPECT(*bma_CmdLnSizeTVec_at(&target.zv, 1) == 5);
+	BMA_EXPECT(*bma_CmdLnSizeTVec_at(&target.zv, 2) == 6);
+	BMA_EXPECT(bma_CmdLnStrVec_getSz(&target.sv) == 2u);
+	BMA_EXPECT(strcmp(*bma_CmdLnStrVec_at(&target.sv, 0), "Hello") == 0);
+	BMA_EXPECT(strcmp(*bma_CmdLnStrVec_at(&target.sv, 1), "World") == 0);
+	VecArgs_dtor(&target, NULL);
+}
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -614,7 +689,9 @@ int main(int argc, char *argv[]) {
 	(void)argc;
 	(void)argv;
 	BMA_TEST(test_simpleArgsShort);
+	BMA_TEST(test_simpleArgsLong);
 	BMA_TEST(test_vecArgsShort);
+	BMA_TEST(test_vecArgsLong);
 
 	printf("All tests passed.\n");
 	fflush(stdout);

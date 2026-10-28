@@ -84,6 +84,16 @@ containg the function definitions, which can be linked afterwards.
 	#define BMA_MDRN_C 0 /* old compilers */
 #endif
 
+/* Static assertions */
+
+#if defined(__cplusplus) && (__cplusplus >= 201103L)
+	#define BMA_STATIC_ASSERT(x) static_assert((x), "Static assertion failed: " #x)
+#elif defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L)
+	#define BMA_STATIC_ASSERT(x) _Static_assert((x), "Static assertion failed: " #x)
+#else
+	#define BMA_STATIC_ASSERT(x) extern char bma_static_assertion_failed_##__LINE__[(x) ? 1 : -1]
+#endif
+
 /* OS detection */
 
 #if defined(__MSDOS__) || defined(MSDOS) || defined(_MSDOS)
@@ -191,6 +201,9 @@ containg the function definitions, which can be linked afterwards.
 #else
 	#error "Can't determine SIZE_MAX for this platform, please fix"
 #endif
+
+BMA_STATIC_ASSERT(((size_t)BMA_SIZE_MAX) == BMA_SIZE_MAX); /* no narrowing conversion */
+BMA_STATIC_ASSERT((((size_t)BMA_SIZE_MAX) + 1u) == 0u);    /* the real maximum */
 
 /* What prefix to use to printf a size_t */
 #if BMA_MDRN_C

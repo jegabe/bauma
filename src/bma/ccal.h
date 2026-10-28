@@ -982,10 +982,10 @@ BMA_DEF size_t bma_alignof(size_t typeSz) {
 		typeSz |= typeSz >> 4;
 		typeSz |= typeSz >> 8;
 		typeSz |= typeSz >> 16;
-#if SIZE_MAX > 0xFFFFFFFF
+#if BMA_SIZE_MAX > 0xFFFFFFFF
 		typeSz |= typeSz >> 32;
 #endif
-#if SIZE_MAX > 0xFFFFFFFFFFFFFFFF
+#if BMA_SIZE_MAX > 0xFFFFFFFFFFFFFFFF
 		typeSz |= typeSz >> 64;
 #endif
 		++typeSz;		

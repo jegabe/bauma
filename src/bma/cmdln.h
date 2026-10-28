@@ -177,33 +177,36 @@ BMA_DEF void bma_CmdLn_addStrToVec(bma_CmdLnStrVec *pVec, const char *pStr) {
 
 BMA_DEF void bma_CmdLn_prntHlp(const char* pExeName, const bma_CmdLnCmdDef *pDef) {
 	bma_assert(pDef != NULL);
-	fprintf(stderr, "Usage: %s [sub-command] [options]\n", pExeName);
+	printf("Usage: %s [sub-command] [options]\n", pExeName);
 	if ((strcmp(pDef->pName, "") == 0) && (pDef->enumOffs != BMA_SIZE_MAX)) {
 		/* Allowed: root command without any option */
 		fprintf(stderr, "  or without any arguments: %s\n", pExeName);
 	}
-	fprintf(stderr, "Possible sub-commands:\n");
+	printf("Possible sub-commands:\n");
 	if (pDef->numSubCmds == 0) {
-		fprintf(stderr, "  -\n");
+		printf("  -\n");
 	}
 	else {
 		size_t i;
 		for (i=0; i<pDef->numSubCmds; ++i) {
 			const bma_CmdLnCmdDef *pSubCmd = &pDef->pSubCmds[i];
-			fprintf(stderr, "  %s: %s\n", pSubCmd->pName, pSubCmd->pDesc);
+			printf("  %s: '%s'\n", pSubCmd->pName, pSubCmd->pDesc);
 		}
 	}
-	fprintf(stderr, "Possible arguments (sub-commands will have their own):\n");
+	printf("Possible arguments (sub-commands will have their own):\n");
 	if (pDef->numArgs == 0) {
-		fprintf(stderr, "  -\n");
+		printf("  -\n");
 	}
 	else {
 		size_t i;
 		for (i=0; i<pDef->numArgs; ++i) {
 			const bma_CmdLnArgDef *pArg = &pDef->pArgs[i];
-			if (pArg->p)
-
-			fprintf(stderr, "  %s: %s\n", pArg->, pSubCmd->pDesc);
+			if (pArg->pShort != NULL) {
+				printf("  --%s / -%s: '%s'", pArg->pLong, pArg->pShort, pArg->pDesc);
+			}
+			else {
+				printf("  --%s: '%s'", pArg->pLong, pArg->pDesc);
+			}
 		}
 	}
 }

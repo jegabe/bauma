@@ -267,9 +267,9 @@ which might produce slower and bloatier code, but it will still
 compile and work just fine
 */
 #if BMA_COMPILER_SUPPORTS_INLINE
-	#define bma_inline static inline
+	#define bma_inline bma_maybe_unused static inline
 #else
-	#define bma_inline static
+	#define bma_inline bma_maybe_unused static
 #endif
 
 /*! For %g to printf double's that don't loose precision when re-parsed from string */

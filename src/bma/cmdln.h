@@ -50,12 +50,12 @@ by the user
 	extern "C" {
 #endif
 
-/* Vector type for parsed integer-vector parameters 	*/
-BMA_DEF_VEC(bma_CmdLnIntVec, int, NULL);
-/* Vector type for parsed size_t-vector parameters 	*/
-BMA_DEF_VEC(bma_CmdLnSizeTVec, size_t, NULL);
-/* Vector type for parsed string-vector parameters 	*/
-BMA_DEF_VEC(bma_CmdLnStrVec, char*, &bma_memblck_dtor);	
+/* Vector type for parsed integer-vector parameters */
+BMA_DEF_VEC(bma_CmdLnIntVec, int, NULL)
+/* Vector type for parsed size_t-vector parameters */
+BMA_DEF_VEC(bma_CmdLnSizeTVec, size_t, NULL)
+/* Vector type for parsed string-vector parameters */
+BMA_DEF_VEC(bma_CmdLnStrVec, char*, &bma_memblck_dtor)
 
 /*! \brief Type of command line options */
 typedef unsigned int bma_CmdLineOptType;
@@ -187,7 +187,7 @@ BMA_DEF bma_bool_t bma_CmdLn_parse(int argc, char **argv, const bma_CmdLnCmdDef 
 	while(pCurrDef->numSubCmds > 0) {
 		if (i >= argc) {
 			fprintf(stderr, "Expected sub-command after '%s'\n", argv[i - 1]);
-			return BMA_FALSE;
+			goto out;
 		}
 		const char *pArg = argv[i++];
 		size_t j;

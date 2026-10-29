@@ -116,6 +116,9 @@ typedef unsigned int bma_CmdLineParseResult;
 #define BMA_CMDLN_PARSE_RESULT_HELP_PRINTED ((bma_CmdLineParseResult)1)
 #define BMA_CMDLN_PARSE_RESULT_ERR          ((bma_CmdLineParseResult)2)
 
+#define BMA_CMDLN_PARSE_NUM_RESULTS         ((bma_CmdLineParseResult)3)
+
+
 BMA_DEF bma_CmdLineParseResult bma_CmdLn_parse(int argc, char **argv, const bma_CmdLnCmdDef *pDef, void *pOutStruct);
 BMA_DEF void bma_CmdLn_parseOrExit(int argc, char **argv, const bma_CmdLnCmdDef *pDef, void *pOutStruct);
 
@@ -475,6 +478,7 @@ out:
 
 BMA_DEF void bma_CmdLn_parseOrExit(int argc, char **argv, const bma_CmdLnCmdDef *pDef, void *pOutStruct) {
 	bma_CmdLineParseResult parseResult = bma_CmdLn_parse(argc, argv, pDef, pOutStruct);
+	BMA_STATIC_ASSERT(BMA_CMDLN_PARSE_NUM_RESULTS == 3U); /* to verify switch is complete */
 	switch(parseResult) {
 		case BMA_CMDLN_PARSE_RESULT_OK: return;
 		case BMA_CMDLN_PARSE_RESULT_HELP_PRINTED: exit(0);

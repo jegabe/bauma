@@ -98,17 +98,18 @@ typedef struct bma_CmdLnArgDef {
   \brief Definition of a single command line command. A command can be stand-alone
          or have any number of sub commands. This way, a command line can be structured hierarchically.
 */
-typedef struct bma_CmdLnCmdDef {
-	const char *pName;                      /*!< \brief Name of the command, must be [A-Za-z_-][A-Za-z0-9_-]* */
-	const char *pDesc;                      /*!< \brief Human readable description of the command */
-	size_t enumOffs;                        /*!< \brief Offset in the output structure of type int or unsigned int
-	                                                    where a specific value is to be set when the command is detected. Use BMA_SIZE_MAX when not needed */
-	unsigned int enumVal;                   /*!< \brief What value to be put at that offset when that commmand is detected */
-	const struct bma_CmdLnCmdDef *pSubCmds; /*!< \brief Pointer to an array of sub-command definitions, NULL if no sub-commands */
-	size_t numSubCmds;                      /*!< \brief Number of sub-command definitions in the array or 0 if no sub-commands */
-	const struct bma_CmdLnArgDef *pArgs;    /*!< \brief Pointer to an array of argument definitions, NULL if no arguments */
-	size_t numArgs;                         /*!< \brief Number of array elements of pArgs or 0 if no arguments */
-} bma_CmdLnCmdDef;
+typedef struct bma_CmdLnCmdDef bma_CmdLnCmdDef;
+struct bma_CmdLnCmdDef {
+	const char *pName;               /*!< \brief Name of the command, must be [A-Za-z_-][A-Za-z0-9_-]* */
+	const char *pDesc;               /*!< \brief Human readable description of the command */
+	size_t enumOffs;                 /*!< \brief Offset in the output structure of type int or unsigned int
+	                                             where a specific value is to be set when the command is detected. Use BMA_SIZE_MAX when not needed */
+	unsigned int enumVal;            /*!< \brief What value to be put at that offset when that commmand is detected */
+	const bma_CmdLnCmdDef *pSubCmds; /*!< \brief Pointer to an array of sub-command definitions, NULL if no sub-commands */
+	size_t numSubCmds;               /*!< \brief Number of sub-command definitions in the array or 0 if no sub-commands */
+	const bma_CmdLnArgDef *pArgs;    /*!< \brief Pointer to an array of argument definitions, NULL if no arguments */
+	size_t numArgs;                  /*!< \brief Number of array elements of pArgs or 0 if no arguments */
+};
 
 typedef unsigned int bma_CmdLineParseResult;
 
@@ -118,8 +119,42 @@ typedef unsigned int bma_CmdLineParseResult;
 
 #define BMA_CMDLN_PARSE_NUM_RESULTS         ((bma_CmdLineParseResult)3)
 
-
+/*!
+  \brief Parses the command line according to the passed definition and fills the output structure with the parsed values.
+         For more convenience, use bma_CmdLn_parseOrExit() which does the error handling by itself.
+  \param argc Number of command line arguments from main() (including program name)
+  \param argv Array of command line arguments from main() (including program name)
+  \param pDef Pointer to the declarative command line definition structure
+  \param pOutStruct Pointer to the output structure where parsed values are to be stored
+  \return BMA_CMDLN_PARSE_RESULT_OK on success,
+          BMA_CMDLN_PARSE_RESULT_HELP_PRINTED if help was requested and printed,
+          BMA_CMDLN_PARSE_RESULT_ERR on error
+*/
 BMA_DEF bma_CmdLineParseResult bma_CmdLn_parse(int argc, char **argv, const bma_CmdLnCmdDef *pDef, void *pOutStruct);
+
+
+/*!
+  \brief Calls bma_CmdLn_parse and then does:
+         - When BMA_CMDLN_PARSE_RESULT_OK is returned, returns normally
+         - When BMA_CMDLN_PARSE_RESULT_HELP_PRINTED is returned, exits the program with exit code 0 (success)
+         - When BMA_CMDLN_PARSE_RESULT_ERR is returned, exits the program with exit code 1 (error)
+  This means that when the function returns, one can be sure that the arguments were parsed successfully, so no other
+  error handling is needed in the main function.
+  Example:
+  \code
+  static const bma_CmdLnCmdDef kMainCmdDef = { ... };
+  typedef struct ParsedArgs { ... } ParsedArgs;
+
+  int main(int argc, char **argv) {
+          ParsedArgs parsedArgs;
+          memset(&parsedArgs, 0, sizeof(parsedArgs));
+          bma_CmdLn_parseOrExit(argc, argv, &kMainCmdDef, &parsedArgs);
+          ... and go on working with parsedArgs content
+          ... cleanup parsedArgs
+          return 0;
+  }
+  \endcode
+*/
 BMA_DEF void bma_CmdLn_parseOrExit(int argc, char **argv, const bma_CmdLnCmdDef *pDef, void *pOutStruct);
 
 /*!

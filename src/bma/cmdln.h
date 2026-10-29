@@ -41,8 +41,6 @@ an output structure. In case of an error, it will print a help message.
 The pre-defined option "--help" or "-h" will be supported by default and can't be changed
 by the user
 
-
-
 */
 #include <bma/ccal.h>
 
@@ -80,6 +78,9 @@ typedef unsigned int bma_CmdLineOptType;
 /*! \brief Vector of string parameters */
 #define BMA_CMDLN_OPT_TYPE_STR_VEC    ((bma_CmdLineOptType)7)
 
+#define BMA_CMDLN_OPT_NUM_OF_TYPES    ((bma_CmdLineOptType)8)
+
+
 /*!
   \brief Definition of a single command line argument
 */
@@ -104,9 +105,9 @@ typedef struct bma_CmdLnCmdDef {
 	                                                    where a specific value is to be set when the command is detected. Use BMA_SIZE_MAX when not needed */
 	unsigned int enumVal;                   /*!< \brief What value to be put at that offset when that commmand is detected */
 	const struct bma_CmdLnCmdDef *pSubCmds; /*!< \brief Pointer to an array of sub-command definitions, NULL if no sub-commands */
-	size_t numSubCmds;                      /*!< \brief Number of sub-command definitions in the array */
+	size_t numSubCmds;                      /*!< \brief Number of sub-command definitions in the array or 0 if no sub-commands */
 	const struct bma_CmdLnArgDef *pArgs;    /*!< \brief Pointer to an array of argument definitions, NULL if no arguments */
-	size_t numArgs;
+	size_t numArgs;                         /*!< \brief Number of array elements of pArgs or 0 if no arguments */
 } bma_CmdLnCmdDef;
 
 typedef unsigned int bma_CmdLineParseResult;
@@ -175,38 +176,69 @@ BMA_DEF void bma_CmdLn_addStrToVec(bma_CmdLnStrVec *pVec, const char *pStr) {
 	bma_CmdLnStrVec_appnd(pVec, &p);
 }
 
-BMA_DEF void bma_CmdLn_prntHlp(const char* pExeName, const bma_CmdLnCmdDef *pDef) {
+BMA_DEF void bma_CmdLn_prntHlp(int argc, char **argv, const bma_CmdLnCmdDef *pDef) {
+	static const char* const typeNames[] = {
+		/* BMA_CMDLN_OPT_TYPE_FLAG       */ "bool"
+		/* BMA_CMDLN_OPT_TYPE_BOOL       */,"bool"
+		/* BMA_CMDLN_OPT_TYPE_INT        */,"int"
+		/* BMA_CMDLN_OPT_TYPE_INT_VEC    */,"list of ints"
+		/* BMA_CMDLN_OPT_TYPE_SIZE_T     */,"size"
+		/* BMA_CMDLN_OPT_TYPE_SIZE_T_VEC */,"list of sizes"
+		/* BMA_CMDLN_OPT_TYPE_STR        */,"string"
+		/* BMA_CMDLN_OPT_TYPE_STR_VEC    */,"list of strings"
+	};
+	BMA_STATIC_ASSERT(bma_ary_sz(typeNames) == BMA_CMDLN_OPT_NUM_OF_TYPES);
+	int i;
+	size_t j;
 	bma_assert(pDef != NULL);
-	printf("Usage: %s [sub-command] [options]\n", pExeName);
+	bma_assert(argc >= 1);
+	bma_assert(argv != NULL);
+	if ((pDef->pDesc != NULL) && (pDef->pDesc[0] != '\0')) {
+		printf("Description: '%s'\n", pDef->pDesc);
+	}
+	printf("Usage:");
+	for (i=0; i<(argc-1); ++i) { /* -1: Skip the "--help" */
+		printf(" %s", argv[i]);
+	}
+	if (pDef->numSubCmds > 0) {
+		printf(" [sub-command]");
+	}
+	if (pDef->numArgs > 0) {
+		printf(" [arguments]");
+	}
+	printf("\n");
 	if ((strcmp(pDef->pName, "") == 0) && (pDef->enumOffs != BMA_SIZE_MAX)) {
 		/* Allowed: root command without any option */
-		fprintf(stderr, "  or without any arguments: %s\n", pExeName);
+		printf("  or without any arguments: %s\n", argv[0]);
 	}
-	printf("Possible sub-commands:\n");
-	if (pDef->numSubCmds == 0) {
-		printf("  -\n");
+	if (pDef->numSubCmds > 0) {
+			printf("Possible sub-commands:\n");
+			for (j = 0; j<pDef->numSubCmds; ++j) {
+				const bma_CmdLnCmdDef *pSubCmd = &pDef->pSubCmds[j];
+				printf("  %s: '%s'\n", pSubCmd->pName, pSubCmd->pDesc);
+			}
 	}
-	else {
-		size_t i;
-		for (i=0; i<pDef->numSubCmds; ++i) {
-			const bma_CmdLnCmdDef *pSubCmd = &pDef->pSubCmds[i];
-			printf("  %s: '%s'\n", pSubCmd->pName, pSubCmd->pDesc);
-		}
-	}
-	printf("Possible arguments (sub-commands will have their own):\n");
-	if (pDef->numArgs == 0) {
-		printf("  -\n");
-	}
-	else {
-		size_t i;
-		for (i=0; i<pDef->numArgs; ++i) {
-			const bma_CmdLnArgDef *pArg = &pDef->pArgs[i];
-			if (pArg->pShort != NULL) {
+	if (pDef->numArgs > 0) {
+		printf("Possible arguments:\n");
+		for (j=0; j<pDef->numArgs; ++j) {
+			const bma_CmdLnArgDef *pArg = &pDef->pArgs[j];
+			const char* pTypeName = NULL;
+			if (pArg->type < BMA_CMDLN_OPT_NUM_OF_TYPES) {
+				pTypeName = typeNames[pArg->type];
+			}
+			if ((pArg->pShort != NULL) && (pArg->pShort[0] != '\0')) {
 				printf("  --%s / -%s: '%s'", pArg->pLong, pArg->pShort, pArg->pDesc);
 			}
 			else {
 				printf("  --%s: '%s'", pArg->pLong, pArg->pDesc);
 			}
+			if (pTypeName != NULL) {
+				printf(" (type: %s)", pTypeName);
+			}
+			if (pArg->reqred) {
+				printf(" (mandatory)");
+			}
+			printf("\n");
 		}
 	}
 }
@@ -218,6 +250,7 @@ BMA_DEF bma_CmdLineParseResult bma_CmdLn_parse(int argc, char **argv, const bma_
 	bma_CmdLineParseResult result = BMA_CMDLN_PARSE_RESULT_ERR;
 	const bma_CmdLnCmdDef *pCurrDef;
 	bma_CmdLnStrVec detectedArgs;
+	bma_bool_t helpRequested = BMA_FALSE;
 	bma_assert(argc > 0);
 	bma_assert(argv != NULL);
 	bma_assert(pDef != NULL);
@@ -227,17 +260,22 @@ BMA_DEF bma_CmdLineParseResult bma_CmdLn_parse(int argc, char **argv, const bma_
 		fprintf(stderr, "argc must be greater than 0: Need at least the program name");
 		goto out;
 	}
+	if ((strcmp(argv[argc-1], "-h") == 0) || (strcmp(argv[argc-1], "--help") == 0)) {
+		helpRequested = BMA_TRUE;
+	}
 	pCurrDef = pDef; /* root command */
 	if ((i >= argc) && (pCurrDef->enumOffs != BMA_SIZE_MAX) && (pCurrDef->numArgs == 0)) {
 		/* specification allows empty root command without parameters
 		   and no sub command was specified on command line */
-		unsigned int *pEnumField = bma_lndr_cast(unsigned int, ((char*)pOutStruct) + pCurrDef->enumOffs);
-		*pEnumField = pCurrDef->enumVal;
+		if (!helpRequested) {
+			unsigned int *pEnumField = bma_lndr_cast(unsigned int, ((char*)pOutStruct) + pCurrDef->enumOffs);
+			*pEnumField = pCurrDef->enumVal;
+		}
 		goto outEmptyRootCmd; /* skip arg scanning */
 	}
-	if (((i+1) == argc) && ((strcmp(argv[i], "-h") == 0) || (strcmp(argv[i], "--help") == 0))) {
+	if (((i+1) == argc) && helpRequested) {
 		/* help requested on root command */
-		bma_CmdLn_prntHlp(argv[0], pCurrDef);
+		bma_CmdLn_prntHlp(argc, argv, pCurrDef);
 		result = BMA_CMDLN_PARSE_RESULT_HELP_PRINTED;
 		goto out;
 	}
@@ -254,7 +292,7 @@ BMA_DEF bma_CmdLineParseResult bma_CmdLn_parse(int argc, char **argv, const bma_
 			const bma_CmdLnCmdDef *pSubCmdDef = &pCurrDef->pSubCmds[j];
 			if (strcmp(pArg, pSubCmdDef->pName) == 0) {
 				pCurrDef = pSubCmdDef;
-				if (pCurrDef->enumOffs != BMA_SIZE_MAX) {
+				if ((!helpRequested) && (pCurrDef->enumOffs != BMA_SIZE_MAX)) {
 					unsigned int *pEnumField = bma_lndr_cast(unsigned int, ((char*)pOutStruct) + pCurrDef->enumOffs);
 					*pEnumField = pCurrDef->enumVal;
 				}
@@ -267,9 +305,9 @@ BMA_DEF bma_CmdLineParseResult bma_CmdLn_parse(int argc, char **argv, const bma_
 			goto out;
 		}
 	}
-	if ((strcmp(argv[argc-1], "-h") == 0) || (strcmp(argv[argc-1], "--help") == 0)) {
+	if (helpRequested) {
 		/* help requested on root command */
-		bma_CmdLn_prntHlp(argv[0], pCurrDef);
+		bma_CmdLn_prntHlp(argc, argv, pCurrDef);
 		result = BMA_CMDLN_PARSE_RESULT_HELP_PRINTED;
 		goto out;
 	}
@@ -562,8 +600,8 @@ static const bma_CmdLnCmdDef kSimpleArgsDef = {
 	,/* enumVal    */ 0 /* not used */
 	,/* pSubCmds   */ NULL /* no sub-commands*/
 	,/* numSubCmds */ 0
-	,/* pArgs   */ kSimpleArgs
-	,/* numArgs */ bma_ary_sz(kSimpleArgs)
+	,/* pArgs      */ kSimpleArgs
+	,/* numArgs    */ bma_ary_sz(kSimpleArgs)
 };
 
 void test_simpleArgsShort(void) {
@@ -665,8 +703,8 @@ static const bma_CmdLnCmdDef kVecArgsDef = {
 	,/* enumVal    */ 0 /* not used */
 	,/* pSubCmds   */ NULL /* no sub-commands*/
 	,/* numSubCmds */ 0
-	,/* pArgs   */ kVecArgs
-	,/* numArgs */ bma_ary_sz(kVecArgs)
+	,/* pArgs      */ kVecArgs
+	,/* numArgs    */ bma_ary_sz(kVecArgs)
 };
 
 void test_vecArgsShort(void) {
@@ -784,13 +822,13 @@ static const bma_CmdLnArgDef kSubCmd3Args[] = {
 static const bma_CmdLnCmdDef kSub2CmdSubCmds[] = {
 	{
 		 /* pName      */ "sub3"
-		,/* pDesc      */ "The command"
+		,/* pDesc      */ "Sub-command nr. 3"
 		,/* enumOffs   */ offsetof(SubCmdArgs, subCmd)
 		,/* enumVal    */ SUB_CMD_3
 		,/* pSubCmds   */ NULL /* no sub-commands*/
 		,/* numSubCmds */ 0
-		,/* pArgs   */ kSubCmd3Args
-		,/* numArgs */ bma_ary_sz(kSubCmd3Args)
+		,/* pArgs      */ kSubCmd3Args
+		,/* numArgs    */ bma_ary_sz(kSubCmd3Args)
 	}
 };
 
@@ -798,35 +836,35 @@ static const bma_CmdLnCmdDef kRootSubCmds[] =
 {
 	 {
 		 /* pName      */ "sub1"
-		,/* pDesc      */ "The command"
+		,/* pDesc      */ "Sub-command nr. 1"
 		,/* enumOffs   */ offsetof(SubCmdArgs, subCmd)
 		,/* enumVal    */ SUB_CMD_1
 		,/* pSubCmds   */ NULL /* no sub-commands */
 		,/* numSubCmds */ 0 /* no sub-commands */
-		,/* pArgs   */ kSubCmd1Args
-		,/* numArgs */ bma_ary_sz(kSubCmd1Args)
+		,/* pArgs      */ kSubCmd1Args
+		,/* numArgs    */ bma_ary_sz(kSubCmd1Args)
 	}
 	,{
 		 /* pName      */ "sub2"
-		,/* pDesc      */ "The command"
+		,/* pDesc      */ "Sub-command nr. 2"
 		,/* enumOffs   */ BMA_SIZE_MAX /* not used */
 		,/* enumVal    */ 0 /* not used */
 		,/* pSubCmds   */ kSub2CmdSubCmds
 		,/* numSubCmds */ bma_ary_sz(kSub2CmdSubCmds)
-		,/* pArgs   */ NULL
-		,/* numArgs */ 0
+		,/* pArgs      */ NULL
+		,/* numArgs    */ 0
 	}
 };
 		
 static const bma_CmdLnCmdDef kSubCmdArgsDef = {
 	 /* pName      */ ""
-	,/* pDesc      */ "The command"
+	,/* pDesc      */ "Root command"
 	,/* enumOffs   */ offsetof(SubCmdArgs, subCmd)
 	,/* enumVal    */ ROOT_CMD
 	,/* pSubCmds   */ kRootSubCmds
 	,/* numSubCmds */ bma_ary_sz(kRootSubCmds)
-	,/* pArgs   */ NULL
-	,/* numArgs */ 0
+	,/* pArgs      */ NULL
+	,/* numArgs    */ 0
 };
 
 void test_subCmdNesting(void) {
@@ -887,6 +925,7 @@ void test_help(void) {
 		memset(&target, 0, sizeof(target));
 		parseResult = bma_CmdLn_parse((int)(bma_ary_sz(argv) - 1u), argv, &kSubCmdArgsDef, &target);
 		BMA_EXPECT(parseResult == BMA_CMDLN_PARSE_RESULT_HELP_PRINTED);
+		BMA_EXPECT(bma_CmdLn_isFieldNull(&target, sizeof(target)));
 	}
 	{
 		char *argv[] = {
@@ -899,6 +938,7 @@ void test_help(void) {
 		memset(&target, 0, sizeof(target));
 		parseResult = bma_CmdLn_parse((int)(bma_ary_sz(argv) - 1u), argv, &kSubCmdArgsDef, &target);
 		BMA_EXPECT(parseResult == BMA_CMDLN_PARSE_RESULT_HELP_PRINTED);
+		BMA_EXPECT(bma_CmdLn_isFieldNull(&target, sizeof(target)));
 	}
 	{
 		/* root command without parameters should work */
@@ -910,6 +950,7 @@ void test_help(void) {
 		memset(&target, 0, sizeof(target));
 		parseResult = bma_CmdLn_parse((int)(bma_ary_sz(argv) - 1u), argv, &kSubCmdArgsDef, &target);
 		BMA_EXPECT(parseResult == BMA_CMDLN_PARSE_RESULT_HELP_PRINTED);
+		BMA_EXPECT(bma_CmdLn_isFieldNull(&target, sizeof(target)));
 	}
 }
 

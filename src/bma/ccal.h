@@ -456,6 +456,18 @@ BMA_DEF char* bma_strPrintf(const char* pFmt, ...);
 */
 #define bma_strndup(p, l) bma_strndup_ext(p, l, bma_getDfltMemAlloc())
 
+/*!
+  \brief Returns pStr if pStr is not NULL, otherwise returns an empty string.
+  To be used to access string pointers that are probably NULL,
+  but where a valid null terminated string is needed in any case.
+*/
+BMA_DEF const char *bma_getStr(const char *pStr);
+
+/*!
+  \brief Checks if all bytes in a field are zero.
+*/
+BMA_DEF bma_bool_t bma_isAllZero(const void *pField, size_t fieldSz);
+
 BMA_DEF void *bma_memmem(const void *pHayStack, size_t hayStackSize, const void *pNeedle, size_t needleSize);
 
 BMA_DEF bma_bool_t bma_strtsWth(const char *pStr, const char* pPrefix);
@@ -619,11 +631,11 @@ BMA_DEF void bma_Vec_clear(bma_Vec *pSelf);
 		return bma_Vec_getData(&pSelf->impl, datatype_); \
 	} \
 	\
-	bma_inline size_t name_ ## _getSz(name_ *pSelf) { \
+	bma_inline size_t name_ ## _getSz(const name_ *pSelf) { \
 		return bma_Vec_getSz(&pSelf->impl); \
 	} \
 	\
-	bma_inline size_t name_ ## _getCap(name_ *pSelf) { \
+	bma_inline size_t name_ ## _getCap(const name_ *pSelf) { \
 		return bma_Vec_getCap(&pSelf->impl); \
 	} \
 	\
@@ -775,7 +787,7 @@ BMA_DEF void bma_HshMp_clear(bma_HshMp* pSelf);
 		bma_HshMp_dtor(&pSelf->impl, NULL); \
 	} \
 	\
-	bma_inline size_t name_ ## _getSz(name_ *pSelf) { \
+	bma_inline size_t name_ ## _getSz(const name_ *pSelf) { \
 		return bma_HshMp_getSz(&pSelf->impl); \
 	} \
 	\
@@ -1123,6 +1135,13 @@ BMA_DEF char* bma_strndup_ext(const char* p, size_t n, bma_IMemAlloc *pAlloc) {
 	return c;
 }
 
+BMA_DEF const char *bma_getStr(const char *pStr) {
+	if (pStr != NULL) {
+		return pStr;
+	}
+	return "";
+}
+
 BMA_DEF size_t bma_printfSz(const char* pFmt, va_list args) {
 #if BMA_MDRN_C
 	int result = vsnprintf(NULL, 0, pFmt, args);
@@ -1229,6 +1248,17 @@ BMA_DEF char* bma_strPrintf(const char* pFmt, ...) {
 	return pBuf;
 }
 
+BMA_DEF bma_bool_t bma_isAllZero(const void *pField, size_t fieldSz) {
+	const unsigned char *p = (const unsigned char *)pField;
+	size_t i;
+	bma_assert(pField != NULL);
+	for (i=0; i<fieldSz; ++i) {
+		if (p[i] != 0) {
+			return BMA_FALSE;
+		}
+	}
+	return BMA_TRUE;
+}
 
 BMA_DEF void *bma_memmem(const void *pHayStack, size_t hayStackSize, const void *pNeedle, size_t needleSize) {
 	const unsigned char *h = (const unsigned char *)pHayStack;

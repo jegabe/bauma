@@ -35,8 +35,8 @@ target_compile_definitions(test_fs PRIVATE BMA_CCAL_IMPL BMA_UTILS_IMPL BMA_FS_I
 add_executable(test_log src/bma/log.h)
 target_compile_definitions(test_log PRIVATE BMA_CCAL_IMPL BMA_THRD_IMPL BMA_LOG_IMPL BMA_LOG_TEST)
 
-add_executable(test_nson src/bma/nson.h)
-target_compile_definitions(test_nson PRIVATE BMA_CCAL_IMPL BMA_NSON_IMPL BMA_NSON_TEST)
+add_executable(test_nj src/bma/nj.h)
+target_compile_definitions(test_nj PRIVATE BMA_CCAL_IMPL BMA_NJ_IMPL BMA_NJ_TEST)
 
 add_executable(test_thrd src/bma/thrd.h)
 target_compile_definitions(test_thrd PRIVATE BMA_CCAL_IMPL BMA_THRD_IMPL BMA_THRD_TEST)
@@ -51,6 +51,6 @@ add_test(NAME test_cmdln COMMAND test_cmdln)
 add_test(NAME test_cmdsl COMMAND test_cmdsl)
 add_test(NAME test_fs COMMAND test_fs)
 add_test(NAME test_log COMMAND test_log)
-add_test(NAME test_nson COMMAND test_nson)
+add_test(NAME test_nj COMMAND test_nj)
 add_test(NAME test_thrd COMMAND test_thrd)
 add_test(NAME test_utils COMMAND test_utils)

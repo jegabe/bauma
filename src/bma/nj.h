@@ -105,11 +105,11 @@ BMA_DEF void bma_njNodePtrDtor(void *ppNode, bma_IMemAlloc *pAlloc);
 BMA_DEF_VEC(bma_NjNodePtrVec, bma_NjNode*, &bma_njNodePtrDtor)
 
 typedef union bma_NjNodeUnion {
-	bma_bool_t         b;
-	bma_intmax_t       si;
-	bma_uintmax_t      ui;
-	double             d;
-	char               *p;
+	bma_bool_t       b;
+	bma_intmax_t     si;
+	bma_uintmax_t    ui;
+	double           d;
+	char             *p;
 	bma_NjNodePtrVec v; /* for maps and arrays, this points to all values */
 } bma_NjNodeUnion;
 
@@ -117,7 +117,7 @@ struct bma_NjNode {
 	bma_NjNodeType  type;
 	bma_NjNodeUnion value;
 	bma_NjNode      *pObjectValue; /* ptr from key to value in objs */
-	bma_IMemAlloc     *pAlloc;
+	bma_IMemAlloc   *pAlloc;
 };
 
 BMA_DEF bma_NjNode *bma_njNew_ext(bma_IMemAlloc *pAlloc);
@@ -177,7 +177,7 @@ BMA_DEF bma_intmax_t bma_njGetInt_ext(bma_NjNode *pNode, const char *pPath, bma_
 BMA_DEF bma_uintmax_t bma_njGetUint_ext(bma_NjNode *pNode, const char *pPath, bma_uintmax_t minValue, bma_uintmax_t maxValue, bma_uintmax_t defaultWhenNotFound, bma_bool_t *pOptOutSuccess);
 #define bma_njGetUshort(pNode, pPath) ((unsigned short)bma_njGetUint_ext((pNode), (pPath), 0, USHRT_MAX, 0, NULL))
 #define bma_njGetUint(pNode, pPath) ((unsigned int)bma_njGetUint_ext((pNode), (pPath), 0, UINT_MAX, 0, NULL))
-#define bma_njGetUlong(pNode, pPath) ((long)bma_njGetUint_ext((pNode), (pPath), 0, ULONG_MAX, 0, NULL))
+#define bma_njGetUlong(pNode, pPath) ((unsigned long)bma_njGetUint_ext((pNode), (pPath), 0, ULONG_MAX, 0, NULL))
 #ifdef ULLONG_MAX
 	#define bma_njGetUlongLong(pNode, pPath) ((unsigned long long)bma_njGetUint_ext((pNode), (pPath), 0, ULLONG_MAX, 0, NULL))
 #endif
@@ -868,8 +868,11 @@ BMA_DEF bma_intmax_t bma_njGetInt_ext(bma_NjNode *pNode, const char *pPath, bma_
 			break;
 		}
 		case BMA_NJ_NODE_TYPE_DBL: {
-			result = (bma_intmax_t)pSubNode->value.d;
-			if (((double)result) != pSubNode->value.d) return defaultWhenNotFound;
+			double d = pSubNode->value.d;
+			/* (double)INTMAX_MIN is exactly -2^(N-1); negated it's the exclusive upper bound */
+			if (!((d >= (double)BMA_INTMAX_MIN) && (d < -(double)BMA_INTMAX_MIN))) return defaultWhenNotFound;
+			result = (bma_intmax_t)d;
+			if (((double)result) != d) return defaultWhenNotFound;
 			break;
 		}
 		default: return defaultWhenNotFound;
@@ -898,8 +901,12 @@ BMA_DEF bma_uintmax_t bma_njGetUint_ext(bma_NjNode *pNode, const char *pPath, bm
 			break;
 		}
 		case BMA_NJ_NODE_TYPE_DBL: {
-			result = (bma_uintmax_t)pSubNode->value.d;
-			if (((double)result) != pSubNode->value.d) return defaultWhenNotFound;
+			double d = pSubNode->value.d;
+			/* exactly 2^N; (double)UINTMAX_MAX alone would round */
+			double lim = 2.0 * (double)((BMA_UINTMAX_MAX >> 1) + 1u);
+			if (!((d >= 0.0) && (d < lim))) return defaultWhenNotFound;
+			result = (bma_uintmax_t)d;
+			if (((double)result) != d) return defaultWhenNotFound;
 			break;
 		}
 		default: return defaultWhenNotFound;
@@ -920,11 +927,13 @@ BMA_DEF double bma_njGetDouble_ext(bma_NjNode *pNode, const char *pPath, double 
 		case BMA_NJ_NODE_TYPE_BOOL: result = (pSubNode->value.b) ? 1.0 : 0.0; break;
 		case BMA_NJ_NODE_TYPE_SGND: {
 			result = (double)pSubNode->value.si;
+			if (result >= -(double)BMA_INTMAX_MIN) return defaultWhenNotFound;
 			if ((bma_intmax_t)result != pSubNode->value.si) return defaultWhenNotFound;
 			break;
 		}
 		case BMA_NJ_NODE_TYPE_UNSGND: {
 			result = (double)pSubNode->value.ui;
+			if (result >= 2.0 * (double)((BMA_UINTMAX_MAX >> 1) + 1u)) return defaultWhenNotFound;
 			if ((bma_uintmax_t)result != pSubNode->value.ui) return defaultWhenNotFound;
 			break;
 		}

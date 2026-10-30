@@ -1264,9 +1264,10 @@ BMA_DEF void *bma_memmem(const void *pHayStack, size_t hayStackSize, const void 
 	const unsigned char *h = (const unsigned char *)pHayStack;
 	const unsigned char *n = (const unsigned char *)pNeedle;
 	const unsigned char *p = h;
-	const unsigned char *end = h + hayStackSize - needleSize + 1;
+	const unsigned char *end;
 	if (needleSize == 0) return (void *)h;
 	if (needleSize > hayStackSize) return NULL;
+	end = h + (hayStackSize - needleSize + 1u);
 	while ((p = memchr(p, n[0], end - p)) != NULL) {
 		if (memcmp(p, n, needleSize) == 0) {
 			return (void *)p;
@@ -2310,6 +2311,19 @@ void test_strPrintf(void) {
 	bma_free(p);
 }
 
+void test_memmem(void) {
+	const char *h = "abcabd";
+	BMA_EXPECT(bma_memmem(h, 6u, "abd", 3u) == h + 3);
+	BMA_EXPECT(bma_memmem(h, 6u, "abc", 3u) == h);
+	BMA_EXPECT(bma_memmem(h, 6u, "d", 1u) == h + 5);
+	BMA_EXPECT(bma_memmem(h, 6u, "abe", 3u) == NULL);
+	BMA_EXPECT(bma_memmem(h, 6u, "", 0u) == h);
+	BMA_EXPECT(bma_memmem(h, 6u, "abcabd", 6u) == h);
+	BMA_EXPECT(bma_memmem(h, 2u, "abc", 3u) == NULL);
+	BMA_EXPECT(bma_memmem(h, 0u, "*/", 2u) == NULL);
+	BMA_EXPECT(bma_memmem(h, 5u, "abd", 3u) == NULL);
+}
+
 typedef struct Ints {
 	int *items;
 	size_t size;
@@ -2685,6 +2699,7 @@ int main(int argc, char *argv[]) {
 	BMA_TEST(test_strdup);
 	BMA_TEST(test_strPrintf_ext);
 	BMA_TEST(test_strPrintf);
+	BMA_TEST(test_memmem);
 	BMA_TEST(test_vector_construct);
 	BMA_TEST(test_vector_append);
 	BMA_TEST(test_vector_at);

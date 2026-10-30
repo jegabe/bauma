@@ -345,7 +345,16 @@ BMA_DEF void bma_njDelete(bma_NjNode *pNode) {
 	bma_free_ext(pNode->pAlloc, pNode);
 }
 
-BMA_DEF void bma_njSkip(bma_NjParseSrc *pStrWithLen) {
+BMA_DEF void bma_njFmtErr(bma_StrBldr *pErrFormatter, const char* pMsg, bma_NjParseSrc *pStrWithLen) {
+	if (pErrFormatter != NULL) {
+		bma_StrBldr_appndStr(pErrFormatter, pMsg);
+		bma_StrBldr_appndStr(pErrFormatter, " (offset ");
+		bma_StrBldr_appndUnsgnd(pErrFormatter, (bma_uintmax_t)(pStrWithLen->pStr - pStrWithLen->pBegin));
+		bma_StrBldr_appndStr(pErrFormatter, ")");
+	}
+}
+
+BMA_DEF bma_bool_t bma_njSkip(bma_NjParseSrc *pStrWithLen, bma_StrBldr *pErrFormatter) {
 	while(pStrWithLen->len > 0) {
 		char c = pStrWithLen->pStr[0];
 		char c2 = '\0';
@@ -363,7 +372,10 @@ BMA_DEF void bma_njSkip(bma_NjParseSrc *pStrWithLen) {
 			                               pStrWithLen->len - 2u,
 			                               "*/",
 			                               2u);
-			if (pEnd == NULL) return;
+			if (pEnd == NULL) {
+				bma_njFmtErr(pErrFormatter, "Error parsing comment: missing closing '*/'", pStrWithLen);
+				return BMA_FALSE;
+			}
 			pEnd += 2;
 			numSkip = pEnd - pStrWithLen->pStr;
 			pStrWithLen->pStr += numSkip;
@@ -384,15 +396,7 @@ BMA_DEF void bma_njSkip(bma_NjParseSrc *pStrWithLen) {
 			break;
 		}
 	}
-}
-
-BMA_DEF void bma_njFmtErr(bma_StrBldr *pErrFormatter, const char* pMsg, bma_NjParseSrc *pStrWithLen) {
-	if (pErrFormatter != NULL) {
-		bma_StrBldr_appndStr(pErrFormatter, pMsg);
-		bma_StrBldr_appndStr(pErrFormatter, " (offset ");
-		bma_StrBldr_appndUnsgnd(pErrFormatter, (bma_uintmax_t)(pStrWithLen->pStr - pStrWithLen->pBegin));
-		bma_StrBldr_appndStr(pErrFormatter, ")");
-	}
+	return BMA_TRUE;
 }
 
 BMA_DEF bma_NjNode *bma_njParseArr(bma_NjParseSrc *pStrWithLen,
@@ -405,7 +409,10 @@ BMA_DEF bma_NjNode *bma_njParseArr(bma_NjParseSrc *pStrWithLen,
 	--pStrWithLen->len;
 	for(;;) {
 		bma_NjNode *pArrayElement;
-		bma_njSkip(pStrWithLen);
+		if (!bma_njSkip(pStrWithLen, pErrFormatter)) {
+			bma_njDelete(pArray);
+			return NULL;
+		}
 		if (pStrWithLen->len == 0) {
 			bma_njDelete(pArray);
 			bma_njFmtErr(pErrFormatter, "Error parsing array: end of data reached", pStrWithLen);
@@ -438,7 +445,10 @@ BMA_DEF bma_NjNode *bma_njParseObj(bma_NjParseSrc *pStrWithLen,
 	for(;;) {
 		bma_NjNode *pKeyElement;
 		bma_NjNode *pValueElement;
-		bma_njSkip(pStrWithLen);
+		if (!bma_njSkip(pStrWithLen, pErrFormatter)) {
+			bma_njDelete(pObject);
+			return NULL;
+		}
 		if (pStrWithLen->len == 0) {
 			bma_njDelete(pObject);
 			bma_njFmtErr(pErrFormatter, "Error parsing object: end of data reached before key", pStrWithLen);
@@ -740,7 +750,7 @@ BMA_DEF bma_NjNode *bma_njParseExt(bma_NjParseSrc *pStrWithLen,
 	char c;
 	bma_assert(pStrWithLen != NULL);
 	bma_assert(pAlloc != NULL);
-	bma_njSkip(pStrWithLen);
+	if (!bma_njSkip(pStrWithLen, pErrFormatter)) return NULL;
 	if (pStrWithLen->len == 0) {
 		bma_njFmtErr(pErrFormatter, "Error parsing: unexpected end of data", pStrWithLen);
 		return NULL;
@@ -754,12 +764,29 @@ BMA_DEF bma_NjNode *bma_njParseExt(bma_NjParseSrc *pStrWithLen,
 	}
 }
 
+BMA_DEF bma_NjNode *bma_njParseRoot(bma_NjParseSrc *pStrWithLen,
+                                    bma_StrBldr *pErrFormatter,
+                                    bma_IMemAlloc *pAlloc) {
+	bma_NjNode *pNode = bma_njParseExt(pStrWithLen, pErrFormatter, pAlloc);
+	if (pNode == NULL) return NULL;
+	if (!bma_njSkip(pStrWithLen, pErrFormatter)) {
+		bma_njDelete(pNode);
+		return NULL;
+	}
+	if (pStrWithLen->len != 0) {
+		bma_njDelete(pNode);
+		bma_njFmtErr(pErrFormatter, "Error parsing: unexpected data after root value", pStrWithLen);
+		return NULL;
+	}
+	return pNode;
+}
+
 BMA_DEF bma_NjNode *bma_njParseMem(const void *pMem, size_t len) {
 	bma_NjParseSrc strWithLen;
 	strWithLen.pBegin = (const char*)pMem;
 	strWithLen.pStr = (const char*)pMem;
 	strWithLen.len = len;
-	return bma_njParseExt(&strWithLen, NULL, bma_getDfltMemAlloc());
+	return bma_njParseRoot(&strWithLen, NULL, bma_getDfltMemAlloc());
 }
 
 BMA_DEF bma_NjNode *bma_njParse(const char *pStr) {
@@ -767,7 +794,7 @@ BMA_DEF bma_NjNode *bma_njParse(const char *pStr) {
 	strWithLen.pBegin = pStr;
 	strWithLen.pStr = pStr;
 	strWithLen.len = strlen(pStr);
-	return bma_njParseExt(&strWithLen, NULL, bma_getDfltMemAlloc());
+	return bma_njParseRoot(&strWithLen, NULL, bma_getDfltMemAlloc());
 }
 
 BMA_DEF bma_NjNode *bma_njGet(bma_NjNode *pNode, const char *pPath) {
@@ -1352,6 +1379,60 @@ void test_parse(void) {
 	bma_njDelete(pNode);
 }
 
+void test_trailing(void) {
+	bma_NjNode *pNode;
+	bma_NjParseSrc src;
+	bma_StrBldr err;
+	BMA_EXPECT(bma_njParse("1 2") == NULL);
+	BMA_EXPECT(bma_njParse("[1]]") == NULL);
+	BMA_EXPECT(bma_njParse("{a 1} garbage") == NULL);
+	BMA_EXPECT(bma_njParseMem("[1] x", 5u) == NULL);
+	pNode = bma_njParseMem("[1] x", 3u);
+	BMA_EXPECT(pNode != NULL);
+	bma_njDelete(pNode);
+	pNode = bma_njParse("[1] // trailing comment\n  ");
+	BMA_EXPECT(pNode != NULL);
+	bma_njDelete(pNode);
+	pNode = bma_njParse("  42 , ");
+	BMA_EXPECT(pNode != NULL);
+	BMA_EXPECT(pNode->type == BMA_NJ_NODE_TYPE_UNSGND);
+	bma_njDelete(pNode);
+	bma_StrBldr_ctor(&err);
+	src.pBegin = "1 2";
+	src.pStr = src.pBegin;
+	src.len = 3u;
+	BMA_EXPECT(bma_njParseRoot(&src, &err, bma_getDfltMemAlloc()) == NULL);
+	BMA_EXPECT(strstr(bma_StrBldr_getStr(&err), "unexpected data after root value (offset 2)") != NULL);
+	bma_StrBldr_dtor(&err, NULL);
+}
+
+void test_comments(void) {
+	bma_NjNode *pNode;
+	bma_NjParseSrc src;
+	bma_StrBldr err;
+	BMA_EXPECT(bma_njParse("/* x") == NULL);
+	BMA_EXPECT(bma_njParse("[1 /* x") == NULL);
+	BMA_EXPECT(bma_njParse("{a /* x") == NULL);
+	BMA_EXPECT(bma_njParse("[1] /* x") == NULL);
+	BMA_EXPECT(bma_njParse("[1] /*") == NULL);
+	BMA_EXPECT(bma_njParse("[1] /*/") == NULL);
+	pNode = bma_njParse("/**/[1 /* a */ 2] /* b */");
+	BMA_EXPECT(pNode != NULL);
+	BMA_EXPECT(bma_NjNodePtrVec_getSz(&pNode->value.v) == 2);
+	bma_njDelete(pNode);
+	pNode = bma_njParse("# c\n[1 # c\r2 // c\n3]#");
+	BMA_EXPECT(pNode != NULL);
+	BMA_EXPECT(bma_NjNodePtrVec_getSz(&pNode->value.v) == 3);
+	bma_njDelete(pNode);
+	bma_StrBldr_ctor(&err);
+	src.pBegin = "[1] /* x";
+	src.pStr = src.pBegin;
+	src.len = strlen(src.pBegin);
+	BMA_EXPECT(bma_njParseRoot(&src, &err, bma_getDfltMemAlloc()) == NULL);
+	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&err), "Error parsing comment: missing closing '*/' (offset 4)") == 0);
+	bma_StrBldr_dtor(&err, NULL);
+}
+
 void test_get(void) {
 	bma_NjNode *pNode, *pSubNode;
 	pNode = bma_njParse(
@@ -1475,6 +1556,8 @@ int main(int argc, char *argv[]) {
 	(void)argv;
 	BMA_TEST(test_new);
 	BMA_TEST(test_parse);
+	BMA_TEST(test_trailing);
+	BMA_TEST(test_comments);
 	BMA_TEST(test_get);
 	BMA_TEST(test_toString);
 

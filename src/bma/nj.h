@@ -33,8 +33,8 @@ more pleasant:
 - Commas and colons in lists and maps are optional, so [1 2 3] is a valid list as long
   as whitespace is used as delimiter
 - Allows C-, C++ and python style comments
-- Any token which isn't "true", "false" or "null" is considered a string, so "Hello" can
-  be also written Hello. Such tokens aren't allowed to contain whitespace of course.
+- Strings that look like identifiers ([A-Za-z_][A-Za-z0-9_]*) and aren't "true", "false" or
+  "null" don't need double quotes, so "Hello" can be also written Hello.
 
 So, for instance, this is recognized as valid NJ:
 
@@ -199,6 +199,8 @@ BMA_DEF void bma_njToStr_ext(bma_StrBldr *pDst, bma_NjNode *pNode, bma_NjDialect
 #ifdef BMA_NJ_IMPL
 
 #include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
 #include <ctype.h>
 #include <math.h>
 #include <errno.h>
@@ -208,6 +210,11 @@ BMA_DEF void bma_njToStr_ext(bma_StrBldr *pDst, bma_NjNode *pNode, bma_NjDialect
 #endif
 
 #define BMA_NJ_NUM_PARSE_BUF_SZ 64u
+
+/* Max. nesting of arrays/objects; protects against stack overflow on malicious input */
+#ifndef BMA_NJ_MAX_DEPTH
+	#define BMA_NJ_MAX_DEPTH 256u
+#endif
 
 #define bma_njSetTrue(pBool) \
 	do { \
@@ -308,6 +315,7 @@ BMA_DEF void bma_njObjAppnd(bma_NjNode* pNode, bma_NjNode *pKey, bma_NjNode *pVa
 	bma_assert(pKey != NULL);
 	bma_assert(pValue != NULL);
 	bma_assert(pNode->type == BMA_NJ_NODE_TYPE_OBJ);
+	bma_assert(pKey->type == BMA_NJ_NODE_TYPE_STR);
 	if (pKey->pObjectValue != NULL) {
 		bma_njDelete(pKey->pObjectValue);
 	}
@@ -399,9 +407,15 @@ BMA_DEF bma_bool_t bma_njSkip(bma_NjParseSrc *pStrWithLen, bma_StrBldr *pErrForm
 	return BMA_TRUE;
 }
 
+BMA_DEF bma_NjNode *bma_njParseVal(bma_NjParseSrc *pStrWithLen,
+                                   bma_StrBldr *pErrFormatter,
+                                   bma_IMemAlloc *pAlloc,
+                                   size_t depth);
+
 BMA_DEF bma_NjNode *bma_njParseArr(bma_NjParseSrc *pStrWithLen,
                                        bma_StrBldr *pErrFormatter,
-                                       bma_IMemAlloc *pAlloc) {
+                                       bma_IMemAlloc *pAlloc,
+                                       size_t depth) {
 	bma_NjNode *pArray = bma_njNewArr_ext(pAlloc);
 	char c;
 	/* skip the '[' */
@@ -424,7 +438,7 @@ BMA_DEF bma_NjNode *bma_njParseArr(bma_NjParseSrc *pStrWithLen,
 			--pStrWithLen->len;
 			return pArray;
 		}
-		pArrayElement = bma_njParseExt(pStrWithLen, pErrFormatter, pAlloc);
+		pArrayElement = bma_njParseVal(pStrWithLen, pErrFormatter, pAlloc, depth + 1u);
 		if (pArrayElement == NULL) {
 			bma_njDelete(pArray);
 			return NULL;
@@ -436,7 +450,8 @@ BMA_DEF bma_NjNode *bma_njParseArr(bma_NjParseSrc *pStrWithLen,
 
 BMA_DEF bma_NjNode *bma_njParseObj(bma_NjParseSrc *pStrWithLen,
                                        bma_StrBldr *pErrFormatter,
-                                       bma_IMemAlloc *pAlloc) {
+                                       bma_IMemAlloc *pAlloc,
+                                       size_t depth) {
 	bma_NjNode *pObject = bma_njNewObj_ext(pAlloc);
 	char c;
 	/* skip the '{' */
@@ -445,6 +460,7 @@ BMA_DEF bma_NjNode *bma_njParseObj(bma_NjParseSrc *pStrWithLen,
 	for(;;) {
 		bma_NjNode *pKeyElement;
 		bma_NjNode *pValueElement;
+		bma_NjParseSrc keyPos;
 		if (!bma_njSkip(pStrWithLen, pErrFormatter)) {
 			bma_njDelete(pObject);
 			return NULL;
@@ -460,12 +476,30 @@ BMA_DEF bma_NjNode *bma_njParseObj(bma_NjParseSrc *pStrWithLen,
 			--pStrWithLen->len;
 			return pObject;
 		}
-		pKeyElement = bma_njParseExt(pStrWithLen, pErrFormatter, pAlloc);
+		keyPos = *pStrWithLen;
+		pKeyElement = bma_njParseVal(pStrWithLen, pErrFormatter, pAlloc, depth + 1u);
 		if (pKeyElement == NULL) {
 			bma_njDelete(pObject);
 			return NULL;
 		}
-		pValueElement = bma_njParseExt(pStrWithLen, pErrFormatter, pAlloc);
+		if (pKeyElement->type != BMA_NJ_NODE_TYPE_STR) {
+			bma_njDelete(pKeyElement);
+			bma_njDelete(pObject);
+			bma_njFmtErr(pErrFormatter, "Error parsing object: key must be a string", &keyPos);
+			return NULL;
+		}
+		if (!bma_njSkip(pStrWithLen, pErrFormatter)) {
+			bma_njDelete(pKeyElement);
+			bma_njDelete(pObject);
+			return NULL;
+		}
+		if ((pStrWithLen->len > 0) && (*pStrWithLen->pStr == '}')) {
+			bma_njDelete(pKeyElement);
+			bma_njDelete(pObject);
+			bma_njFmtErr(pErrFormatter, "Error parsing object: missing value for key", pStrWithLen);
+			return NULL;
+		}
+		pValueElement = bma_njParseVal(pStrWithLen, pErrFormatter, pAlloc, depth + 1u);
 		if (pValueElement == NULL) {
 			bma_njDelete(pKeyElement);
 			bma_njDelete(pObject);
@@ -599,6 +633,7 @@ BMA_DEF bma_NjNode *bma_njParseTok(bma_NjParseSrc *pStrWithLen,
                                        bma_StrBldr *pErrFormatter,
                                        bma_IMemAlloc *pAlloc) {
 	const char *p = pStrWithLen->pStr;
+	bma_NjParseSrc tokPos = *pStrWithLen; /* error offsets point at the token start */
 	size_t len = 0;
 	size_t i;
 	bma_bool_t containsDotOrE = BMA_FALSE;
@@ -607,8 +642,11 @@ BMA_DEF bma_NjNode *bma_njParseTok(bma_NjParseSrc *pStrWithLen,
 	char *pEnd;
 	while(pStrWithLen->len > 0) {
 		char c = *pStrWithLen->pStr;
+		char c2 = (pStrWithLen->len > 1u) ? pStrWithLen->pStr[1] : '\0';
 		if ((c == ':') || (c == ',') || (c == '[') || (c == ']') ||
-		    (c == '{') || (c == '}') || isspace((unsigned char)c)) break;
+		    (c == '{') || (c == '}') || (c == '"') || (c == '#') ||
+		    ((c == '/') && ((c2 == '/') || (c2 == '*'))) ||
+		    isspace((unsigned char)c)) break;
 		if ((c == '.') || (c == 'e') || (c == 'E')) containsDotOrE = BMA_TRUE;
 		if ((c == 'x') || (c == 'X')) containsX = BMA_TRUE;
 		++len;
@@ -616,7 +654,7 @@ BMA_DEF bma_NjNode *bma_njParseTok(bma_NjParseSrc *pStrWithLen,
 		--pStrWithLen->len;
 	}
 	if (len == 0) {
-		bma_njFmtErr(pErrFormatter, "Error parsing token: length is zero", pStrWithLen);
+		bma_njFmtErr(pErrFormatter, "Error parsing token: length is zero", &tokPos);
 		return NULL;
 	}
 	if (((p[0] >= '0') && (p[0] <= '9')) || (p[0] == '.') || (p[0] == '+') || (p[0] == '-')) {
@@ -624,7 +662,7 @@ BMA_DEF bma_NjNode *bma_njParseTok(bma_NjParseSrc *pStrWithLen,
 		char parseBuf[BMA_NJ_NUM_PARSE_BUF_SZ];
 		char *pParseBuf; /* A null terminated array to have reliable stdlib number parsing */
 		if (containsX) {
-			bma_njFmtErr(pErrFormatter, "Hex. numbers aren't supported", pStrWithLen);
+			bma_njFmtErr(pErrFormatter, "Error parsing number: hex numbers aren't supported", &tokPos);
 			return NULL;
 		}
 		if (len < sizeof(parseBuf)) { /* fits, inclusive '\0' terminator */
@@ -647,17 +685,17 @@ BMA_DEF bma_NjNode *bma_njParseTok(bma_NjParseSrc *pStrWithLen,
 			value = strtod(pParseBuf, &pEnd);
 			if ((value == 0.0) && (errno == ERANGE)) {
 				NJ_FREE_PARSE_BUF();
-				bma_njFmtErr(pErrFormatter, "Error parsing double: value out of range", pStrWithLen);
+				bma_njFmtErr(pErrFormatter, "Error parsing double: value out of range", &tokPos);
 				return NULL;
 			}
 			if ((value == HUGE_VAL) || (value == -HUGE_VAL)) {
 				NJ_FREE_PARSE_BUF();
-				bma_njFmtErr(pErrFormatter, "Error parsing double: value out of range", pStrWithLen);
+				bma_njFmtErr(pErrFormatter, "Error parsing double: value out of range", &tokPos);
 				return NULL;
 			}
 			if (*pEnd != '\0') {
 				NJ_FREE_PARSE_BUF();
-				bma_njFmtErr(pErrFormatter, "Error parsing double: invalid format", pStrWithLen);
+				bma_njFmtErr(pErrFormatter, "Error parsing double: invalid format", &tokPos);
 				return NULL;
 			}
 			NJ_FREE_PARSE_BUF();
@@ -669,20 +707,20 @@ BMA_DEF bma_NjNode *bma_njParseTok(bma_NjParseSrc *pStrWithLen,
 				value = (bma_intmax_t)strtoll(pParseBuf, &pEnd, 10);
 				if (((value == LLONG_MAX) || (value == LLONG_MIN) || (value == 0)) && (errno == ERANGE)) {
 					NJ_FREE_PARSE_BUF();
-					bma_njFmtErr(pErrFormatter, "Error parsing signed integer: value out of range", pStrWithLen);
+					bma_njFmtErr(pErrFormatter, "Error parsing signed integer: value out of range", &tokPos);
 					return NULL;
 				}
 			#else
 				value = (bma_intmax_t)strtol(pParseBuf, &pEnd, 10);
 				if (((value == LONG_MAX) || (value == LONG_MIN) || (value == 0)) && (errno == ERANGE)) {
 					NJ_FREE_PARSE_BUF();
-					bma_njFmtErr(pErrFormatter, "Error parsing signed integer: value out of range", pStrWithLen);
+					bma_njFmtErr(pErrFormatter, "Error parsing signed integer: value out of range", &tokPos);
 					return NULL;
 				}
 			#endif
 			if (*pEnd != '\0') {
 				NJ_FREE_PARSE_BUF();
-				bma_njFmtErr(pErrFormatter, "Error parsing signed integer: invalid format", pStrWithLen);
+				bma_njFmtErr(pErrFormatter, "Error parsing signed integer: invalid format", &tokPos);
 				return NULL;
 			}
 			NJ_FREE_PARSE_BUF();
@@ -692,24 +730,24 @@ BMA_DEF bma_NjNode *bma_njParseTok(bma_NjParseSrc *pStrWithLen,
 			uValue = (bma_uintmax_t)strtoull(pParseBuf, &pEnd, 10);
 			if (((uValue == ULLONG_MAX) || (uValue == 0)) && (errno == ERANGE)) {
 				NJ_FREE_PARSE_BUF();
-				bma_njFmtErr(pErrFormatter, "Error parsing unsigned integer: value out of range", pStrWithLen);
+				bma_njFmtErr(pErrFormatter, "Error parsing unsigned integer: value out of range", &tokPos);
 				return NULL;
 			}
 			if (*pEnd != '\0') {
 				NJ_FREE_PARSE_BUF();
-				bma_njFmtErr(pErrFormatter, "Error parsing unsigned integer: invalid format", pStrWithLen);
+				bma_njFmtErr(pErrFormatter, "Error parsing unsigned integer: invalid format", &tokPos);
 				return NULL;
 			}
 		#else
 			uValue = (bma_uintmax_t)strtoul(pParseBuf, &pEnd, 10);
 			if (((uValue == ULONG_MAX) || (uValue == 0)) && (errno == ERANGE)) {
 				NJ_FREE_PARSE_BUF();
-				bma_njFmtErr(pErrFormatter, "Error parsing unsigned integer: value out of range", pStrWithLen);
+				bma_njFmtErr(pErrFormatter, "Error parsing unsigned integer: value out of range", &tokPos);
 				return NULL;
 			}
 			if (*pEnd != '\0') {
 				NJ_FREE_PARSE_BUF();
-				bma_njFmtErr(pErrFormatter, "Error parsing unsigned integer: invalid format", pStrWithLen);
+				bma_njFmtErr(pErrFormatter, "Error parsing unsigned integer: invalid format", &tokPos);
 				return NULL;
 			}
 		#endif
@@ -734,19 +772,20 @@ BMA_DEF bma_NjNode *bma_njParseTok(bma_NjParseSrc *pStrWithLen,
 				/* good */
 			}
 			else {
-				bma_njFmtErr(pErrFormatter, "Error parsing token: invalid", pStrWithLen);
+				bma_njFmtErr(pErrFormatter, "Error parsing token: invalid", &tokPos);
 				return NULL;
 			}
 		}
 		return bma_njNewStrWithLen_ext(p, len, pAlloc);
 	}
-	bma_njFmtErr(pErrFormatter, "Error parsing token: invalid", pStrWithLen);
+	bma_njFmtErr(pErrFormatter, "Error parsing token: invalid", &tokPos);
 	return NULL;
 }
 
-BMA_DEF bma_NjNode *bma_njParseExt(bma_NjParseSrc *pStrWithLen,
+BMA_DEF bma_NjNode *bma_njParseVal(bma_NjParseSrc *pStrWithLen,
                                    bma_StrBldr *pErrFormatter,
-                                   bma_IMemAlloc *pAlloc) {
+                                   bma_IMemAlloc *pAlloc,
+                                   size_t depth) {
 	char c;
 	bma_assert(pStrWithLen != NULL);
 	bma_assert(pAlloc != NULL);
@@ -756,12 +795,22 @@ BMA_DEF bma_NjNode *bma_njParseExt(bma_NjParseSrc *pStrWithLen,
 		return NULL;
 	}
 	c = *pStrWithLen->pStr;
+	if (((c == '[') || (c == '{')) && (depth >= BMA_NJ_MAX_DEPTH)) {
+		bma_njFmtErr(pErrFormatter, "Error parsing: nesting too deep", pStrWithLen);
+		return NULL;
+	}
 	switch(c) {
-		case '[': return bma_njParseArr(pStrWithLen, pErrFormatter, pAlloc);
-		case '{': return bma_njParseObj(pStrWithLen, pErrFormatter, pAlloc);
+		case '[': return bma_njParseArr(pStrWithLen, pErrFormatter, pAlloc, depth);
+		case '{': return bma_njParseObj(pStrWithLen, pErrFormatter, pAlloc, depth);
 		case '"': return bma_njParseStr(pStrWithLen, pErrFormatter, pAlloc);
 		default: return bma_njParseTok(pStrWithLen, pErrFormatter, pAlloc);
 	}
+}
+
+BMA_DEF bma_NjNode *bma_njParseExt(bma_NjParseSrc *pStrWithLen,
+                                   bma_StrBldr *pErrFormatter,
+                                   bma_IMemAlloc *pAlloc) {
+	return bma_njParseVal(pStrWithLen, pErrFormatter, pAlloc, 0u);
 }
 
 BMA_DEF bma_NjNode *bma_njParseRoot(bma_NjParseSrc *pStrWithLen,
@@ -807,11 +856,15 @@ BMA_DEF bma_NjNode *bma_njGet(bma_NjNode *pNode, const char *pPath) {
 		if (*pPath == '[') { /* array indexing */
 			char tmp[BMA_UINTMAX_MAX_DEC_LEN+1]; /* for strtoul(l) to have null term. buf */
 			size_t num;
+			size_t i;
 			bma_uintmax_t idx;
 			const char* pEnd = strchr(pPath+1, ']');
 			if (pEnd == 0) return NULL;
 			num = (size_t)(pEnd - (pPath+1));
-			if (num > BMA_UINTMAX_MAX_DEC_LEN) return NULL;
+			if ((num == 0) || (num > BMA_UINTMAX_MAX_DEC_LEN)) return NULL;
+			for (i=0; i<num; ++i) {
+				if (!isdigit((unsigned char)pPath[1+i])) return NULL;
+			}
 			memcpy(tmp, pPath+1, num);
 			tmp[num] = '\0';
 			errno = 0;
@@ -841,7 +894,7 @@ BMA_DEF bma_NjNode *bma_njGet(bma_NjNode *pNode, const char *pPath) {
 			if (pNode->type != BMA_NJ_NODE_TYPE_OBJ) return NULL;
 			for (i=0; i<bma_NjNodePtrVec_getSz(&pNode->value.v); ++i) {
 				pSubNode = *bma_NjNodePtrVec_at(&pNode->value.v, i);
-				if (pSubNode->type != BMA_NJ_NODE_TYPE_STR) return NULL;
+				if (pSubNode->type != BMA_NJ_NODE_TYPE_STR) continue;
 				bma_assert(pSubNode->value.p != NULL);
 				if (strlen(pSubNode->value.p) != num) continue;
 				if (memcmp(pSubNode->value.p, pPath, num) == 0) {
@@ -966,6 +1019,7 @@ BMA_DEF double bma_njGetDouble_ext(bma_NjNode *pNode, const char *pPath, double 
 		}
 		case BMA_NJ_NODE_TYPE_DBL: {
 			result = pSubNode->value.d;
+			if (result != result) return defaultWhenNotFound;
 			break;
 		}
 		default: return defaultWhenNotFound;
@@ -1087,7 +1141,17 @@ BMA_DEF void bma_njToStr_impl(bma_StrBldr *pDst, bma_NjNode *pNode, bma_NjDialec
 		case BMA_NJ_NODE_TYPE_BOOL:   bma_StrBldr_appndBool(pDst, pNode->value.b);    break;
 		case BMA_NJ_NODE_TYPE_SGND:   bma_StrBldr_appndSgnd(pDst, pNode->value.si);   break;
 		case BMA_NJ_NODE_TYPE_UNSGND: bma_StrBldr_appndUnsgnd(pDst, pNode->value.ui); break;
-		case BMA_NJ_NODE_TYPE_DBL:    bma_StrBldr_appndDbl(pDst, pNode->value.d);     break;
+		case BMA_NJ_NODE_TYPE_DBL: {
+			double d = pNode->value.d;
+			/* JSON has no NaN/Inf */
+			if ((d != d) || (d > DBL_MAX) || (d < -DBL_MAX)) {
+				bma_StrBldr_appndStrN(pDst, "null", 4u);
+			}
+			else {
+				bma_StrBldr_appndDbl(pDst, d);
+			}
+			break;
+		}
 		case BMA_NJ_NODE_TYPE_STR: {
 			const char *p = pNode->value.p;
 			size_t len = strlen(pNode->value.p);
@@ -1433,6 +1497,142 @@ void test_comments(void) {
 	bma_StrBldr_dtor(&err, NULL);
 }
 
+void test_objKeys(void) {
+	bma_NjNode *pNode, *pKey;
+	bma_NjParseSrc src;
+	bma_StrBldr err;
+	BMA_EXPECT(bma_njParse("{1: a}") == NULL);
+	BMA_EXPECT(bma_njParse("{-1: a}") == NULL);
+	BMA_EXPECT(bma_njParse("{1.5: a}") == NULL);
+	BMA_EXPECT(bma_njParse("{true: a}") == NULL);
+	BMA_EXPECT(bma_njParse("{null: a}") == NULL);
+	BMA_EXPECT(bma_njParse("{[1]: a}") == NULL);
+	BMA_EXPECT(bma_njParse("{{}: a}") == NULL);
+	BMA_EXPECT(bma_njParse("{a: 1, 2: b}") == NULL);
+	pNode = bma_njParse("{a: 1, \"b c\": 2, \"1\": 3}");
+	BMA_EXPECT(pNode != NULL);
+	BMA_EXPECT(bma_njGetUint(pNode, "1") == 3u);
+	bma_njDelete(pNode);
+	/* error offset points at the key */
+	bma_StrBldr_ctor(&err);
+	src.pBegin = "{a 1  42 b}";
+	src.pStr = src.pBegin;
+	src.len = strlen(src.pBegin);
+	BMA_EXPECT(bma_njParseRoot(&src, &err, bma_getDfltMemAlloc()) == NULL);
+	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&err), "Error parsing object: key must be a string (offset 6)") == 0);
+	bma_StrBldr_dtor(&err, NULL);
+	/* bma_njGet skips non-string keys instead of aborting the search */
+	pNode = bma_njNewObj();
+	pKey = bma_njNewUnsigned(1u);
+	pKey->pObjectValue = bma_njNewNull();
+	bma_NjNodePtrVec_appnd(&pNode->value.v, &pKey);
+	bma_njObjAppnd(pNode, bma_njNewStr("x"), bma_njNewUnsigned(7u));
+	BMA_EXPECT(bma_njGetUint(pNode, "x") == 7u);
+	bma_njDelete(pNode);
+}
+
+static char *test_makeNested(size_t depth, char open, char close) {
+	char *p = (char*)malloc(2u * depth + 1u);
+	memset(p, open, depth);
+	memset(p + depth, close, depth);
+	p[2u * depth] = '\0';
+	return p;
+}
+
+void test_depth(void) {
+	bma_NjNode *pNode;
+	bma_NjParseSrc src;
+	bma_StrBldr err;
+	char *p;
+	p = test_makeNested(BMA_NJ_MAX_DEPTH, '[', ']');
+	pNode = bma_njParse(p);
+	BMA_EXPECT(pNode != NULL);
+	bma_njDelete(pNode);
+	free(p);
+	p = test_makeNested(BMA_NJ_MAX_DEPTH + 1u, '[', ']');
+	BMA_EXPECT(bma_njParse(p) == NULL);
+	bma_StrBldr_ctor(&err);
+	src.pBegin = p;
+	src.pStr = p;
+	src.len = strlen(p);
+	BMA_EXPECT(bma_njParseRoot(&src, &err, bma_getDfltMemAlloc()) == NULL);
+	BMA_EXPECT(strstr(bma_StrBldr_getStr(&err), "nesting too deep") != NULL);
+	bma_StrBldr_dtor(&err, NULL);
+	free(p);
+	/* far beyond any real stack limit */
+	p = test_makeNested(1000000u, '[', ']');
+	BMA_EXPECT(bma_njParse(p) == NULL);
+	free(p);
+	p = (char*)malloc(1000001u);
+	memset(p, '{', 1000000u);
+	p[1000000u] = '\0';
+	BMA_EXPECT(bma_njParse(p) == NULL);
+	free(p);
+	/* objects count too: depth of values inside {a: ...} */
+	pNode = bma_njParse("{a: {b: [1, {c: 2}]}}");
+	BMA_EXPECT(pNode != NULL);
+	BMA_EXPECT(bma_njGetUint(pNode, "a/b/[1]/c") == 2u);
+	bma_njDelete(pNode);
+}
+
+void test_tokenBoundaries(void) {
+	bma_NjNode *pNode;
+	bma_NjParseSrc src;
+	bma_StrBldr err;
+	pNode = bma_njParse("[1//c\n2]");
+	BMA_EXPECT((pNode != NULL) && (bma_NjNodePtrVec_getSz(&pNode->value.v) == 2));
+	bma_njDelete(pNode);
+	pNode = bma_njParse("[a/*c*/b]");
+	BMA_EXPECT((pNode != NULL) && (bma_NjNodePtrVec_getSz(&pNode->value.v) == 2));
+	bma_njDelete(pNode);
+	pNode = bma_njParse("{a:1#c\n}");
+	BMA_EXPECT((pNode != NULL) && (bma_njGetUint(pNode, "a") == 1u));
+	bma_njDelete(pNode);
+	pNode = bma_njParse("[a\"b\"]");
+	BMA_EXPECT((pNode != NULL) && (bma_NjNodePtrVec_getSz(&pNode->value.v) == 2));
+	bma_njDelete(pNode);
+	pNode = bma_njParse("{a\"b\"}");
+	BMA_EXPECT(pNode != NULL);
+	BMA_EXPECT(strcmp(bma_njGet(pNode, "a")->value.p, "b") == 0);
+	bma_njDelete(pNode);
+	BMA_EXPECT(bma_njParse("[a/b]") == NULL);
+	BMA_EXPECT(bma_njParse("{a}") == NULL);
+	BMA_EXPECT(bma_njParse("{a 1 b}") == NULL);
+	bma_StrBldr_ctor(&err);
+	src.pBegin = "{a }";
+	src.pStr = src.pBegin;
+	src.len = strlen(src.pBegin);
+	BMA_EXPECT(bma_njParseRoot(&src, &err, bma_getDfltMemAlloc()) == NULL);
+	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&err), "Error parsing object: missing value for key (offset 3)") == 0);
+	bma_StrBldr_dtor(&err, NULL);
+}
+
+static void test_expectErr(const char *pSrc, const char *pExpectedErr) {
+	bma_NjParseSrc src;
+	bma_StrBldr err;
+	bma_StrBldr_ctor(&err);
+	src.pBegin = pSrc;
+	src.pStr = pSrc;
+	src.len = strlen(pSrc);
+	BMA_EXPECT(bma_njParseRoot(&src, &err, bma_getDfltMemAlloc()) == NULL);
+	if (strcmp(bma_StrBldr_getStr(&err), pExpectedErr) != 0) {
+		fprintf(stderr, "Got error '%s'\n", bma_StrBldr_getStr(&err));
+	}
+	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&err), pExpectedErr) == 0);
+	bma_StrBldr_dtor(&err, NULL);
+}
+
+void test_tokenErrOffsets(void) {
+	test_expectErr("[1, 0x10]", "Error parsing number: hex numbers aren't supported (offset 4)");
+	test_expectErr("[1, 1.2.3]", "Error parsing double: invalid format (offset 4)");
+	test_expectErr("[1, 1e999]", "Error parsing double: value out of range (offset 4)");
+	test_expectErr("[1, -12a]", "Error parsing signed integer: invalid format (offset 4)");
+	test_expectErr("[1, 99999999999999999999999]", "Error parsing unsigned integer: value out of range (offset 4)");
+	test_expectErr("[1, 12a]", "Error parsing unsigned integer: invalid format (offset 4)");
+	test_expectErr("[1, ab-c]", "Error parsing token: invalid (offset 4)");
+	test_expectErr("[1, $x]", "Error parsing token: invalid (offset 4)");
+}
+
 void test_get(void) {
 	bma_NjNode *pNode, *pSubNode;
 	pNode = bma_njParse(
@@ -1456,6 +1656,55 @@ void test_get(void) {
 	BMA_EXPECT(pSubNode->type == BMA_NJ_NODE_TYPE_STR);
 	BMA_EXPECT(strcmp(pSubNode->value.p, "swimming") == 0);
 	bma_njDelete(pNode);
+}
+
+void test_getIndex(void) {
+	bma_NjNode *pNode, *pSubNode;
+	pNode = bma_njParse("{a: [x, y, [z]]}");
+	BMA_EXPECT(pNode != NULL);
+	pSubNode = bma_njGet(pNode, "a/[1]");
+	BMA_EXPECT((pSubNode != NULL) && (strcmp(pSubNode->value.p, "y") == 0));
+	pSubNode = bma_njGet(pNode, "a/[2]/[0]");
+	BMA_EXPECT((pSubNode != NULL) && (strcmp(pSubNode->value.p, "z") == 0));
+	pSubNode = bma_njGet(pNode, "a/[01]");
+	BMA_EXPECT((pSubNode != NULL) && (strcmp(pSubNode->value.p, "y") == 0));
+	BMA_EXPECT(bma_njGet(pNode, "a/[]") == NULL);
+	BMA_EXPECT(bma_njGet(pNode, "a/[abc]") == NULL);
+	BMA_EXPECT(bma_njGet(pNode, "a/[1x]") == NULL);
+	BMA_EXPECT(bma_njGet(pNode, "a/[ 1]") == NULL);
+	BMA_EXPECT(bma_njGet(pNode, "a/[1 ]") == NULL);
+	BMA_EXPECT(bma_njGet(pNode, "a/[+1]") == NULL);
+	BMA_EXPECT(bma_njGet(pNode, "a/[-1]") == NULL);
+	BMA_EXPECT(bma_njGet(pNode, "a/[3]") == NULL);
+	BMA_EXPECT(bma_njGet(pNode, "a/[1") == NULL);
+	BMA_EXPECT(bma_njGet(pNode, "a/[99999999999999999999999]") == NULL);
+	bma_njDelete(pNode);
+}
+
+void test_toStringNonFinite(void) {
+	bma_StrBldr b;
+	bma_NjNode *pNode;
+	bma_bool_t ok;
+	volatile double zero = 0.0;
+	double dNan = zero / zero;
+	double dInf = 1.0 / zero;
+	bma_StrBldr_ctor(&b);
+	pNode = bma_njNewArr();
+	bma_njArrAppnd(pNode, bma_njNewDouble(dNan));
+	bma_njArrAppnd(pNode, bma_njNewDouble(dInf));
+	bma_njArrAppnd(pNode, bma_njNewDouble(-dInf));
+	bma_njArrAppnd(pNode, bma_njNewDouble(1.5));
+	bma_njArrAppnd(pNode, bma_njNewDouble(3.0));
+	bma_njToStr_ext(&b, pNode, BMA_NJ_DIALECT_JSON, BMA_FALSE, "");
+	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&b), "[null,null,null,1.5,3]") == 0);
+	BMA_EXPECT(bma_njGetDouble_ext(pNode, "[0]", -DBL_MAX, DBL_MAX, 42.0, &ok) == 42.0);
+	BMA_EXPECT(!ok);
+	BMA_EXPECT(bma_njGetDouble_ext(pNode, "[1]", -DBL_MAX, DBL_MAX, 42.0, &ok) == 42.0);
+	BMA_EXPECT(!ok);
+	BMA_EXPECT(bma_njGetDouble_ext(pNode, "[3]", -DBL_MAX, DBL_MAX, 42.0, &ok) == 1.5);
+	BMA_EXPECT(ok);
+	bma_njDelete(pNode);
+	bma_StrBldr_dtor(&b, NULL);
 }
 
 void test_toString(void) {
@@ -1558,8 +1807,14 @@ int main(int argc, char *argv[]) {
 	BMA_TEST(test_parse);
 	BMA_TEST(test_trailing);
 	BMA_TEST(test_comments);
+	BMA_TEST(test_objKeys);
+	BMA_TEST(test_depth);
+	BMA_TEST(test_tokenBoundaries);
+	BMA_TEST(test_tokenErrOffsets);
 	BMA_TEST(test_get);
+	BMA_TEST(test_getIndex);
 	BMA_TEST(test_toString);
+	BMA_TEST(test_toStringNonFinite);
 
 	printf("All tests passed.\n");
 	fflush(stdout);

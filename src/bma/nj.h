@@ -63,6 +63,9 @@ although readability would suffer from that, but the parser would still be happy
 
 Having those additional features doesn't make the parser much more complicated
 but makes writing this json dialect a joy.
+
+IMPORTANT: This parser only works in the "C" locale. When the program using it calls setlocale() to change the locale,
+the parser will fail or give surprising results. So don't do that.
 */
 
 #include <limits.h>
@@ -120,76 +123,172 @@ struct bma_NjNode {
 	bma_IMemAlloc   *pAlloc;
 };
 
+/*! \brief Create a new node in memory without specific type and value */
 BMA_DEF bma_NjNode *bma_njNew_ext(bma_IMemAlloc *pAlloc);
+
+/*! \brief Same as bma_njNew_ext, using the default memory allocator */
 #define bma_njNew() bma_njNew_ext(bma_getDfltMemAlloc())
 
+/*! \brief Creates a new null-type node */
 BMA_DEF bma_NjNode *bma_njNewNull_ext(bma_IMemAlloc *pAlloc);
+
+/*! \brief Creates a new null-type node using the default memory allocator */
 #define bma_njNewNull() bma_njNewNull_ext(bma_getDfltMemAlloc())
 
+/*! \brief Creates a new bool-type node (true or false) */
 BMA_DEF bma_NjNode *bma_njNewBool_ext(bma_bool_t value, bma_IMemAlloc *pAlloc);
+
+/*! \brief Same as bma_njNewBool_ext, using the default memory allocator */
 #define bma_njNewBool(value) bma_njNewBool_ext((value), bma_getDfltMemAlloc())
 
+/*! \brief Creates a new signed integer-type node */
 BMA_DEF bma_NjNode *bma_njNewSigned_ext(bma_intmax_t value, bma_IMemAlloc *pAlloc);
+
+/*! \brief Same as bma_njNewSigned_ext, using the default memory allocator */
 #define bma_njNewSigned(value) bma_njNewSigned_ext((value), bma_getDfltMemAlloc())
 
+/*! \brief Creates a new unsigned integer-type node */
 BMA_DEF bma_NjNode *bma_njNewUnsigned_ext(bma_uintmax_t value, bma_IMemAlloc *pAlloc);
+
+/*! \brief Same as bma_njNewUnsigned_ext, using the default memory allocator */
 #define bma_njNewUnsigned(value) bma_njNewUnsigned_ext((value), bma_getDfltMemAlloc())
 
+/*! \brief Creates a new double precision floating point type node */
 BMA_DEF bma_NjNode *bma_njNewDouble_ext(double value, bma_IMemAlloc *pAlloc);
+
+/*! \brief Same as bma_njNewDouble_ext, using the default memory allocator */
 #define bma_njNewDouble(value) bma_njNewDouble_ext((value), bma_getDfltMemAlloc())
 
+/*!
+  \brief Creates a new string-type node
+  \param pValue The string value. If xferOwnership is BMA_TRUE, the string is not copied but the pointer is taken over.
+                In that case the allocator must match the one where the string was allocated from. If xferOwnership is
+                BMA_FALSE, the string is copied into the node. In both cases, the node owns the string and will free
+                its stored string when the node is deleted.
+*/
 BMA_DEF bma_NjNode *bma_njNewStr_ext(const char *pValue, bma_bool_t xferOwnership, bma_IMemAlloc *pAlloc);
+
+/*! \brief Same as bma_njNewStr_ext, using the default memory allocator */
 #define bma_njNewStr(value) bma_njNewStr_ext((value), BMA_FALSE, bma_getDfltMemAlloc())
 
+/*! \brief Creates a new string-type node with a specified length. A copy of the string is stored. */
 BMA_DEF bma_NjNode *bma_njNewStrWithLen_ext(const char *pValue, size_t valueLen, bma_IMemAlloc *pAlloc);
+
+/*! \brief Same as bma_njNewStrWithLen_ext, using the default memory allocator */
 #define bma_njNewStrWithLen(value, len) bma_njNewStrWithLen_ext((value), (len), bma_getDfltMemAlloc())
 
+/*! \brief Creates a new array-type node. After this call, the array is initialized as empty (0 elements). */
 BMA_DEF bma_NjNode *bma_njNewArr_ext(bma_IMemAlloc *pAlloc);
+
+/*! \brief Same as bma_njNewArr_ext, using the default memory allocator */
 #define bma_njNewArr() bma_njNewArr_ext(bma_getDfltMemAlloc())
+
+/*! \brief Appends an element to an array-type node */
 BMA_DEF void bma_njArrAppnd(bma_NjNode* pNode, bma_NjNode* pArrayElement);
 
+/*! \brief Creates a new object-type (map, key-value storage) node */
 BMA_DEF bma_NjNode *bma_njNewObj_ext(bma_IMemAlloc *pAlloc);
+
+/*! \brief Same as bma_njNewObj_ext, using the default memory allocator */
 #define bma_njNewObj() bma_njNewObj_ext(bma_getDfltMemAlloc())
+
+/*!
+  \brief Appends a key-value pair to an object-type node.
+  IMPORTANT: The key node must be of type string. The implementation will only check that in debug mode.
+  IMPORTANT: The implementation won't check for duplicate keye; the caller must ensure that
+*/
 BMA_DEF void bma_njObjAppnd(bma_NjNode* pNode, bma_NjNode *pKey, bma_NjNode *pValue);
 
+/*! \brief Deletes a node and all its children; also the allocated values if there are any */
 BMA_DEF void bma_njDelete(bma_NjNode *pNode);
 
+/*!
+  \brief Parses a document from representation in memory.
+  \param pStrWithLen The string to parse, with length. The string doesn't need to be null-terminated.
+                     For correct error output, both pointers pBegin and pStr must point to the same string,
+                     and len must be the length of that string.
+  \param pErrFormatter If not NULL, error messages will be appended to this string builder.
+                       If NULL, no error messages are generated.
+  \param pAlloc The memory allocator to use for allocating the node and its children.
+                Use ccal_getDfltMemAlloc() to use the default allocator.
+*/
 BMA_DEF bma_NjNode *bma_njParseExt(bma_NjParseSrc *pStrWithLen,
-                                       bma_StrBldr *pErrFormatter,
-                                       bma_IMemAlloc *pAlloc);
+                                   bma_StrBldr *pErrFormatter,
+                                   bma_IMemAlloc *pAlloc);
 
+/*! \brief Parses a document from a memory buffer with known length by calling bma_njParseExt */
 BMA_DEF bma_NjNode *bma_njParseMem(const void *pMem, size_t len);
+
+/*! \brief Parses a document from a null-terminated string using bma_njParseExt */
 BMA_DEF bma_NjNode *bma_njParse(const char *pStr);
 
+/*!
+  \brief Looks-up a (sub-)node by using a small DSL to traverse the node tree.
+  \param pNode The node to start the search from
+  \param pPath The path to the node to look up.
+               The path is a string of the form "key1/key2[3]/key4", where keys are object
+               keys and numbers in brackets are array indices (0-based). Empty string means the root node itself.
+*/
 BMA_DEF bma_NjNode *bma_njGet(bma_NjNode *pNode, const char *pPath);
 
+/*! \brief See bma_njGet but specialized for boolean values. */
 BMA_DEF bma_bool_t bma_njGetBool_ext(bma_NjNode *pNode, const char *pPath, bma_bool_t defaultWhenNotFound, bma_bool_t *pOptOutSuccess);
+
+/*! \brief See bma_njGetBool but with a default values, meaning returning BMA_FALSE when the node is not found and not reporting errors */
 #define bma_njGetBool(pNode, pPath) bma_njGetBool_ext((pNode), (pPath), BMA_FALSE, NULL)
 
+/*! \brief See bma_njGet but specialized for integer values. By passing min/max as boundaries, any integer type
+           can be retrieved. Below are the convenience macros for common integer types. */
 BMA_DEF bma_intmax_t bma_njGetInt_ext(bma_NjNode *pNode, const char *pPath, bma_intmax_t minValue, bma_intmax_t maxValue, bma_intmax_t defaultWhenNotFound, bma_bool_t *pOptOutSuccess);
+
+/*! \brief See bma_njGetIntExt but specialized for short integer values and not reporting errors (0 is the fall-back for errors) */
 #define bma_njGetShort(pNode, pPath) ((short)bma_njGetInt_ext((pNode), (pPath), SHRT_MIN, SHRT_MAX, 0, NULL))
+
+/*! \brief See bma_njGetIntExt but specialized for integer values and not reporting errors (0 is the fall-back for errors) */
 #define bma_njGetInt(pNode, pPath) ((int)bma_njGetInt_ext((pNode), (pPath), INT_MIN, INT_MAX, 0, NULL))
+
+/*! \brief See bma_njGetIntExt but specialized for long integer values and not reporting errors (0 is the fall-back for errors) */
 #define bma_njGetLong(pNode, pPath) ((long)bma_njGetInt_ext((pNode), (pPath), LONG_MIN, LONG_MAX, 0, NULL))
 #ifdef LLONG_MAX
+	/*! \brief See bma_njGetIntExt but specialized for long long integer values and not reporting errors (0 is the fall-back for errors) */
 	#define bma_njGetLongLong(pNode, pPath) ((long long)bma_njGetInt_ext((pNode), (pPath), LLONG_MIN, LLONG_MAX, 0, NULL))
 #endif
 
+/*! \brief See bma_njGet but specialized for unsigned integer values. */
 BMA_DEF bma_uintmax_t bma_njGetUint_ext(bma_NjNode *pNode, const char *pPath, bma_uintmax_t minValue, bma_uintmax_t maxValue, bma_uintmax_t defaultWhenNotFound, bma_bool_t *pOptOutSuccess);
+
+/*! \brief See bma_njGetUintExt but specialized for unsigned short integer values and not reporting errors (0 is the fall-back for errors) */
 #define bma_njGetUshort(pNode, pPath) ((unsigned short)bma_njGetUint_ext((pNode), (pPath), 0, USHRT_MAX, 0, NULL))
+
+/*! \brief See bma_njGetUintExt but specialized for unsigned integer values and not reporting errors (0 is the fall-back for errors) */
 #define bma_njGetUint(pNode, pPath) ((unsigned int)bma_njGetUint_ext((pNode), (pPath), 0, UINT_MAX, 0, NULL))
+
+/*! \brief See bma_njGetUintExt but specialized for unsigned long integer values and not reporting errors (0 is the fall-back for errors) */
 #define bma_njGetUlong(pNode, pPath) ((unsigned long)bma_njGetUint_ext((pNode), (pPath), 0, ULONG_MAX, 0, NULL))
 #ifdef ULLONG_MAX
+	/*! \brief See bma_njGetUintExt but specialized for unsigned long long integer values and not reporting errors (0 is the fall-back for errors) */
 	#define bma_njGetUlongLong(pNode, pPath) ((unsigned long long)bma_njGetUint_ext((pNode), (pPath), 0, ULLONG_MAX, 0, NULL))
 #endif
 
+/*! \brief See bma_njGet but specialized for floating point values. */
 BMA_DEF double bma_njGetDouble_ext(bma_NjNode *pNode, const char *pPath, double minValue, double maxValue, double defaultWhenNotFound, bma_bool_t *pOptOutSuccess);
+
+/*! \brief See bma_njGetDoubleExt but specialized for float values and not reporting errors (0.0 is the fall-back for errors) */
 #define bma_njGetFloat(pNode, pPath) ((float)bma_njGetDouble_ext((pNode), (pPath), -FLT_MAX, FLT_MAX, 0.0, NULL))
+
+/*! \brief See bma_njGetDoubleExt but specialized for double values and not reporting errors (0.0 is the fall-back for errors) */
 #define bma_njGetDouble(pNode, pPath) bma_njGetDouble_ext((pNode), (pPath), -DBL_MAX, DBL_MAX, 0.0, NULL)
 
+/*! \brief See bma_njGet but specialized for string values. Strings are appended into the passed string builder. */
 BMA_DEF bma_bool_t bma_njGetString_ext(bma_StrBldr *pDst, bma_NjNode *pNode, const char *pPath, const char *pDefaultWhenNotFound);
+
+/*! \brief See bma_njGetStringExt but using an empty string as the default when the node isn't found */
 #define bma_njGetString(pDst, pNode, pPath) bma_njGetString_ext((pDst), (pNode), (pPath), "")
 
+/*! \brief Converts a tree of nodes into its string representation, eiter JSON or NJ dialect */
 BMA_DEF void bma_njToStr_ext(bma_StrBldr *pDst, bma_NjNode *pNode, bma_NjDialect dialect, bma_bool_t pretty, const char *pIndent);
+
+/*! \brief See bma_njToStrExt but using default parameters: Using JSON, pretty-printed with tab character as indentation */
 #define bma_njToStr(pDst, pNode) bma_njToStr_ext((pDst), (pNode), BMA_NJ_DIALECT_JSON, BMA_TRUE, "\t")
 
 #ifdef __cplusplus
@@ -1633,6 +1732,48 @@ void test_tokenErrOffsets(void) {
 	test_expectErr("[1, $x]", "Error parsing token: invalid (offset 4)");
 }
 
+void test_stringErrors(void) {
+	BMA_EXPECT(bma_njParse("\"\\q\"") == NULL);
+	BMA_EXPECT(bma_njParse("\"\\u12G4\"") == NULL);
+	BMA_EXPECT(bma_njParse("\"\\u0000\"") == NULL);
+	BMA_EXPECT(bma_njParse("\"\\uD800\"") == NULL);
+	BMA_EXPECT(bma_njParse("\"\\u12") == NULL);
+	BMA_EXPECT(bma_njParse("\"unterminated") == NULL);
+}
+
+void test_numericBoundaries(void) {
+	bma_NjNode *pNode;
+	bma_StrBldr number;
+	bma_StrBldr_ctor(&number);
+	bma_StrBldr_appndUnsgnd(&number, BMA_UINTMAX_MAX);
+	pNode = bma_njParse(bma_StrBldr_getStr(&number));
+	BMA_EXPECT(pNode != NULL);
+	BMA_EXPECT(pNode->type == BMA_NJ_NODE_TYPE_UNSGND);
+	BMA_EXPECT(pNode->value.ui == BMA_UINTMAX_MAX);
+	bma_njDelete(pNode);
+	bma_StrBldr_clear(&number);
+	bma_StrBldr_appndSgnd(&number, BMA_INTMAX_MIN);
+	pNode = bma_njParse(bma_StrBldr_getStr(&number));
+	BMA_EXPECT(pNode != NULL);
+	BMA_EXPECT(pNode->type == BMA_NJ_NODE_TYPE_SGND);
+	BMA_EXPECT(pNode->value.si == BMA_INTMAX_MIN);
+	bma_njDelete(pNode);
+	bma_StrBldr_dtor(&number, NULL);
+	pNode = bma_njParse("[-0, 1e3, -2.5e-2, 0.0]");
+	BMA_EXPECT(pNode != NULL);
+	BMA_EXPECT(bma_NjNodePtrVec_getSz(&pNode->value.v) == 4u);
+	BMA_EXPECT((*bma_NjNodePtrVec_at(&pNode->value.v, 0))->type == BMA_NJ_NODE_TYPE_SGND);
+	BMA_EXPECT((*bma_NjNodePtrVec_at(&pNode->value.v, 0))->value.si == 0);
+	BMA_EXPECT((*bma_NjNodePtrVec_at(&pNode->value.v, 1))->type == BMA_NJ_NODE_TYPE_DBL);
+	BMA_EXPECT((*bma_NjNodePtrVec_at(&pNode->value.v, 1))->value.d == 1000.0);
+	BMA_EXPECT(fabs((*bma_NjNodePtrVec_at(&pNode->value.v, 2))->value.d + 0.025) < 0.000001);
+	bma_njDelete(pNode);
+	BMA_EXPECT(bma_njParse("1e") == NULL);
+	BMA_EXPECT(bma_njParse("--1") == NULL);
+	BMA_EXPECT(bma_njParse("1.2.3") == NULL);
+	BMA_EXPECT(bma_njParse("0x10") == NULL);
+}
+
 void test_get(void) {
 	bma_NjNode *pNode, *pSubNode;
 	pNode = bma_njParse(
@@ -1681,6 +1822,123 @@ void test_getIndex(void) {
 	bma_njDelete(pNode);
 }
 
+void test_getters(void) {
+	bma_NjNode *pNode = bma_njNewObj();
+	bma_StrBldr result;
+	bma_bool_t ok;
+	bma_njObjAppnd(pNode, bma_njNewStr("yes"), bma_njNewBool(BMA_TRUE));
+	bma_njObjAppnd(pNode, bma_njNewStr("no"), bma_njNewBool(BMA_FALSE));
+	bma_njObjAppnd(pNode, bma_njNewStr("signed"), bma_njNewSigned(-7));
+	bma_njObjAppnd(pNode, bma_njNewStr("unsigned"), bma_njNewUnsigned(8u));
+	bma_njObjAppnd(pNode, bma_njNewStr("integerDouble"), bma_njNewDouble(3.0));
+	bma_njObjAppnd(pNode, bma_njNewStr("fraction"), bma_njNewDouble(1.5));
+	bma_njObjAppnd(pNode, bma_njNewStr("text"), bma_njNewStr("hello"));
+	bma_njObjAppnd(pNode, bma_njNewStr("null"), bma_njNewNull());
+	bma_njObjAppnd(pNode, bma_njNewStr("largest"), bma_njNewUnsigned(BMA_UINTMAX_MAX));
+
+	BMA_EXPECT(bma_njGetBool_ext(pNode, "yes", BMA_FALSE, &ok) == BMA_TRUE);
+	BMA_EXPECT(ok);
+	BMA_EXPECT(bma_njGetBool_ext(pNode, "no", BMA_TRUE, &ok) == BMA_FALSE);
+	BMA_EXPECT(ok);
+	BMA_EXPECT(bma_njGetBool_ext(pNode, "missing", BMA_TRUE, &ok) == BMA_TRUE);
+	BMA_EXPECT(!ok);
+	BMA_EXPECT(bma_njGetBool_ext(pNode, "signed", BMA_TRUE, &ok) == BMA_TRUE);
+	BMA_EXPECT(!ok);
+
+	BMA_EXPECT(bma_njGetInt_ext(pNode, "yes", -10, 10, 99, &ok) == 1);
+	BMA_EXPECT(ok);
+	BMA_EXPECT(bma_njGetInt_ext(pNode, "signed", -10, 10, 99, &ok) == -7);
+	BMA_EXPECT(ok);
+	BMA_EXPECT(bma_njGetInt_ext(pNode, "unsigned", -10, 10, 99, &ok) == 8);
+	BMA_EXPECT(ok);
+	BMA_EXPECT(bma_njGetInt_ext(pNode, "integerDouble", -10, 10, 99, &ok) == 3);
+	BMA_EXPECT(ok);
+	BMA_EXPECT(bma_njGetInt_ext(pNode, "fraction", -10, 10, 99, &ok) == 99);
+	BMA_EXPECT(!ok);
+	BMA_EXPECT(bma_njGetInt_ext(pNode, "signed", -5, 5, 99, &ok) == 99);
+	BMA_EXPECT(!ok);
+	BMA_EXPECT(bma_njGetInt_ext(pNode, "largest", BMA_INTMAX_MIN, BMA_INTMAX_MAX, 99, &ok) == 99);
+	BMA_EXPECT(!ok);
+
+	BMA_EXPECT(bma_njGetUint_ext(pNode, "no", 0u, 10u, 99u, &ok) == 0u);
+	BMA_EXPECT(ok);
+	BMA_EXPECT(bma_njGetUint_ext(pNode, "unsigned", 0u, 10u, 99u, &ok) == 8u);
+	BMA_EXPECT(ok);
+	BMA_EXPECT(bma_njGetUint_ext(pNode, "integerDouble", 0u, 10u, 99u, &ok) == 3u);
+	BMA_EXPECT(ok);
+	BMA_EXPECT(bma_njGetUint_ext(pNode, "signed", 0u, BMA_UINTMAX_MAX, 99u, &ok) == 99u);
+	BMA_EXPECT(!ok);
+	BMA_EXPECT(bma_njGetUint_ext(pNode, "fraction", 0u, BMA_UINTMAX_MAX, 99u, &ok) == 99u);
+	BMA_EXPECT(!ok);
+	BMA_EXPECT(bma_njGetUint_ext(pNode, "unsigned", 0u, 5u, 99u, &ok) == 99u);
+	BMA_EXPECT(!ok);
+
+	BMA_EXPECT(bma_njGetDouble_ext(pNode, "signed", -10.0, 10.0, 99.0, &ok) == -7.0);
+	BMA_EXPECT(ok);
+	BMA_EXPECT(bma_njGetDouble_ext(pNode, "yes", -10.0, 10.0, 99.0, &ok) == 1.0);
+	BMA_EXPECT(ok);
+	BMA_EXPECT(bma_njGetDouble_ext(pNode, "fraction", -10.0, 10.0, 99.0, &ok) == 1.5);
+	BMA_EXPECT(ok);
+	BMA_EXPECT(bma_njGetDouble_ext(pNode, "unsigned", 0.0, 5.0, 99.0, &ok) == 99.0);
+	BMA_EXPECT(!ok);
+	BMA_EXPECT(bma_njGetDouble_ext(pNode, "text", -10.0, 10.0, 99.0, &ok) == 99.0);
+	BMA_EXPECT(!ok);
+
+	bma_StrBldr_ctor(&result);
+	BMA_EXPECT(bma_njGetString_ext(&result, pNode, "text", "fallback"));
+	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&result), "hello") == 0);
+	bma_StrBldr_clear(&result);
+	BMA_EXPECT(!bma_njGetString_ext(&result, pNode, "missing", "fallback"));
+	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&result), "fallback") == 0);
+	bma_StrBldr_clear(&result);
+	BMA_EXPECT(!bma_njGetString_ext(&result, pNode, "null", "fallback"));
+	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&result), "fallback") == 0);
+	bma_StrBldr_dtor(&result, NULL);
+	bma_njDelete(pNode);
+}
+
+typedef struct test_NjMemAlloc {
+	bma_IMemAlloc iface;
+	size_t numAlloc;
+	size_t numFree;
+} test_NjMemAlloc;
+
+static void *test_NjMemAlloc_rllc(void *pSelf, void *pOld, size_t newSz, size_t *pOptRealSz) {
+	test_NjMemAlloc *pAlloc = (test_NjMemAlloc*)pSelf;
+	void *pResult;
+	if (newSz == 0u) {
+		++pAlloc->numFree;
+		free(pOld);
+		return NULL;
+	}
+	++pAlloc->numAlloc;
+	pResult = realloc(pOld, newSz);
+	if ((pResult != NULL) && (pOptRealSz != NULL)) *pOptRealSz = newSz;
+	return pResult;
+}
+
+void test_stringOwnership(void) {
+	test_NjMemAlloc alloc;
+	bma_NjNode *pNode;
+	char *pOwned;
+	char source[] = "copy me";
+	memset(&alloc, 0, sizeof(alloc));
+	alloc.iface.pRllc = &test_NjMemAlloc_rllc;
+	pOwned = (char*)test_NjMemAlloc_rllc(&alloc, NULL, sizeof("owned"), NULL);
+	BMA_EXPECT(pOwned != NULL);
+	memcpy(pOwned, "owned", sizeof("owned"));
+	pNode = bma_njNewStr_ext(pOwned, BMA_TRUE, &alloc.iface);
+	BMA_EXPECT(pNode != NULL);
+	BMA_EXPECT(pNode->value.p == pOwned);
+	bma_njDelete(pNode);
+	pNode = bma_njNewStr_ext(source, BMA_FALSE, &alloc.iface);
+	BMA_EXPECT(pNode != NULL);
+	BMA_EXPECT(pNode->value.p != source);
+	BMA_EXPECT(strcmp(pNode->value.p, source) == 0);
+	bma_njDelete(pNode);
+	BMA_EXPECT(alloc.numAlloc == alloc.numFree);
+}
+
 void test_toStringNonFinite(void) {
 	bma_StrBldr b;
 	bma_NjNode *pNode;
@@ -1703,6 +1961,25 @@ void test_toStringNonFinite(void) {
 	BMA_EXPECT(!ok);
 	BMA_EXPECT(bma_njGetDouble_ext(pNode, "[3]", -DBL_MAX, DBL_MAX, 42.0, &ok) == 1.5);
 	BMA_EXPECT(ok);
+	bma_njDelete(pNode);
+	bma_StrBldr_dtor(&b, NULL);
+}
+
+void test_stringEscaping(void) {
+	const char value[] = "\"\\\b\f\n\r\t\x01\x7f";
+	const char expected[] = "\"\\\"\\\\\\b\\f\\n\\r\\t\\u0001\\u007F\"";
+	bma_StrBldr b;
+	bma_NjNode *pNode;
+	bma_NjNode *pRoundTrip;
+	bma_StrBldr_ctor(&b);
+	pNode = bma_njNewStr(value);
+	bma_njToStr_ext(&b, pNode, BMA_NJ_DIALECT_JSON, BMA_FALSE, "");
+	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&b), expected) == 0);
+	pRoundTrip = bma_njParse(bma_StrBldr_getStr(&b));
+	BMA_EXPECT(pRoundTrip != NULL);
+	BMA_EXPECT(pRoundTrip->type == BMA_NJ_NODE_TYPE_STR);
+	BMA_EXPECT(strcmp(pRoundTrip->value.p, value) == 0);
+	bma_njDelete(pRoundTrip);
 	bma_njDelete(pNode);
 	bma_StrBldr_dtor(&b, NULL);
 }
@@ -1811,9 +2088,14 @@ int main(int argc, char *argv[]) {
 	BMA_TEST(test_depth);
 	BMA_TEST(test_tokenBoundaries);
 	BMA_TEST(test_tokenErrOffsets);
+	BMA_TEST(test_stringErrors);
+	BMA_TEST(test_numericBoundaries);
 	BMA_TEST(test_get);
 	BMA_TEST(test_getIndex);
+	BMA_TEST(test_getters);
+	BMA_TEST(test_stringOwnership);
 	BMA_TEST(test_toString);
+	BMA_TEST(test_stringEscaping);
 	BMA_TEST(test_toStringNonFinite);
 
 	printf("All tests passed.\n");

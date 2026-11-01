@@ -160,11 +160,11 @@ BMA_DEF bma_NjNode *bma_njNewDouble_ext(double value, bma_IMemAlloc *pAlloc);
 #define bma_njNewDouble(value) bma_njNewDouble_ext((value), bma_getDfltMemAlloc())
 
 /*!
-  \brief Creates a new string-type node
-  \param pValue The string value. If xferOwnership is BMA_TRUE, the string is not copied but the pointer is taken over.
-                In that case the allocator must match the one where the string was allocated from. If xferOwnership is
-                BMA_FALSE, the string is copied into the node. In both cases, the node owns the string and will free
-                its stored string when the node is deleted.
+\brief Creates a new string-type node
+\param pValue The string value. If xferOwnership is BMA_TRUE, the string is not copied but the pointer is taken over.
+              In that case the allocator must match the one where the string was allocated from. If xferOwnership is
+              BMA_FALSE, the string is copied into the node. In both cases, the node owns the string and will free
+              its stored string when the node is deleted.
 */
 BMA_DEF bma_NjNode *bma_njNewStr_ext(const char *pValue, bma_bool_t xferOwnership, bma_IMemAlloc *pAlloc);
 
@@ -193,9 +193,9 @@ BMA_DEF bma_NjNode *bma_njNewObj_ext(bma_IMemAlloc *pAlloc);
 #define bma_njNewObj() bma_njNewObj_ext(bma_getDfltMemAlloc())
 
 /*!
-  \brief Appends a key-value pair to an object-type node.
-  IMPORTANT: The key node must be of type string. The implementation will only check that in debug mode.
-  IMPORTANT: The implementation won't check for duplicate keye; the caller must ensure that
+\brief Appends a key-value pair to an object-type node.
+IMPORTANT: The key node must be of type string. The implementation will only check that in debug mode.
+IMPORTANT: The implementation won't check for duplicate keye; the caller must ensure that
 */
 BMA_DEF void bma_njObjAppnd(bma_NjNode* pNode, bma_NjNode *pKey, bma_NjNode *pValue);
 
@@ -203,14 +203,14 @@ BMA_DEF void bma_njObjAppnd(bma_NjNode* pNode, bma_NjNode *pKey, bma_NjNode *pVa
 BMA_DEF void bma_njDelete(bma_NjNode *pNode);
 
 /*!
-  \brief Parses a document from representation in memory.
-  \param pStrWithLen The string to parse, with length. The string doesn't need to be null-terminated.
-                     For correct error output, both pointers pBegin and pStr must point to the same string,
-                     and len must be the length of that string.
-  \param pErrFormatter If not NULL, error messages will be appended to this string builder.
-                       If NULL, no error messages are generated.
-  \param pAlloc The memory allocator to use for allocating the node and its children.
-                Use ccal_getDfltMemAlloc() to use the default allocator.
+\brief Parses a document from representation in memory.
+\param pStrWithLen The string to parse, with length. The string doesn't need to be null-terminated.
+                   For correct error output, both pointers pBegin and pStr must point to the same string,
+                   and len must be the length of that string.
+\param pErrFormatter If not NULL, error messages will be appended to this string builder.
+                     If NULL, no error messages are generated.
+\param pAlloc The memory allocator to use for allocating the node and its children.
+              Use ccal_getDfltMemAlloc() to use the default allocator.
 */
 BMA_DEF bma_NjNode *bma_njParseExt(bma_NjParseSrc *pStrWithLen,
                                    bma_StrBldr *pErrFormatter,
@@ -223,11 +223,11 @@ BMA_DEF bma_NjNode *bma_njParseMem(const void *pMem, size_t len);
 BMA_DEF bma_NjNode *bma_njParse(const char *pStr);
 
 /*!
-  \brief Looks-up a (sub-)node by using a small DSL to traverse the node tree.
-  \param pNode The node to start the search from
-  \param pPath The path to the node to look up.
-               The path is a string of the form "key1/key2[3]/key4", where keys are object
-               keys and numbers in brackets are array indices (0-based). Empty string means the root node itself.
+\brief Looks-up a (sub-)node by using a small DSL to traverse the node tree.
+\param pNode The node to start the search from
+\param pPath The path to the node to look up.
+             The path is a string of the form "key1/key2[3]/key4", where keys are object
+             keys and numbers in brackets are array indices (0-based). Empty string means the root node itself.
 */
 BMA_DEF bma_NjNode *bma_njGet(bma_NjNode *pNode, const char *pPath);
 
@@ -238,7 +238,7 @@ BMA_DEF bma_bool_t bma_njGetBool_ext(bma_NjNode *pNode, const char *pPath, bma_b
 #define bma_njGetBool(pNode, pPath) bma_njGetBool_ext((pNode), (pPath), BMA_FALSE, NULL)
 
 /*! \brief See bma_njGet but specialized for integer values. By passing min/max as boundaries, any integer type
-           can be retrieved. Below are the convenience macros for common integer types. */
+         can be retrieved. Below are the convenience macros for common integer types. */
 BMA_DEF bma_intmax_t bma_njGetInt_ext(bma_NjNode *pNode, const char *pPath, bma_intmax_t minValue, bma_intmax_t maxValue, bma_intmax_t defaultWhenNotFound, bma_bool_t *pOptOutSuccess);
 
 /*! \brief See bma_njGetIntExt but specialized for short integer values and not reporting errors (0 is the fall-back for errors) */

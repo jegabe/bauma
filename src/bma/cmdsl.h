@@ -84,34 +84,21 @@ The built-in functions are:
 	extern "C" {
 #endif
 
-/*! \brief Representation of variable pushed on the stack */
 typedef struct bma_CmdslPshedVar {
-	bma_StrBldr name;  /*!< Variable name */
-	bma_StrBldr value; /*!< Variable value */
+	bma_StrBldr name;
+	bma_StrBldr value;
 } bma_CmdslPshedVar;
 
-/*! \brief Destructor for the pushed variable structure */
 BMA_DEF void bma_CmdslPshedVar_dtor(bma_CmdslPshedVar *p, bma_IMemAlloc *pAlloc);
 
-/*! \brief Vector of pushed variables */
 BMA_DEF_VEC(bma_CmdslPshdVarVec, bma_CmdslPshedVar, (bma_dtor_t)&bma_CmdslPshedVar_dtor)
-
-/*! \brief Vector of temporary string builders used during command processing */
 BMA_DEF_VEC(bma_CmdslTmpStrBldrsVec, bma_StrBldr, (bma_dtor_t)&bma_StrBldr_dtor)
-
-/*! \brief Vector of vectors of temporary string builders, for cases where 0..n parameters/values as arrays are needed */
 BMA_DEF_VEC(bma_CmdslTmpStrBldrsVecVec, bma_CmdslTmpStrBldrsVec, (bma_dtor_t)&bma_Vec_dtor)
 
-/*! \brief Command processor structure */
 typedef struct bma_Cmdsl bma_Cmdsl;
 
-/*!
-  \brief Function pointer type for command functions which are pluggable from C language via bma_Cmdsl_addFunc()
-  A function can have state but doesn't have to. The state can be passed via the pUserData pointer, which is set when adding the function.
- */
 typedef bma_bool_t (*bma_cmdsl_func_t)(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void *pUserData, const bma_StrBldr* pParams, size_t numOfParams);
 
-/*! \brief Internal structure for storing command functions with user data */
 typedef struct bma_CmdslFuncWthUsrData {
 	bma_cmdsl_func_t pFunc;
 	void *pUserData; /* optional, heap-allocated */
@@ -119,20 +106,13 @@ typedef struct bma_CmdslFuncWthUsrData {
 	bma_bool_t isBuiltIn;
 } bma_CmdslFuncWthUsrData;
 
-/*! \brief Destructor for the command function with user data structure */
 BMA_DEF void bma_CmdslFuncWthUsrData_dtor(bma_CmdslFuncWthUsrData* pSelf, bma_IMemAlloc *pAlloc);
 
-/*! \brief Interface for all kinds of nodes such as function calls, constants, ... */
 typedef struct bma_ICmdslNode bma_ICmdslNode;
 
-/*! \brief Hash map for mapping function names to their implementations */
 BMA_DEF_HSHMP(bma_CmdslStrNtoFuncWithUsrDataMap, bma_StrN, bma_CmdslFuncWthUsrData, (bma_dtor_t)&bma_StrN_dtor, (bma_dtor_t)&bma_CmdslFuncWthUsrData_dtor, (bma_hash_t)&bma_StrN_hash, (bma_eq_t)&bma_StrN_eq)
-
-/*! \brief Hash map for mapping variable names to their values */
 BMA_DEF_HSHMP(bma_CmdslStrNtoStrBldrMap, bma_StrN, bma_StrBldr, (bma_dtor_t)&bma_StrN_dtor, (bma_dtor_t)&bma_StrBldr_dtor, (bma_hash_t)&bma_StrN_hash, (bma_eq_t)&bma_StrN_eq)
 
-
-/*! \brief Command processor structure. Use constructor and destructor to initialize and clean up */
 struct bma_Cmdsl {
 	bma_CmdslStrNtoFuncWithUsrDataMap functions;
 	bma_CmdslStrNtoStrBldrMap         variables;
@@ -144,63 +124,37 @@ struct bma_Cmdsl {
 	char escapeChar;
 };
 
-/*! \brief Constructor for the command processor */
 BMA_DEF void bma_Cmdsl_ctor_ext(bma_Cmdsl *pSelf, char escapeChar, bma_IMemAlloc *pAlloc);
-
-/*! \brief Same but using default value for the escape character ('%') and using the default mem. allocator */
 #define bma_Cmdsl_ctor(pSelf) bma_Cmdsl_ctor_ext((pSelf), '%', bma_getDfltMemAlloc())
 
-/*! \brief Destructor for the command processor */
 BMA_DEF void bma_Cmdsl_dtor(bma_Cmdsl *pSelf, bma_IMemAlloc *pAlloc);
 
-/*!
-  \brief Add a C function to the command processor. The processor must be previously initialized
-  \param pFuncName Name of the function, e.g. "myFunc". It must be a valid identifier (see bma_cmdsl_isValidIdentifier())
-  \param p Pointer to the function implementation. The structure content is copied, so pointer to a structure on stack can be passed.
- */
 BMA_DEF bma_bool_t bma_Cmdsl_addFunc(bma_Cmdsl *pSelf, const char *pFuncName, bma_CmdslFuncWthUsrData* p);
 
-/*!
-  \brief Set the value of a variable in the command processor prior to evaluation of the template.
-  \param pSelf Pointer to the command processor
-  \param pVarName Name of the variable
-  \param pValue Value to set
-  \return BMA_TRUE if successful, BMA_FALSE otherwise
- */
 BMA_DEF bma_bool_t bma_Cmdsl_setVar(bma_Cmdsl *pSelf, const char *pVarName, const char *pValue);
-
-/*! \brief Same as bma_Cmdsl_setVar but with explicit length parameters */
 BMA_DEF bma_bool_t bma_Cmdsl_setVar_ext(bma_Cmdsl *pSelf, const char *pVarName, size_t nameLen, const char *pValue, size_t valueLen);
 
-/*! \brief Get the value of a variable from the command processor or empty string if not found */
-BMA_DEF const char *bma_Cmdsl_getVar(bma_Cmdsl *pSelf, const char *pVarName);
 
-/*! \brief Same as bma_Cmdsl_getVar but with explicit length parameters. If not found, returns NULL */
+BMA_DEF const char *bma_Cmdsl_getVar(bma_Cmdsl *pSelf, const char *pVarName);
 BMA_DEF const bma_StrBldr *bma_Cmdsl_getVar_ext(bma_Cmdsl *pSelf, const char *pVarName, size_t nameLen);
 
-/*! \brief Push a variable onto the stack */
 BMA_DEF void bma_Cmdsl_push_ext(bma_Cmdsl *pSelf, const char *pVarName, size_t varNameLen);
-
-/*! \brief Same as bma_Cmdsl_push but for null terminated strings */
 #define bma_Cmdsl_push(pSelf, pVarName) bma_Cmdsl_push_ext((pSelf), (pVarName), strlen(pVarName))
 
-/*! \brief Pops a variable from the stack */
 BMA_DEF void bma_Cmdsl_pop_ext(bma_Cmdsl *pSelf, const char *pVarName, size_t varNameLen);
-
-/*! \brief Same as bma_Cmdsl_pop but for null terminated strings */
 #define bma_Cmdsl_pop(pSelf, pVarName) bma_Cmdsl_pop_ext((pSelf), (pVarName), strlen(pVarName))
 
-/*! \brief Parse memory containing a command template. When pErrFormatter is not NULL, it will be used to format any error messages */
 BMA_DEF bma_bool_t bma_Cmdsl_parseMem_ext(bma_Cmdsl *pSelf, const void *pMem, size_t memSize, bma_StrBldr *pErrFormatter);
-
-/*! \brief Same as bma_Cmdsl_parseMem but without error formatting */
 #define bma_Cmdsl_parseMem(pSelf, pMem, memSize) bma_Cmdsl_parseMem_ext((pSelf), (pMem), (memSize), NULL)
 
-/*! \brief Same as bma_cmdsl_parseMem_ext but for a null terminated string template */
 BMA_DEF bma_bool_t bma_Cmdsl_parseStr_ext(bma_Cmdsl *pSelf, const char *pStr, bma_StrBldr *pErrFormatter);
-
-/*! \brief Same as bma_Cmdsl_parseStr_ext but without error formatting */
 #define bma_Cmdsl_parseStr(pSelf, pStr) bma_Cmdsl_parseStr_ext((pSelf), (pStr), NULL)
+
+BMA_DEF void bma_Cmdsl_allcTmpStrBldrs(bma_Cmdsl *pSelf, size_t num, bma_CmdslTmpStrBldrsVec *pOut);
+BMA_DEF void bma_Cmdsl_freeTmpStrBldrs(bma_Cmdsl *pSelf, bma_CmdslTmpStrBldrsVec *pTmpStrBldrs);
+
+BMA_DEF void bma_Cmdsl_allcTmpStrBldr(bma_Cmdsl *pSelf, bma_StrBldr *pOut);
+BMA_DEF void bma_Cmdsl_freeTmpStrBldr(bma_Cmdsl *pSelf, bma_StrBldr *pTmpStrBldr);
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -216,12 +170,6 @@ BMA_DEF bma_bool_t bma_Cmdsl_parseStr_ext(bma_Cmdsl *pSelf, const char *pStr, bm
 	extern "C" {
 #endif
 
-BMA_DEF void bma_Cmdsl_allcTmpStrBldrs(bma_Cmdsl *pSelf, size_t num, bma_CmdslTmpStrBldrsVec *pOut);
-BMA_DEF void bma_Cmdsl_freeTmpStrBldrs(bma_Cmdsl *pSelf, bma_CmdslTmpStrBldrsVec *pTmpStrBldrs);
-
-BMA_DEF void bma_Cmdsl_allcTmpStrBldr(bma_Cmdsl *pSelf, bma_StrBldr *pOut);
-BMA_DEF void bma_Cmdsl_freeTmpStrBldr(bma_Cmdsl *pSelf, bma_StrBldr *pTmpStrBldr);
-
 BMA_DEF bma_bool_t bma_cmdsl_isValidIdentifier(const char* pStr, size_t len) {
 	size_t i;
 	char c;
@@ -235,28 +183,19 @@ BMA_DEF bma_bool_t bma_cmdsl_isValidIdentifier(const char* pStr, size_t len) {
 	return BMA_TRUE;
 }
 
-/*!
-  \brief Structure representing a node in the command template parse tree
-  A node needs to be destructable and evaluatable, so it has function pointers for those operations.
-  The actual node structure will be derived from this base structure and will
-   implement the functions accordingly.
-*/
 struct bma_ICmdslNode {
 	void (*pDestruct)(void* pSelf, bma_IMemAlloc *pAlloc);
 	bma_bool_t (*pEval)(void* pSelf, bma_StrBldr* pDst, bma_Cmdsl* pCmdsl);
 };
 
-/*! \brief Structure representing the source of the command template being parsed */
 typedef struct bma_cmdsl_ParseSrc {
 	const char *pBegin; /* for error reporting to calculate error offset */
 	const char *pStr; /* incremented while parsing */
 	size_t len; /* decremented while parsing */
 } bma_cmdsl_ParseSrc;
 
-/*! \brief Parse a sequence. A sequence is consecutive node representations, e.g. a constant followed by a function call */
 BMA_DEF bma_ICmdslNode *bma_cmdsl_parseSequence(bma_Cmdsl *pSelf, bma_cmdsl_ParseSrc* pStr, bma_StrBldr *pErrFormatter, bma_bool_t insideFunction);
 
-/*! \brief Internal implementation of the %set() function */
 BMA_DEF bma_bool_t bma_cmdsl_funcSet(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void *pUserData, const bma_StrBldr* pParams, size_t numOfParams) {
 	(void)pUserData;
 	if (numOfParams != 2) {
@@ -277,7 +216,6 @@ BMA_DEF bma_bool_t bma_cmdsl_funcSet(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void 
 	return BMA_TRUE;
 }
 
-/*! \brief Internal implementation of the %get() function */
 BMA_DEF bma_bool_t bma_cmdsl_funcGet(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void *pUserData, const bma_StrBldr* pParams, size_t numOfParams) {
 	(void)pUserData;
 	const bma_StrBldr *pValue;
@@ -294,16 +232,6 @@ BMA_DEF bma_bool_t bma_cmdsl_funcGet(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void 
 	return BMA_TRUE;
 }
 
-static bma_bool_t bma_cmdsl_isEscapedComma(const char *pBegin, const char *pComma, char escapeChar) {
-	size_t escapeCount = 0u;
-	while ((pComma > pBegin) && (pComma[-1] == escapeChar)) {
-		--pComma;
-		++escapeCount;
-	}
-	return (escapeCount % 2u) != 0u;
-}
-
-/*! \brief Internal implementation of the %call() function */
 BMA_DEF bma_bool_t bma_cmdsl_funcCall(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void *pUserData, const bma_StrBldr* pParams, size_t numOfParams) {
 	(void)pUserData;
 	bma_bool_t result;
@@ -337,7 +265,7 @@ BMA_DEF bma_bool_t bma_cmdsl_funcCall(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void
 	argsLen = bma_StrBldr_getSz(&pParams[1]);
 	nArgs = (argsLen > 0u) ? 1u : 0u;
 	for (i=0; i<argsLen; ++i) {
-		if ((pArgs[i] == ',') && !bma_cmdsl_isEscapedComma(pArgs, pArgs + i, pCmdsl->escapeChar)) {
+		if ((pArgs[i] == ',') && ((i == 0u) || (pArgs[i-1u] != pCmdsl->escapeChar))) {
 			++nArgs;
 		}
 	}
@@ -358,7 +286,9 @@ BMA_DEF bma_bool_t bma_cmdsl_funcCall(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void
 		else {
 			len = ((size_t)(p - pArgs));
 			offs = len + 1; /* incl. ',' */
-			isEscaped = bma_cmdsl_isEscapedComma(pArgs, p, pCmdsl->escapeChar);
+			if ((p > pArgs) && (p[-1] == pCmdsl->escapeChar)) {
+				isEscaped = BMA_TRUE;
+			}
 		}
 		bma_assert(i < nArgs);
 		pParsedArg = bma_CmdslTmpStrBldrsVec_at(&parsedArgs, i);
@@ -377,7 +307,6 @@ BMA_DEF bma_bool_t bma_cmdsl_funcCall(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void
 	return result;
 }
 
-/*! \brief Internal implementation of the %push() function */
 BMA_DEF bma_bool_t bma_cmdsl_funcPush(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void *pUserData, const bma_StrBldr* pParams, size_t numOfParams) {
 	(void)pUserData;
 	const char* pVarName;
@@ -408,7 +337,6 @@ BMA_DEF bma_bool_t bma_cmdsl_funcPush(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void
 	return BMA_TRUE;
 }
 
-/*! \brief Internal implementation of the %pop() function */
 BMA_DEF bma_bool_t bma_cmdsl_funcPop(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void *pUserData, const bma_StrBldr* pParams, size_t numOfParams) {
 	(void)pUserData;
 	const char* pVarName;
@@ -417,7 +345,7 @@ BMA_DEF bma_bool_t bma_cmdsl_funcPop(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void 
 	bma_StrBldr *pValue;
 	if (numOfParams != 1u) {
 		bma_StrBldr_clear(pDst);
-		bma_StrBldr_appndStr(pDst, "Wrong number of parameters for function pop(), expected 1 but got ");
+		bma_StrBldr_appndStr(pDst, "Wrong number of parameters for function push(), expected 1 but got ");
 		bma_StrBldr_appndUnsgnd(pDst, numOfParams);
 		return BMA_FALSE;
 	}
@@ -465,17 +393,14 @@ BMA_DEF bma_bool_t bma_cmdsl_funcPop(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void 
 	return BMA_FALSE;
 }
 
-/*! \brief Vector of parameter names, to implement function definitions inside of the cmdsl language */
 BMA_DEF_VEC(bma_CmdslStrNVec, bma_StrN, (bma_dtor_t)&bma_StrN_dtor)
 
-/*! \brief For functions defined with %def() inside the template*/
 typedef struct bma_CmdslUsrDefndFuncData {
 	bma_StrN name;
 	bma_ICmdslNode *pBody;
 	bma_CmdslStrNVec paramNames;
 } bma_CmdslUsrDefndFuncData;
 
-/*! \brief Destructor for the bma_CmdslUsrDefndFuncData structure */
 void bma_CmdslUsrDefndFuncData_dtor(bma_CmdslUsrDefndFuncData *pSelf, bma_IMemAlloc *pAlloc) {
 	bma_assert(pSelf != NULL);
 	bma_assert(pAlloc != NULL);
@@ -486,7 +411,6 @@ void bma_CmdslUsrDefndFuncData_dtor(bma_CmdslUsrDefndFuncData *pSelf, bma_IMemAl
 	bma_free_ext(pAlloc, pSelf->name.p);
 }
 
-/*! \brief Generic C function calling functions defined with %def() in the template */
 bma_bool_t bma_cmdsl_funcUsrDefnd(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void *pUserData_, const bma_StrBldr* pParams, size_t numOfParams) {
 	bma_assert(pDst != NULL);
 	bma_assert(pCmdsl != NULL);
@@ -532,7 +456,6 @@ bma_bool_t bma_cmdsl_funcUsrDefnd(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void *pU
 	return result;
 }
 
-/*! \brief Implementation of the %def() function */
 BMA_DEF bma_bool_t bma_cmdsl_funcDef(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void *pUserData, const bma_StrBldr* pParams, size_t numOfParams) {
 	(void)pUserData;
 	bma_StrN name;
@@ -645,7 +568,6 @@ BMA_DEF bma_bool_t bma_cmdsl_funcDef(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void 
 	return BMA_TRUE;
 }
 
-/*! \brief Implementation of the %undef() function */
 BMA_DEF bma_bool_t bma_cmdsl_funcUndef(bma_StrBldr *pDst, bma_Cmdsl* pCmdsl, void *pUserData, const bma_StrBldr* pParams, size_t numOfParams) {
 	(void)pUserData;
 	bma_StrN name;
@@ -704,7 +626,6 @@ BMA_DEF void bma_CmdslNodePtr_dtor(bma_ICmdslNode **ppSelf, bma_IMemAlloc *pAllo
 #endif
 }
 
-/*! \brief Nodes which are text constants */
 typedef struct bma_CmdslNodeText {
 	bma_ICmdslNode base;
 	bma_StrN text;
@@ -719,7 +640,6 @@ BMA_DEF void bma_CmdslNodeText_dtor(bma_CmdslNodeText *pSelf, bma_IMemAlloc *pAl
 #endif
 }
 
-/*! \brief Evaluation of text constants is just appending the content to the result string */
 BMA_DEF bma_bool_t bma_CmdslNodeText_eval(void *pSelf_, bma_StrBldr *pDst, bma_Cmdsl* pCmdsl) {
 	bma_CmdslNodeText *pSelf = (bma_CmdslNodeText*)pSelf_;
 	bma_assert(pSelf != NULL);
@@ -744,7 +664,6 @@ BMA_DEF void bma_CmdslNodeText_ctor(bma_CmdslNodeText *pSelf, const char *pText,
 	pSelf->text.len = textLen;
 }
 
-/*! \brief For nodes representing empty text constants, to save on needed memory by avoiding string builder members */
 typedef struct bma_CmdslNodeEmpty {
 	bma_ICmdslNode base;
 } bma_CmdslNodeEmpty;
@@ -775,7 +694,6 @@ BMA_DEF void bma_CmdslNodeEmpty_ctor(bma_CmdslNodeEmpty *pSelf) {
 
 BMA_DEF_VEC(bma_CmdslNodePtrVec, bma_ICmdslNode*, (bma_dtor_t)&bma_CmdslNodePtr_dtor)
 
-/*! \brief A node that calls a function with a calculated set of string parameters. The result is appended to the output string */
 typedef struct bma_CmdslNodeFuncCall {
 	bma_ICmdslNode base;
 	bma_StrN name;
@@ -816,8 +734,6 @@ BMA_DEF bma_bool_t bma_cmdsl_NodeFunctionCall_eval(void *pSelf_, bma_StrBldr *pD
 		bma_ICmdslNode *pArgNode = *bma_CmdslNodePtrVec_at(&pSelf->args, i);
 		bma_StrBldr *pArg = bma_CmdslTmpStrBldrsVec_at(&tmpStrBldrs, i);
 		if (!(*pArgNode->pEval)(pArgNode, pArg, pCmdsl)) {
-			bma_StrBldr_clear(pDst);
-			bma_StrBldr_appndStrN(pDst, bma_StrBldr_getStr(pArg), bma_StrBldr_getSz(pArg));
 			result = BMA_FALSE;
 			goto cleanup;
 		}
@@ -840,7 +756,6 @@ BMA_DEF void bma_cmdsl_NodeFunctionCall_construct(bma_CmdslNodeFuncCall *pSelf, 
 	bma_CmdslNodePtrVec_ctor_ext(&pSelf->args, pAlloc);
 }
 
-/*! \brief Sequence nodes are just text snippets pasted one after another: constants, function call results, ... */
 typedef struct bma_CmdslNodeSeq {
 	bma_ICmdslNode base;
 	bma_CmdslNodePtrVec nodes;
@@ -1261,7 +1176,6 @@ err:
 BMA_DEF bma_ICmdslNode *bma_cmdsl_parseFunctionCall(bma_Cmdsl *pSelf, bma_cmdsl_ParseSrc* pStr, bma_StrBldr *pErrFormatter) {
 	const char *p;
 	size_t n;
-	bma_bool_t lastWasComma = BMA_FALSE;
 	bma_StrN funcName;
 	bma_CmdslNodeFuncCall* pFuncCall;
 	if ((pStr->len == 0) || (*pStr->pStr != pSelf->escapeChar)) {
@@ -1311,13 +1225,6 @@ BMA_DEF bma_ICmdslNode *bma_cmdsl_parseFunctionCall(bma_Cmdsl *pSelf, bma_cmdsl_
 		bma_ICmdslNode* pArg;
 		char c = *pStr->pStr;
 		if (c == ')') {
-			if (lastWasComma) {
-				bma_CmdslNodeEmpty *pEmpty;
-				pEmpty = bma_malloc_ext(pSelf->pAlloc, bma_CmdslNodeEmpty);
-				bma_CmdslNodeEmpty_ctor(pEmpty);
-				pArg = (bma_ICmdslNode*)pEmpty;
-				bma_CmdslNodePtrVec_appnd(&pFuncCall->args, &pArg);
-			}
 			++pStr->pStr;
 			--pStr->len;
 			goto out;
@@ -1331,13 +1238,11 @@ BMA_DEF bma_ICmdslNode *bma_cmdsl_parseFunctionCall(bma_Cmdsl *pSelf, bma_cmdsl_
 			bma_CmdslNodePtrVec_appnd(&pFuncCall->args, &pArg);
 			++pStr->pStr;
 			--pStr->len;
-			lastWasComma = BMA_TRUE;
 			continue;
 		}
 		pArg = bma_cmdsl_parseElement(pSelf, pStr, pErrFormatter, BMA_TRUE);
 		if (pArg == NULL) goto err;
 		bma_CmdslNodePtrVec_appnd(&pFuncCall->args, &pArg);
-		lastWasComma = BMA_FALSE;
 		if (pStr->len == 0) {
 			if (pErrFormatter != NULL) {
 				bma_cmdsl_printErrAtOffs(pErrFormatter, pStr, "reached end while before ')'");
@@ -1348,7 +1253,6 @@ BMA_DEF bma_ICmdslNode *bma_cmdsl_parseFunctionCall(bma_Cmdsl *pSelf, bma_cmdsl_
 		if (c == ',') {
 			++pStr->pStr;
 			--pStr->len;
-			lastWasComma = BMA_TRUE;
 		}
 	}
 err:
@@ -1606,12 +1510,6 @@ void test_parseMalformedEscapes(void) {
 	BMA_EXPECT(cmdsl.pRootNode == pOriginalRoot);
 	BMA_EXPECT(!bma_Cmdsl_parseStr(&cmdsl, "%"));
 	BMA_EXPECT(cmdsl.pRootNode == pOriginalRoot);
-	BMA_EXPECT(!bma_Cmdsl_parseStr(&cmdsl, "%f("));
-	BMA_EXPECT(cmdsl.pRootNode == pOriginalRoot);
-	BMA_EXPECT(!bma_Cmdsl_parseStr(&cmdsl, "%f(a"));
-	BMA_EXPECT(cmdsl.pRootNode == pOriginalRoot);
-	BMA_EXPECT(!bma_Cmdsl_parseStr(&cmdsl, "%f(%g(x)"));
-	BMA_EXPECT(cmdsl.pRootNode == pOriginalRoot);
 	BMA_EXPECT((*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl));
 	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&b), "original") == 0);
 	bma_StrBldr_dtor(&b, NULL);
@@ -1658,13 +1556,6 @@ static bma_bool_t test_cmdslCollectParams(bma_StrBldr *pDst, bma_Cmdsl *pCmdsl, 
 	return BMA_TRUE;
 }
 
-static void test_cmdslExpectEvalError(bma_Cmdsl *pCmdsl, bma_StrBldr *pOutput, const char *pSource, const char *pExpected) {
-	BMA_EXPECT(bma_Cmdsl_parseStr(pCmdsl, pSource));
-	BMA_EXPECT(!(*pCmdsl->pRootNode->pEval)(pCmdsl->pRootNode, pOutput, pCmdsl));
-	BMA_EXPECT(strstr(bma_StrBldr_getStr(pOutput), pExpected) != NULL);
-	bma_StrBldr_clear(pOutput);
-}
-
 void test_callArgumentSplitting(void) {
 	bma_Cmdsl cmdsl;
 	bma_CmdslFuncWthUsrData func;
@@ -1683,42 +1574,6 @@ void test_callArgumentSplitting(void) {
 	BMA_EXPECT(bma_Cmdsl_parseStr(&cmdsl, "%call(collect,prefix%%%,suffix)"));
 	BMA_EXPECT((*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl));
 	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&b), "1:prefix%,suffix") == 0);
-	bma_StrBldr_clear(&b);
-	BMA_EXPECT(bma_Cmdsl_parseStr(&cmdsl, "%call(collect,%{prefix%%,suffix}%)"));
-	BMA_EXPECT((*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl));
-	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&b), "2:prefix%%|suffix") == 0);
-	bma_StrBldr_clear(&b);
-	BMA_EXPECT(bma_Cmdsl_parseStr(&cmdsl, "%collect()"));
-	BMA_EXPECT((*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl));
-	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&b), "0:") == 0);
-	bma_StrBldr_clear(&b);
-	BMA_EXPECT(bma_Cmdsl_parseStr(&cmdsl, "%collect(,first)"));
-	BMA_EXPECT((*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl));
-	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&b), "2:|first") == 0);
-	bma_StrBldr_clear(&b);
-	BMA_EXPECT(bma_Cmdsl_parseStr(&cmdsl, "%collect(first,,last)"));
-	BMA_EXPECT((*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl));
-	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&b), "3:first||last") == 0);
-	bma_StrBldr_clear(&b);
-	BMA_EXPECT(bma_Cmdsl_parseStr(&cmdsl, "%collect(first,)"));
-	BMA_EXPECT((*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl));
-	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&b), "2:first|") == 0);
-	bma_StrBldr_clear(&b);
-	BMA_EXPECT(bma_Cmdsl_parseStr(&cmdsl, "%collect(,)"));
-	BMA_EXPECT((*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl));
-	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&b), "2:|") == 0);
-	bma_StrBldr_clear(&b);
-	BMA_EXPECT(bma_Cmdsl_parseStr(&cmdsl, "%call(missing,arg)"));
-	BMA_EXPECT(!(*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl));
-	BMA_EXPECT(strstr(bma_StrBldr_getStr(&b), "Function 'missing()' not found") != NULL);
-	bma_StrBldr_clear(&b);
-	BMA_EXPECT(bma_Cmdsl_parseStr(&cmdsl, "%call(collect,%pop(MISSING))"));
-	BMA_EXPECT(!(*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl));
-	BMA_EXPECT(strstr(bma_StrBldr_getStr(&b), "Couldn't find variable 'MISSING' on stack") != NULL);
-	bma_StrBldr_clear(&b);
-	BMA_EXPECT(bma_Cmdsl_parseStr(&cmdsl, "%collect(after)"));
-	BMA_EXPECT((*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl));
-	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&b), "1:after") == 0);
 	bma_StrBldr_dtor(&b, NULL);
 	bma_Cmdsl_dtor(&cmdsl, NULL);
 }
@@ -1753,13 +1608,6 @@ void test_pushPopNested(void) {
 	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&b), "") == 0);
 	BMA_EXPECT(strcmp(bma_Cmdsl_getVar(&cmdsl, "UNSET"), "") == 0);
 	BMA_EXPECT(bma_CmdslPshdVarVec_getSz(&cmdsl.pushedVariables) == 0u);
-	BMA_EXPECT(bma_Cmdsl_setVar(&cmdsl, "A", "outerA"));
-	BMA_EXPECT(bma_Cmdsl_setVar(&cmdsl, "B", "outerB"));
-	bma_StrBldr_clear(&b);
-	BMA_EXPECT(bma_Cmdsl_parseStr(&cmdsl, "%push(A)%set(A,tempA)%push(B)%set(B,tempB)%pop(A)%get(B)%pop(B)%get(A)%get(B)"));
-	BMA_EXPECT((*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl));
-	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&b), "tempBouterAouterB") == 0);
-	BMA_EXPECT(bma_CmdslPshdVarVec_getSz(&cmdsl.pushedVariables) == 0u);
 	bma_StrBldr_dtor(&b, NULL);
 	bma_Cmdsl_dtor(&cmdsl, NULL);
 }
@@ -1772,37 +1620,6 @@ void test_popEmptyStack(void) {
 	BMA_EXPECT(bma_Cmdsl_parseStr(&cmdsl, "%pop(MISSING)"));
 	BMA_EXPECT(!(*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl));
 	BMA_EXPECT(strstr(bma_StrBldr_getStr(&b), "Couldn't find variable 'MISSING' on stack") != NULL);
-	bma_StrBldr_dtor(&b, NULL);
-	bma_Cmdsl_dtor(&cmdsl, NULL);
-}
-
-void test_popInvalidParameterCount(void) {
-	bma_Cmdsl cmdsl;
-	bma_StrBldr b;
-	bma_StrBldr_ctor(&b);
-	bma_Cmdsl_ctor(&cmdsl);
-	BMA_EXPECT(bma_Cmdsl_parseStr(&cmdsl, "%pop()"));
-	BMA_EXPECT(!(*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl));
-	BMA_EXPECT(strstr(bma_StrBldr_getStr(&b), "Wrong number of parameters for function pop(), expected 1 but got 0") != NULL);
-	bma_StrBldr_clear(&b);
-	BMA_EXPECT(bma_Cmdsl_parseStr(&cmdsl, "%pop(a,b)"));
-	BMA_EXPECT(!(*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl));
-	BMA_EXPECT(strstr(bma_StrBldr_getStr(&b), "Wrong number of parameters for function pop(), expected 1 but got 2") != NULL);
-	bma_StrBldr_dtor(&b, NULL);
-	bma_Cmdsl_dtor(&cmdsl, NULL);
-}
-
-void test_builtinInvalidParameterCounts(void) {
-	bma_Cmdsl cmdsl;
-	bma_StrBldr b;
-	bma_StrBldr_ctor(&b);
-	bma_Cmdsl_ctor(&cmdsl);
-	test_cmdslExpectEvalError(&cmdsl, &b, "%set()", "function set(), expected 2 but got 0");
-	test_cmdslExpectEvalError(&cmdsl, &b, "%get(a,b)", "function get(), expected 1 but got 2");
-	test_cmdslExpectEvalError(&cmdsl, &b, "%push(a,b)", "function push(), expected 1 but got 2");
-	test_cmdslExpectEvalError(&cmdsl, &b, "%call()", "function call(), expected 2 but got 0");
-	test_cmdslExpectEvalError(&cmdsl, &b, "%def()", "function def(), expected min. 2 but got 0");
-	test_cmdslExpectEvalError(&cmdsl, &b, "%undef(a,b)", "function undef(), expected 1 but got 2");
 	bma_StrBldr_dtor(&b, NULL);
 	bma_Cmdsl_dtor(&cmdsl, NULL);
 }
@@ -1863,46 +1680,6 @@ void test_defInvalidParameterCount(void) {
 	bma_Cmdsl_dtor(&cmdsl, NULL);
 }
 
-void test_defUndefValidation(void) {
-	bma_Cmdsl cmdsl;
-	bma_StrBldr b;
-	bma_StrBldr_ctor(&b);
-	bma_Cmdsl_ctor(&cmdsl);
-	test_cmdslExpectEvalError(&cmdsl, &b, "%def(1f,0,body)", "Invalid function name");
-	test_cmdslExpectEvalError(&cmdsl, &b, "%def(f,1,1A,body)", "Invalid parameter name");
-	test_cmdslExpectEvalError(&cmdsl, &b, "%def(f,0,one)%def(f,0,two)", "already defined");
-	BMA_EXPECT(bma_Cmdsl_parseStr(&cmdsl, "%f()"));
-	BMA_EXPECT((*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl));
-	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&b), "one") == 0);
-	test_cmdslExpectEvalError(&cmdsl, &b, "%undef(get)", "can't be removed because it is a pre-defined function");
-	test_cmdslExpectEvalError(&cmdsl, &b, "%undef(missing)", "function 'missing()' not found");
-	bma_StrBldr_dtor(&b, NULL);
-	bma_Cmdsl_dtor(&cmdsl, NULL);
-}
-
-void test_defDuringFunctionCall(void) {
-	bma_Cmdsl cmdsl;
-	bma_StrBldr b;
-	bma_StrBldr program;
-	size_t i;
-	bma_StrBldr_ctor(&b);
-	bma_StrBldr_ctor(&program);
-	bma_Cmdsl_ctor(&cmdsl);
-	bma_StrBldr_appndStr(&program, "%def(f,0,%{");
-	for (i=0u; i<32u; ++i) {
-		bma_StrBldr_appndStr(&program, "%def(g");
-		bma_StrBldr_appndUnsgnd(&program, i);
-		bma_StrBldr_appndStr(&program, ",0,value)");
-	}
-	bma_StrBldr_appndStr(&program, "}%)%f()%g31()");
-	BMA_EXPECT(bma_Cmdsl_parseStr(&cmdsl, bma_StrBldr_getStr(&program)));
-	BMA_EXPECT((*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl));
-	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&b), "value") == 0);
-	bma_StrBldr_dtor(&program, NULL);
-	bma_StrBldr_dtor(&b, NULL);
-	bma_Cmdsl_dtor(&cmdsl, NULL);
-}
-
 void test_defTooManyArguments(void) {
 	bma_Cmdsl cmdsl;
 	bma_StrBldr b;
@@ -1933,21 +1710,6 @@ void test_defMissingArguments(void) {
 	bma_Cmdsl_dtor(&cmdsl, NULL);
 }
 
-void test_defBodyFailureRestoresParameters(void) {
-	bma_Cmdsl cmdsl;
-	bma_StrBldr b;
-	bma_StrBldr_ctor(&b);
-	bma_Cmdsl_ctor(&cmdsl);
-	BMA_EXPECT(bma_Cmdsl_setVar(&cmdsl, "A", "outer"));
-	BMA_EXPECT(bma_Cmdsl_parseStr(&cmdsl, "%def(f,1,A,%{%pop(MISSING)}%)%f(inner)"));
-	BMA_EXPECT(!(*cmdsl.pRootNode->pEval)(cmdsl.pRootNode, &b, &cmdsl));
-	BMA_EXPECT(strcmp(bma_Cmdsl_getVar(&cmdsl, "A"), "outer") == 0);
-	BMA_EXPECT(bma_CmdslPshdVarVec_getSz(&cmdsl.pushedVariables) == 0u);
-	BMA_EXPECT(strstr(bma_StrBldr_getStr(&b), "Couldn't find variable 'MISSING' on stack") != NULL);
-	bma_StrBldr_dtor(&b, NULL);
-	bma_Cmdsl_dtor(&cmdsl, NULL);
-}
-
 #ifdef __cplusplus
 	} /* extern "C" */
 #endif
@@ -1966,16 +1728,11 @@ int main(int argc, char *argv[]) {
 	BMA_TEST(test_pushPop);
 	BMA_TEST(test_pushPopNested);
 	BMA_TEST(test_popEmptyStack);
-	BMA_TEST(test_popInvalidParameterCount);
-	BMA_TEST(test_builtinInvalidParameterCounts);
 	BMA_TEST(test_defUndef);
 	BMA_TEST(test_defInvalidBody);
 	BMA_TEST(test_defInvalidParameterCount);
-	BMA_TEST(test_defUndefValidation);
-	BMA_TEST(test_defDuringFunctionCall);
 	BMA_TEST(test_defTooManyArguments);
 	BMA_TEST(test_defMissingArguments);
-	BMA_TEST(test_defBodyFailureRestoresParameters);
 
 	printf("All tests passed.\n");
 	fflush(stdout);

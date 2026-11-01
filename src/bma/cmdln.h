@@ -68,7 +68,7 @@ so a simple "memset(&output, 0, sizeof(output))" is enough to prepare the output
 BMA_DEF_VEC(bma_CmdLnIntVec, int, NULL)
 /* Vector type for parsed size_t-vector arguments */
 BMA_DEF_VEC(bma_CmdLnSizeTVec, size_t, NULL)
-/* Vector type for parsed string-vector arguments */
+/* Vector type for parsed string-vector arguments. Holds ownership of the strings. */
 BMA_DEF_VEC(bma_CmdLnStrVec, char*, &bma_memblck_dtor)
 
 /*! \brief Type of command line argument */
@@ -81,7 +81,7 @@ typedef unsigned int bma_CmdLineArgType;
 /*! \brief Integer argument with an integer value following the argument name, like "--intParam 42" */
 #define BMA_CMDLN_ARG_TYPE_INT        ((bma_CmdLineArgType)2)
 /*! \brief Vector of integers (bma_CmdLnIntVec). If "reqred" flag is set,
-           minimum one occurence is requird. Example "--intVec 1 --intVec 2"
+         minimum one occurence is requird. Example "--intVec 1 --intVec 2"
 	   If the target field isn't initialized (all bytes zero),
 	   it will be constructed using bma_CmdLnIntVec_ctor */
 #define BMA_CMDLN_ARG_TYPE_INT_VEC    ((bma_CmdLineArgType)3)
@@ -98,7 +98,7 @@ typedef unsigned int bma_CmdLineArgType;
 
 
 /*!
-  \brief Definition of a single argument (of a command or sub-(sub-)command)
+\brief Definition of a single argument (of a command or sub-(sub-)command)
 */
 typedef struct bma_CmdLnArgDef {
 	bma_CmdLineArgType type; /*!< \brief Type of the argument, see BMA_CMDLN_ARG_TYPE_* */
@@ -111,13 +111,13 @@ typedef struct bma_CmdLnArgDef {
 } bma_CmdLnArgDef;
 
 /*!
-  \brief Definition of a command. A command can be stand-alone
-         or have any number of sub-(sub-) commands. This way, a command line can be structured hierarchically.
-         The root commnd must have an empty string as name. If it has an enumOffs which is not BMA_SIZE_MAX, this
-         means that the root command can be called without any sub command. If it is BMA_SIZE_MAX, this means that the
-         root command is just a container for sub-commands and can't be called directly.
-         If it is meant to be only a container, definition of pArgs and numArgs is not required since it won't be
-         used anyway.
+\brief Definition of a command. A command can be stand-alone
+       or have any number of sub-(sub-) commands. This way, a command line can be structured hierarchically.
+       The root commnd must have an empty string as name. If it has an enumOffs which is not BMA_SIZE_MAX, this
+       means that the root command can be called without any sub command. If it is BMA_SIZE_MAX, this means that the
+       root command is just a container for sub-commands and can't be called directly.
+       If it is meant to be only a container, definition of pArgs and numArgs is not required since it won't be
+       used anyway.
 */
 typedef struct bma_CmdLnCmdDef bma_CmdLnCmdDef;
 struct bma_CmdLnCmdDef {
@@ -142,46 +142,46 @@ typedef unsigned int bma_CmdLnPrseRslt;
 #define BMA_CMDLN_NUM_PRSE_RSLTS         ((bma_CmdLnPrseRslt)3) /*!< \brief Number of possible parsing results */
 
 /*!
-  \brief Parses the command line according to the passed definition and fills the output structure with the parsed values.
-         For more convenience, use bma_CmdLn_prseOrExit() which does the error handling by itself.
-         IMPORTANT: The function can automatically call constructor of vector types (bma_CmdLnIntVec, bma_CmdLnSizeTVec, bma_CmdLnStrVec)
-         if the target field is initialized to all bytes zero. This way, using a memset() call on the output structure before
-         calling this function is everything needed to prepare the output structure. But of course, having pre-constructed
-         vector fields is also possible.
-         Calling vector destructors is in the responsibility of the caller.
-         
-  \param argc Number of command line arguments from main() (including program name)
-  \param argv Array of command line arguments from main() (including program name)
-  \param pDef Pointer to the declarative command line definition structure
-  \param pOutStruct Pointer to the output structure where parsed values are to be stored
-  \return BMA_CMDLN_PRSE_RSLT_OK on success,
-          BMA_CMDLN_PRSE_RSLT_HELP_PRINTED if help was requested and printed,
-          BMA_CMDLN_PRSE_RSLT_ERR on error
+\brief Parses the command line according to the passed definition and fills the output structure with the parsed values.
+       For more convenience, use bma_CmdLn_prseOrExit() which does the error handling by itself.
+       IMPORTANT: The function can automatically call constructor of vector types (bma_CmdLnIntVec, bma_CmdLnSizeTVec, bma_CmdLnStrVec)
+       if the target field is initialized to all bytes zero. This way, using a memset() call on the output structure before
+       calling this function is everything needed to prepare the output structure. But of course, having pre-constructed
+       vector fields is also possible.
+       Calling vector destructors is in the responsibility of the caller.
+
+\param argc Number of command line arguments from main() (including program name)
+\param argv Array of command line arguments from main() (including program name)
+\param pDef Pointer to the declarative command line definition structure
+\param pOutStruct Pointer to the output structure where parsed values are to be stored
+\return BMA_CMDLN_PRSE_RSLT_OK on success,
+        BMA_CMDLN_PRSE_RSLT_HELP_PRINTED if help was requested and printed,
+        BMA_CMDLN_PRSE_RSLT_ERR on error
 */
 BMA_DEF bma_CmdLnPrseRslt bma_CmdLn_prse(int argc, char **argv, const bma_CmdLnCmdDef *pDef, void *pOutStruct);
 
 
 /*!
-  \brief Calls bma_CmdLn_prse and then does:
-         - When BMA_CMDLN_PRSE_RSLT_OK is returned, returns normally
-         - When BMA_CMDLN_PRSE_RSLT_HELP_PRINTED is returned, exits the program with exit code 0 (success)
-         - When BMA_CMDLN_PRSE_RSLT_ERR is returned, exits the program with exit code 1 (error)
-  This means that when the function returns, one can be sure that the arguments were parsed successfully, so no other
-  error handling is needed in the main function.
-  Example:
-  \code
-  typedef struct ParsedArgs { ... } ParsedArgs;
-  static const bma_CmdLnCmdDef kMainCmdDef = { ... };
+\brief Calls bma_CmdLn_prse and then does:
+       - When BMA_CMDLN_PRSE_RSLT_OK is returned, returns normally
+       - When BMA_CMDLN_PRSE_RSLT_HELP_PRINTED is returned, exits the program with exit code 0 (success)
+       - When BMA_CMDLN_PRSE_RSLT_ERR is returned, exits the program with exit code 1 (error)
+This means that when the function returns, one can be sure that the arguments were parsed successfully, so no other
+error handling is needed in the main function.
+Example:
+\code
+typedef struct ParsedArgs { ... } ParsedArgs;
+static const bma_CmdLnCmdDef kMainCmdDef = { ... };
 
-  int main(int argc, char **argv) {
-          ParsedArgs parsedArgs;
-          memset(&parsedArgs, 0, sizeof(parsedArgs));
-          bma_CmdLn_prseOrExit(argc, argv, &kMainCmdDef, &parsedArgs);
-          ... and go on working with parsedArgs content
-          ... cleanup parsedArgs
-          return 0;
-  }
-  \endcode
+int main(int argc, char **argv) {
+        ParsedArgs parsedArgs;
+        memset(&parsedArgs, 0, sizeof(parsedArgs));
+        bma_CmdLn_prseOrExit(argc, argv, &kMainCmdDef, &parsedArgs);
+        ... and go on working with parsedArgs content
+        ... cleanup parsedArgs
+        return 0;
+}
+\endcode
 */
 BMA_DEF void bma_CmdLn_prseOrExit(int argc, char **argv, const bma_CmdLnCmdDef *pDef, void *pOutStruct);
 
@@ -202,6 +202,9 @@ BMA_DEF void bma_CmdLn_prseOrExit(int argc, char **argv, const bma_CmdLnCmdDef *
 	extern "C" {
 #endif
 
+/* Vector for holding strings without taking ownership */
+BMA_DEF_VEC(bma_CmdLnStrRefVec, const char*, NULL)
+
 BMA_DEF bma_bool_t bma_CmdLn_strCaseEq(const char *pStr1, const char *pStr2) {
 	size_t len1 = strlen(pStr1);
 	size_t len2 = strlen(pStr2);
@@ -215,10 +218,10 @@ BMA_DEF bma_bool_t bma_CmdLn_strCaseEq(const char *pStr1, const char *pStr2) {
 	return BMA_TRUE;
 }
 
-BMA_DEF bma_bool_t bma_CmdLn_vecHasStr(bma_CmdLnStrVec *pVec, const char *pStr) {
+BMA_DEF bma_bool_t bma_CmdLn_vecHasStr(bma_CmdLnStrRefVec *pVec, const char *pStr) {
 	size_t i;
-	for (i=0; i<bma_CmdLnStrVec_getSz(pVec); ++i) {
-		const char *pExisting = *bma_CmdLnStrVec_at(pVec, i);
+	for (i=0; i<bma_CmdLnStrRefVec_getSz(pVec); ++i) {
+		const char *pExisting = *bma_CmdLnStrRefVec_at(pVec, i);
 		if (strcmp(pExisting, pStr) == 0) {
 			return BMA_TRUE;
 		}
@@ -226,11 +229,9 @@ BMA_DEF bma_bool_t bma_CmdLn_vecHasStr(bma_CmdLnStrVec *pVec, const char *pStr) 
 	return BMA_FALSE;
 }
 
-BMA_DEF void bma_CmdLn_addStrToVec(bma_CmdLnStrVec *pVec, const char *pStr) {
-	char *p;
+BMA_DEF void bma_CmdLn_addStrToVec(bma_CmdLnStrRefVec *pVec, const char *pStr) {
 	if (bma_CmdLn_vecHasStr(pVec, pStr)) return;
-	p = bma_strdup(pStr);
-	bma_CmdLnStrVec_appnd(pVec, &p);
+	bma_CmdLnStrRefVec_appnd(pVec, &pStr);
 }
 
 BMA_DEF void bma_CmdLn_prntHlp(int argc, char **argv, const bma_CmdLnCmdDef *pDef) {
@@ -307,13 +308,13 @@ BMA_DEF bma_CmdLnPrseRslt bma_CmdLn_prse(int argc, char **argv, const bma_CmdLnC
 	size_t j;
 	bma_CmdLnPrseRslt rslt = BMA_CMDLN_PRSE_RSLT_ERR;
 	const bma_CmdLnCmdDef *pCurrDef;
-	bma_CmdLnStrVec dtctedArgs;
+	bma_CmdLnStrRefVec dtctedArgs;
 	bma_bool_t hlpReqsted = BMA_FALSE;
 	bma_assert(argc > 0);
 	bma_assert(argv != NULL);
 	bma_assert(pDef != NULL);
 	bma_assert(pOutStruct != NULL);
-	bma_CmdLnStrVec_ctor(&dtctedArgs);
+	bma_CmdLnStrRefVec_ctor(&dtctedArgs);
 	if (argc < 1) {
 		fprintf(stderr, "argc must be greater than 0: Need at least the program name");
 		goto out;
@@ -530,7 +531,7 @@ BMA_DEF bma_CmdLnPrseRslt bma_CmdLn_prse(int argc, char **argv, const bma_CmdLnC
 emptyRootCmd:
 	rslt = BMA_CMDLN_PRSE_RSLT_OK;
 out:
-	bma_CmdLnStrVec_dtor(&dtctedArgs, NULL);
+	bma_CmdLnStrRefVec_dtor(&dtctedArgs, NULL);
 	return rslt;
 }
 

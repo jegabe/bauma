@@ -457,14 +457,14 @@ BMA_DEF char* bma_strPrintf(const char* pFmt, ...);
 #define bma_strndup(p, l) bma_strndup_ext(p, l, bma_getDfltMemAlloc())
 
 /*!
-  \brief Returns pStr if pStr is not NULL, otherwise returns an empty string.
-  To be used to access string pointers that are probably NULL,
-  but where a valid null terminated string is needed in any case.
+\brief Returns pStr if pStr is not NULL, otherwise returns an empty string.
+To be used to access string pointers that are probably NULL,
+but where a valid null terminated string is needed in any case.
 */
 BMA_DEF const char *bma_getStr(const char *pStr);
 
 /*!
-  \brief Checks if all bytes in a field are zero.
+\brief Checks if all bytes in a field are zero.
 */
 BMA_DEF bma_bool_t bma_isAllZero(const void *pField, size_t fieldSz);
 
@@ -581,20 +581,20 @@ BMA_DEF bma_bool_t bma_Vec_rmv_impl(bma_Vec *pSelf,
 BMA_DEF void bma_Vec_clear(bma_Vec *pSelf);
 
 /*! \brief Declares and defines a type safe bma_Vec wrapper.
-    In very old compilers not supporting inlining, this may generate a small call overhead,
-    but for every other compiler, this doesn't have any downside. What it
-    offers is a more clean and more type safe API. Otherwise, everything
-    is just forwarded to bma_Vec to have exactly one binary implementation of a vec.
-    Usage example:
-    \code
+  In very old compilers not supporting inlining, this may generate a small call overhead,
+  but for every other compiler, this doesn't have any downside. What it
+  offers is a more clean and more type safe API. Otherwise, everything
+  is just forwarded to bma_Vec to have exactly one binary implementation of a vec.
+  Usage example:
+  \code
 
-    #include <bauma/ccal.h>
+  #include <bauma/ccal.h>
 
-    BMA_DEF_VEC(mylib_IntVec, int, NULL)
+  BMA_DEF_VEC(mylib_IntVec, int, NULL)
 
-    \endcode
+  \endcode
 
-    This declares a new data type "mylib_IntVec" which holds plain "int"
+  This declares a new data type "mylib_IntVec" which holds plain "int"
 */
 #define BMA_DEF_VEC(name_, datatype_, pDtor_) \
 	\
@@ -819,6 +819,7 @@ BMA_DEF void bma_StrBldr_ctor_ext(bma_StrBldr *pSelf, bma_IMemAlloc *pAlloc);
 #define bma_StrBldr_ctor(pSelf) bma_StrBldr_ctor_ext((pSelf), bma_getDfltMemAlloc())
 BMA_DEF void bma_StrBldr_dtor(bma_StrBldr *pSelf, bma_IMemAlloc *pAlloc);
 #define bma_StrBldr_getStr(pSelf) ((const char* const)((pSelf)->pStr))
+#define bma_StrBldr_getAlloc(pSelf) ((bma_IMemAlloc* const)((pSelf)->pAlloc))
 
 #if BMA_DBG
 	BMA_DEF char bma_StrBldr_at_impl_D(bma_StrBldr *pSelf, size_t index);

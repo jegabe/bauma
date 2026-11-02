@@ -160,6 +160,8 @@ typedef unsigned int bma_CmdLnPrseRslt;
 */
 BMA_DEF bma_CmdLnPrseRslt bma_CmdLn_prse(int argc, char **argv, const bma_CmdLnCmdDef *pDef, void *pOutStruct);
 
+typedef void (*bma_CmdLn_clnup)(void*);
+
 
 /*!
 \brief Calls bma_CmdLn_prse and then does:
@@ -175,21 +177,22 @@ static const bma_CmdLnCmdDef kMainCmdDef = { ... };
 
 int main(int argc, char **argv) {
         ParsedArgs parsedArgs;
+	void parsedArgs_dtor(ParsedArgs *pSelf, bma_IMemAlloc *pAlloc) { ... }
         memset(&parsedArgs, 0, sizeof(parsedArgs));
-        bma_CmdLn_prseOrExit(argc, argv, &kMainCmdDef, &parsedArgs);
+        bma_CmdLn_prseOrExit(argc, argv, &kMainCmdDef, &parsedArgs, &parsedArgs_dtor, NULL, NULL);
         ... and go on working with parsedArgs content
         ... cleanup parsedArgs
         return 0;
 }
 \endcode
 */
-BMA_DEF void bma_CmdLn_prseOrExit(int argc, char **argv, const bma_CmdLnCmdDef *pDef, void *pOutStruct);
+BMA_DEF void bma_CmdLn_prseOrExit(int argc, char **argv, const bma_CmdLnCmdDef *pDef, void *pOutStruct, bma_dtor_t pOutStructDtor, bma_CmdLn_clnup pClnUpFnc, void *pClnUpFncUsrData);
 
 #ifdef __cplusplus
 	} /* extern "C" */
 #endif
 
-#ifdef BMA_CMDLN_IMPL
+#if (defined(BMA_CMDLN_IMPL) || defined(BMA_IMPL))
 
 #include <string.h>
 #include <stdlib.h>
@@ -535,13 +538,22 @@ out:
 	return rslt;
 }
 
-BMA_DEF void bma_CmdLn_prseOrExit(int argc, char **argv, const bma_CmdLnCmdDef *pDef, void *pOutStruct) {
+BMA_DEF void bma_CmdLn_prseOrExit(int argc, char **argv, const bma_CmdLnCmdDef *pDef, void *pOutStruct, bma_dtor_t pOutStructDtor, bma_CmdLn_clnup pClnUpFnc, void *pClnUpFncUsrData) {
+	int exitCode = 0;
 	bma_CmdLnPrseRslt parseResult = bma_CmdLn_prse(argc, argv, pDef, pOutStruct);
 	BMA_STATIC_ASSERT(BMA_CMDLN_NUM_PRSE_RSLTS == 3U); /* to verify switch is complete */
 	switch(parseResult) {
 		case BMA_CMDLN_PRSE_RSLT_OK: return;
-		case BMA_CMDLN_PRSE_RSLT_HELP_PRINTED: exit(0);
-		default: /* BMA_CMDLN_PRSE_RSLT_ERR */ exit(1);
+		default: /* BMA_CMDLN_PRSE_RSLT_ERR */ exitCode = 1; /* and fall through */
+		case BMA_CMDLN_PRSE_RSLT_HELP_PRINTED: {
+			if (pClnUpFnc != NULL) {
+				(*pClnUpFnc)(pClnUpFncUsrData);
+			}
+			if (pOutStructDtor != NULL) {
+				(*pOutStructDtor)(pOutStruct, bma_getDfltMemAlloc());
+			}
+			exit(exitCode);
+		}
 	}
 }
 
@@ -549,7 +561,7 @@ BMA_DEF void bma_CmdLn_prseOrExit(int argc, char **argv, const bma_CmdLnCmdDef *
 	} /* extern "C" */
 #endif
 
-#endif /* BMA_CMDLN_IMPL */
+#endif /* BMA_CMDLN_IMPL || BMA_IMPL */
 
 #ifdef BMA_CMDLN_TEST
 

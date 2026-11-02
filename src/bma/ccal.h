@@ -44,7 +44,7 @@ How to include in other projects:
 This is an stb-style C header only library.
 Just download this file and #include <bauma/ccal.h> and you're done when only declarations
 are needed.
-When also the function definitions are needed, define the macro BMA_CCAL_IMPL
+When also the function definitions are needed, define the macro BMA_CCAL_IMPL or BMA_IMPL
 and #include <bauma/ccal.h> after that, but only in one source file. Or just pass ccal.h to
 a compiler as C source file and pass "-DBMA_CCAL_IMPL" which will give an object file
 containg the function definitions, which can be linked afterwards.
@@ -959,7 +959,7 @@ BMA_DEF bma_bool_t bma_StrTree_rmv_impl(
 	} /* extern "C" */
 #endif
 
-#ifdef BMA_CCAL_IMPL
+#if (defined(BMA_CCAL_IMPL) || defined(BMA_IMPL))
 
 #include <assert.h>
 #include <string.h> /* for all kind of memory and string things */
@@ -2256,7 +2256,7 @@ BMA_DEF bma_bool_t bma_StrTree_rmv_impl(
 	} /* extern "C" */
 #endif
 
-#endif /* BMA_CCAL_IMPL */
+#endif /* BMA_CCAL_IMPL || BMA_IMPL */
 
 #ifdef BMA_CCAL_TEST
 

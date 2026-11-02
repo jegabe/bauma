@@ -21,28 +21,30 @@ endif()
 include_directories(src)
 
 add_executable(test_ccal src/bma/ccal.h)
-target_compile_definitions(test_ccal PRIVATE BMA_CCAL_IMPL BMA_CCAL_TEST)
+target_compile_definitions(test_ccal PRIVATE BMA_IMPL BMA_CCAL_TEST)
 
 add_executable(test_cmdln src/bma/cmdln.h)
-target_compile_definitions(test_cmdln PRIVATE BMA_CCAL_IMPL BMA_CMDLN_IMPL BMA_CMDLN_TEST)
+target_compile_definitions(test_cmdln PRIVATE BMA_IMPL BMA_CMDLN_TEST)
 
 add_executable(test_cmdsl src/bma/cmdsl.h)
-target_compile_definitions(test_cmdsl PRIVATE BMA_CCAL_IMPL BMA_CMDSL_IMPL BMA_CMDSL_TEST)
+target_compile_definitions(test_cmdsl PRIVATE BMA_IMPL BMA_CMDSL_TEST)
 
 add_executable(test_fs src/bma/fs.h)
-target_compile_definitions(test_fs PRIVATE BMA_CCAL_IMPL BMA_UTILS_IMPL BMA_FS_IMPL BMA_FS_TEST)
+target_compile_definitions(test_fs PRIVATE BMA_IMPL BMA_FS_TEST)
 
 add_executable(test_log src/bma/log.h)
-target_compile_definitions(test_log PRIVATE BMA_CCAL_IMPL BMA_THRD_IMPL BMA_LOG_IMPL BMA_LOG_TEST)
+target_compile_definitions(test_log PRIVATE BMA_IMPL BMA_LOG_TEST)
 
 add_executable(test_nj src/bma/nj.h)
-target_compile_definitions(test_nj PRIVATE BMA_CCAL_IMPL BMA_NJ_IMPL BMA_NJ_TEST)
+target_compile_definitions(test_nj PRIVATE BMA_IMPL BMA_NJ_TEST)
 
 add_executable(test_thrd src/bma/thrd.h)
-target_compile_definitions(test_thrd PRIVATE BMA_CCAL_IMPL BMA_THRD_IMPL BMA_THRD_TEST)
+target_compile_definitions(test_thrd PRIVATE BMA_IMPL BMA_THRD_TEST)
 
 add_executable(test_utils src/bma/utils.h)
-target_compile_definitions(test_utils PRIVATE BMA_CCAL_IMPL BMA_UTILS_IMPL BMA_UTILS_TEST)
+target_compile_definitions(test_utils PRIVATE BMA_IMPL BMA_UTILS_TEST)
+
+add_executable(bauma src/bma/main.c)
 
 enable_testing()
 

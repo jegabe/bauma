@@ -57,7 +57,7 @@ BMA_DEF bma_bool_t bma_isFile(const char *pPath);
 	} /* extern "C" */
 #endif
 
-#ifdef BMA_FS_IMPL
+#if (defined(BMA_FS_IMPL) || defined(BMA_IMPL))
 
 #if BMA_IS_WINDOWS
 	#include <bma/win.h>
@@ -246,7 +246,7 @@ BMA_DEF bma_bool_t bma_isFile(const char *pPath) {
 	} /* extern "C" */
 #endif
 
-#endif /* BMA_FS_IMPLEMENTATION */
+#endif /* BMA_FS_IMPL || BMA_IMPL */
 
 #ifdef BMA_FS_TEST
 

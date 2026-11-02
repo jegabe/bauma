@@ -172,7 +172,7 @@ BMA_DEF void bma_Log_addCnslSink(const char* pPath, bma_LogLevel level);
 	} /* extern "C" */
 #endif
 
-#ifdef BMA_LOG_IMPL
+#if (defined(BMA_LOG_IMPL) || defined(BMA_IMPL))
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -580,7 +580,7 @@ BMA_DEF void bma_Log_addCnslSink(const char* pPath, bma_LogLevel level) {
 	} /* extern "C" */
 #endif
 
-#endif /* BMA_LOG_IMPL */
+#endif /* BMA_LOG_IMPL || BMA_IMPL */
 
 #ifdef BMA_LOG_TEST
 

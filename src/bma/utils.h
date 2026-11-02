@@ -95,7 +95,7 @@ BMA_DEF char *bma_wStrDup(const wchar_t *pStr);
 	} /* extern "C" */
 #endif
 
-#ifdef BMA_UTILS_IMPL
+#if (defined(BMA_UTILS_IMPL) || defined(BMA_IMPL))
 
 #include <wchar.h>
 
@@ -575,7 +575,7 @@ BMA_DEF char *bma_wStrDup(const wchar_t *pStr) {
 	} /* extern "C" */
 #endif
 
-#endif /* BMA_UTILS_IMPL */
+#endif /* BMA_UTILS_IMPL || BMA_IMPL */
 
 #ifdef BMA_UTILS_TEST
 

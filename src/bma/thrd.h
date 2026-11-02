@@ -250,7 +250,7 @@ BMA_DEF void bma_sleepMs(unsigned int ms);
 	} /* extern "C" */
 #endif
 
-#ifdef BMA_THRD_IMPL
+#if (defined(BMA_THRD_IMPL) || defined(BMA_IMPL))
 
 #ifdef __cplusplus
 	extern "C" {
@@ -701,7 +701,7 @@ BMA_DEF void bma_sleepMs(unsigned int ms) {
 	} /* extern "C" */
 #endif
 
-#endif /* BMA_LOG_IMPL */
+#endif /* BMA_THRD_IMPL || BMA_IMPL */
 
 #ifdef BMA_THRD_TEST
 

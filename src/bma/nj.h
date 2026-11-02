@@ -295,7 +295,7 @@ BMA_DEF void bma_njToStr_ext(bma_StrBldr *pDst, bma_NjNode *pNode, bma_NjDialect
 	} /* extern "C" */
 #endif
 
-#ifdef BMA_NJ_IMPL
+#if defined(BMA_NJ_IMPL) || defined(BMA_IMPL)
 
 #include <string.h>
 #include <stdlib.h>
@@ -1339,7 +1339,7 @@ BMA_DEF void bma_njToStr_ext(bma_StrBldr *pDst, bma_NjNode *pNode, bma_NjDialect
 	} /* extern "C" */
 #endif
 
-#endif /* BMA_NJ_IMPL */
+#endif /* BMA_NJ_IMPL || BMA_IMPL */
 
 #ifdef BMA_NJ_TEST
 

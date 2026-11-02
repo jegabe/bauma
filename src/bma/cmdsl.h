@@ -160,7 +160,7 @@ BMA_DEF void bma_Cmdsl_freeTmpStrBldr(bma_Cmdsl *pSelf, bma_StrBldr *pTmpStrBldr
 	} /* extern "C" */
 #endif
 
-#ifdef BMA_CMDSL_IMPL
+#if (defined(BMA_CMDSL_IMPL) || defined(BMA_IMPL))
 
 #include <string.h>
 #include <ctype.h>
@@ -1403,7 +1403,7 @@ BMA_DEF void bma_Cmdsl_freeTmpStrBldr(bma_Cmdsl *pSelf, bma_StrBldr *pTmpStrBldr
 	} /* extern "C" */
 #endif
 
-#endif /* BMA_CMDSL_IMPL */
+#endif /* BMA_CMDSL_IMPL || BMA_IMPL */
 
 #ifdef BMA_CMDSL_TEST
 

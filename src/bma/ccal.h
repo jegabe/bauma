@@ -572,9 +572,9 @@ BMA_DEF void bma_Vec_appnd_impl(
 BMA_DEF void bma_Vec_each(bma_Vec *pSelf, bma_each_t pFunc, void *pOptUsrDta);
 
 BMA_DEF bma_bool_t bma_Vec_rmv_impl(bma_Vec *pSelf,
-                                                  size_t index,
-                                                  void *pOptRmvdElem
-                                                  BMA_DBG_OPT_PARAM(const char* pType));
+                                    size_t index,
+                                    void *pOptRmvdElem
+                                    BMA_DBG_OPT_PARAM(const char* pType));
 #define bma_Vec_rmv(pSelf, index, pOptRmvdElem, type) \
 	bma_Vec_rmv_impl(pSelf, index, pOptRmvdElem BMA_DBG_OPT_PARAM(#type))
 
@@ -1431,9 +1431,9 @@ BMA_DEF void bma_Vec_each(bma_Vec *pSelf, bma_each_t pFunc, void *pOptUsrDta) {
 }
 
 BMA_DEF bma_bool_t bma_Vec_rmv_impl(bma_Vec *pSelf,
-                                                  size_t index,
-                                                  void *pOptRmvdElem
-                                                  BMA_DBG_OPT_PARAM(const char* pType)) {
+                                    size_t index,
+                                    void *pOptRmvdElem
+                                    BMA_DBG_OPT_PARAM(const char* pType)) {
 	bma_assert(pSelf != NULL);
 	bma_assert(strcmp(pType, pSelf->pType) == 0);
 	bma_assert(index < pSelf->size);

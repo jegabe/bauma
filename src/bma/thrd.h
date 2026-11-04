@@ -246,6 +246,53 @@ BMA_DEF void bma_Thrd_dtor(bma_Thrd* pSelf, bma_IMemAlloc *pAlloc);
 
 BMA_DEF void bma_sleepMs(unsigned int ms);
 
+/*
+\brief Returns the number of available logic processing cores.
+Never returns a number smaller than 1 */
+BMA_DEF size_t bma_numCores(void);
+
+/*!
+\brief Function type to be executed using bma_prllel.
+The function is called with a pointer to the current task popped from the stack of tasks to process it.
+The function can create sub-tasks by locking pMtx, pushing new tasks onto pTasks and unlocking the mutex again.
+IMPORTANT: The function MUST NOT pop tasks from pTasks, only push new tasks onto it. Popping is done by bma_prllel. But the function
+can observe the size of pTasks periodically (locked by mutex of course) to check if the sub-tasks it pushed had been processed. It should
+never wait for any other thread to process the pushed sub-task; it should attempt to try to periodically pop the pushed sub-tasks
+and process it by itself to no stall the system. If other threads have processed the sub-task, it was just luck.
+For most cases, sub tasks aren't needed and pTsksStackMtx/pTasks should be left untouched.
+The mutex which is injected can be used for two different scenarions:
+- To view into pTasks
+- To synchronize access to pTaskUsrData
+So, when a result needs to be collected, the mutex can also be locked, result written via pTaskUsrData and then unlocked again
+\param pCrrntTask pointer to a task popped from the stack of tasks. The function should never pop items by its own.
+\param pTaskUsrData Optional context passed via pTaskUsrData in bma_prllel
+\param pMtx Mutex which can be either utilized to inspect pTasks or to sync. access to pTaskUsrData
+\param pTasks The remaining tasks. The function can push additional workload (under locked pMtx) but must never attempt to pop items off
+\return BMA_TRUE for successful task execution, BMA_FALSE for errors. In either case, the optional destructor for a task item is run
+        automatically
+*/
+typedef bma_bool_t (*bma_prllel_task_t)(void *pCrrntTask, void *pTaskUsrData, bma_Mtx *pMtx, bma_Vec *pTasks);
+
+/*!
+\brief Execute tasks in parallel using multiple threads, trying to maximize CPU core usage.
+The function pops elements from the pTasks vector (last element first, LIFO)
+and uses multiple threads to process them. The processing
+function is the passed pTaskFunc function. Optional context can be passed through pTaskUsrData
+to the pTaskFunc function. For instance, some common result structure or data can be placed there.
+Once all tasks have finished, the function returns. Once a pTaskFunc returns BMA_FALSE, processing stops and this
+function returns BMA_FALSE as well, possibly leaving pTasks items behind. So, also make sure to call the destructor
+of the pTasks vector properly for clean-up.
+The vector of tasks has undefined element type. This is on purpose: The user can define his own type
+the threads should process.
+When no multithreading is available, this function just processes items sequentially on one core.
+\param pTask Vector used as a stack (LIFO) of work load
+\param pTaskFunc Function for processing a task, potentially called from multiple threads
+\param pTaskUsrData Optional user data passed to pTaskFunc, for instance for collecting the task results
+\param BMA_TRUE when all pTaskFunc calls returned BMA_TRUE. BMA_FALSE when one of the function calls
+       returned BMA_FALSE
+*/
+BMA_DEF bma_bool_t bma_prllel(bma_Vec *pTasks, bma_prllel_task_t pTaskFunc, void *pTaskUsrData);
+
 #ifdef __cplusplus
 	} /* extern "C" */
 #endif
@@ -697,6 +744,132 @@ BMA_DEF void bma_sleepMs(unsigned int ms) {
 	#endif
 }
 
+BMA_DEF size_t bma_numCores(void) {
+	#if BMA_WIN_THRDS
+		DWORD cores = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+		if (cores < 1) cores = 1U;
+		return (size_t)cores;
+	#elif BMA_POSIX_THRDS 
+		long n = sysconf(_SC_NPROCESSORS_ONLN);
+		if (cores < 1) cores = 1U;
+		return (size_t)cores;
+	#else
+		return 1U;
+	#endif
+}
+
+#if BMA_HAS_THRDS
+
+
+BMA_DEF_VEC(bma_ThrdVec, bma_Thrd, (bma_dtor_t)&bma_Thrd_dtor)
+
+typedef struct bmaPrllThrdFncUsrData {
+	bma_Mtx *pMtx;
+	bma_Vec *pTasks;
+	bma_prllel_task_t pTaskFunc;
+	void *pTaskUsrData;
+	bma_bool_t ok;
+} bmaPrllThrdFncUsrData;
+
+/* Thread local buffer to avoid memory allocation in bma_prllel_thrd_fnc */
+#define BMA_PRLL_THRD_CRRNT_TASK_PREALLOC_SZ (32U * sizeof(size_t)) /* 32 words approx. */
+
+static void bma_prllel_thrd_fnc(void *pUsrData) {
+	union Buf {
+		bma_max_align_t aligner;
+		char data[BMA_PRLL_THRD_CRRNT_TASK_PREALLOC_SZ];
+	} buf;
+	bmaPrllThrdFncUsrData *pData = (bmaPrllThrdFncUsrData *)(pUsrData);
+	bma_IMemAlloc *pAlloc;
+	void *pCrrntTask;
+	bma_bool_t ok;
+	bma_bool_t hasTsk;
+	bma_assert(pData != NULL);
+	bma_assert(pData->pMtx != NULL);
+	bma_assert(pData->pTasks != NULL);
+	bma_assert(pData->pTaskFunc != NULL);
+	pAlloc = bma_getDfltMemAlloc();
+	if (pData->pTasks->elemSz <= sizeof(buf)) {
+		/* stack buffer sufficient */
+		pCrrntTask = bma_lndr_cast(void, &buf);
+	}
+	else {
+		/* need heap because buf not sufficient */
+		pCrrntTask = (pAlloc->pRllc)(pAlloc, NULL, pData->pTasks->elemSz, NULL);
+	}
+	for (;;) {
+		/* begin locked section */
+		bma_Mtx_lck(pData->pMtx);
+		ok = pData->ok;
+		hasTsk = (bma_Vec_getSz(pData->pTasks) > 0);
+		if (ok && hasTsk) {
+			/* Pop next task of the stack into pCrrntTask */
+			bma_Vec_rmv_impl(pData->pTasks,
+			                 bma_Vec_getSz(pData->pTasks) - 1U,
+			                 pCrrntTask
+			                 BMA_DBG_OPT_PARAM(pData->pTasks->pType));
+		}
+		bma_Mtx_unlck(pData->pMtx);
+		/* end locked section */
+		if ((!hasTsk) || (!ok)) {
+			goto out;
+		}
+		/* Must be executed outside mutex lock */
+		ok = (pData->pTaskFunc)(pCrrntTask, pData->pTaskUsrData, pData->pMtx, pData->pTasks);
+		if (pData->pTasks->pElemDtor != NULL) {
+			(*pData->pTasks->pElemDtor)(pCrrntTask, pData->pTasks->pAlloc);
+		}
+		if (!ok) {
+			/* begin locked section */
+			bma_Mtx_lck(pData->pMtx);
+			pData->ok = BMA_FALSE;
+			bma_Mtx_unlck(pData->pMtx);
+			/* end locked section */
+			goto out;
+		}
+	}
+
+out:
+	if (pCrrntTask != bma_lndr_cast(void, &buf)) {
+		/* Not on stack: dealloc. heap mem. */
+		(*pAlloc->pRllc)(pAlloc, pCrrntTask, 0, NULL);
+	}
+}
+
+#endif
+
+BMA_DEF bma_bool_t bma_prllel(bma_Vec *pTasks, bma_prllel_task_t pTaskFunc, void *pTaskUsrData) {
+	size_t i;
+	size_t numCores;
+	bma_ThrdVec thrds;
+	bmaPrllThrdFncUsrData thrdUsrData;
+	bma_Mtx mtx;
+	bma_assert(pTasks != NULL);
+	bma_assert(pTaskFunc != NULL);
+	bma_Mtx_ctor(&mtx);
+	numCores = (bma_numCores() - 1U); /* -1: Current thread also used for processing tasks */
+	thrdUsrData.pMtx = &mtx;
+	thrdUsrData.pTasks = pTasks;
+	thrdUsrData.pTaskFunc = pTaskFunc;
+	thrdUsrData.pTaskUsrData = pTaskUsrData;
+	thrdUsrData.ok = BMA_TRUE;
+	bma_ThrdVec_ctor(&thrds);
+	bma_ThrdVec_rsrv(&thrds, numCores);
+	for (i=0; i<numCores; ++i) {
+		bma_Thrd thrd;
+		bma_Thrd_ctor(&thrd, &bma_prllel_thrd_fnc, &thrdUsrData);
+		bma_ThrdVec_appnd(&thrds, &thrd);
+	}
+	/* now also use the current thread to process tasks */
+	bma_prllel_thrd_fnc(&thrdUsrData);
+	/* This calls the threads destructors which joins all threads,
+           so it only returns when everything's done */
+	bma_ThrdVec_dtor(&thrds, NULL);
+	bma_Mtx_dtor(&mtx, NULL);
+        /* All extra threads gone now, so it is safe to access the "ok" field */
+	return thrdUsrData.ok;
+}
+
 #ifdef __cplusplus
 	} /* extern "C" */
 #endif
@@ -842,6 +1015,39 @@ void test_mtx(void) {
 	#endif
 }
 
+static bma_bool_t test_prllel_process(void *pCrrntTask, void *pTaskUsrData, bma_Mtx *pMtx, bma_Vec *pTasks) {
+	int* pInt = (int *)pCrrntTask;
+	int* pResult = (int *)pTaskUsrData;
+	(void)pTasks;
+	bma_Mtx_lck(pMtx);
+	*pResult += *pInt;
+	bma_Mtx_unlck(pMtx);
+	return BMA_TRUE;
+}
+
+void test_prllel(void) {
+#define BMA_NUM 1000
+	bma_bool_t ok;
+	bma_Vec ints;
+	int i;
+	int result = 0;
+	int expected = 0;
+	for (i=0; i<BMA_NUM; ++i) {
+		expected += i;
+	}
+	bma_Vec_ctor(&ints, int, NULL);
+	for (i=0; i<BMA_NUM; ++i) {
+		bma_Vec_appnd(&ints, int, &i);
+	}
+	/* sum all ints in the vec using multiple threads */
+	ok = bma_prllel(&ints, &test_prllel_process, &result);
+	BMA_EXPECT(ok);
+	BMA_EXPECT(bma_Vec_getSz(&ints) == 0);
+	bma_Vec_dtor(&ints, NULL);
+	BMA_EXPECT(result == expected);
+#undef BMA_NUM
+}
+
 #ifdef __cplusplus
 	} /* extern "C" */
 #endif
@@ -851,6 +1057,7 @@ int main(int argc, char *argv[]) {
 	(void)argv;
 	BMA_TEST(test_shrd_snglThrd);
 	BMA_TEST(test_mtx);
+	BMA_TEST(test_prllel);
 	printf("All tests passed.\n");
 	fflush(stdout);
 	return 0;

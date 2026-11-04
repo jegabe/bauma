@@ -257,11 +257,8 @@ BMA_DEF size_t bma_numCores(void);
 \brief Function type to be executed using bma_prllel.
 The function is called with a pointer to the current task popped from the stack of tasks to process it.
 The function can create sub-tasks by locking pMtx, pushing new tasks onto pTasks and unlocking the mutex again.
-IMPORTANT: The function MUST NOT pop existing tasks from pTasks, only push new tasks onto it or pop ones which it has pushed before.
-The function can observe the size of pTasks (locked by mutex of course) to check if the sub-tasks it pushed had been processed. It should
-never wait for any other thread to process the pushed sub-task; it should attempt to try to periodically pop the pushed sub-tasks
-and process it by itself to no stall the system. If other threads have processed the sub-task, it was just luck.
-For most cases, sub tasks aren't needed and pTsksStackMtx/pTasks should be left untouched.
+If it does so, it should also attempt to work on the newest task pushed onto the stack for the case no other thread is
+ready.
 The mutex which is injected can be used for two different scenarions:
 - To view into pTasks vector to push new tasks or to pop tasks the function has pushed before
 - To synchronize access to pTaskUsrData
@@ -843,32 +840,39 @@ out:
 BMA_DEF bma_bool_t bma_prllel(bma_Vec *pTasks, bma_prllel_task_t pTaskFunc, void *pTaskUsrData) {
 	size_t i;
 	size_t numCores;
+	size_t numThrds;
 	bma_ThrdVec thrds;
 	bmaPrllThrdFncUsrData thrdUsrData;
 	bma_Mtx mtx;
 	bma_assert(pTasks != NULL);
 	bma_assert(pTaskFunc != NULL);
 	bma_Mtx_ctor(&mtx);
-	numCores = (bma_numCores() - 1U); /* -1: Current thread also used for processing tasks */
+	numCores = bma_numCores();
+	bma_assert(numCores > 0);
 	thrdUsrData.pMtx = &mtx;
 	thrdUsrData.pTasks = pTasks;
 	thrdUsrData.pTaskFunc = pTaskFunc;
 	thrdUsrData.pTaskUsrData = pTaskUsrData;
 	thrdUsrData.ok = BMA_TRUE;
 	bma_ThrdVec_ctor(&thrds);
-	bma_ThrdVec_rsrv(&thrds, numCores);
-	for (i=0; i<numCores; ++i) {
-		bma_Thrd thrd;
-		bma_Thrd_ctor(&thrd, &bma_prllel_thrd_fnc, &thrdUsrData);
-		bma_ThrdVec_appnd(&thrds, &thrd);
+	while(thrdUsrData.ok && (bma_Vec_getSz(pTasks) > 0)) {
+		/* -1 because the current thread will also do work */
+		numThrds = bma_min(numCores, (bma_Vec_getSz(pTasks))) - 1U;
+		bma_ThrdVec_rsrv(&thrds, numCores);
+		for (i=0; i<numThrds; ++i) {
+			bma_Thrd thrd;
+			bma_Thrd_ctor(&thrd, &bma_prllel_thrd_fnc, &thrdUsrData);
+			bma_ThrdVec_appnd(&thrds, &thrd);
+		}
+		/* now also use the current thread to process tasks */
+		bma_prllel_thrd_fnc(&thrdUsrData);
+		/* This calls the threads destructors which joins all threads,
+		   so it only returns when everything's done */
+		bma_ThrdVec_clear(&thrds);
 	}
-	/* now also use the current thread to process tasks */
-	bma_prllel_thrd_fnc(&thrdUsrData);
-	/* This calls the threads destructors which joins all threads,
-           so it only returns when everything's done */
 	bma_ThrdVec_dtor(&thrds, NULL);
 	bma_Mtx_dtor(&mtx, NULL);
-        /* All extra threads gone now, so it is safe to access the "ok" field */
+	/* All extra threads gone now, so it is safe to access the "ok" field */
 	return thrdUsrData.ok;
 }
 
@@ -1050,80 +1054,106 @@ void test_prllel_addInts(void) {
 #undef BMA_NUM
 }
 
-static size_t bma_intHash(const void *pInt) {
-	return (size_t)*(const int*)pInt;
+static size_t bma_longHash(const void *pLong) {
+	return (size_t)*(const long *)pLong;
 }
 
-static bma_bool_t bma_intEq(const void* pLhs, const void *pRhs) {
-	return (*(const int*)pLhs) == (*(const int*)pRhs);
+static bma_bool_t bma_longEq(const void* pLhs, const void *pRhs) {
+	return (*(const long *)pLhs) == (*(const long *)pRhs);
 }
 
 static bma_bool_t test_fnc_prllel_fbncci(void *pCrrntTask, void *pTaskUsrData, bma_Mtx *pMtx, bma_Vec *pTasks) {
-	int nthFib = *(int*)pCrrntTask;
+	long nthFib = *(int*)pCrrntTask;
+	long nthMin1;
+	long nthMin2;
+	long *pValNthMin1;
+	long *pValNthMin2;
+	size_t i;
+	bma_bool_t hasValue;
 	bma_HshMp* pClcltdFbs = (bma_HshMp*)pTaskUsrData;
 	bma_assert(nthFib >= 0);
 	if ((nthFib >= 0) && (nthFib <= 1)) {
-		/* fib(0) == 0 and fib(1) == 0 */
-		int val = 0;
+		/* fib(0) == 0 and fib(1) == 1 */
 		bma_Mtx_lck(pMtx);
-		bma_HshMp_put(pClcltdFbs, &nthFib, &val, int, int);
+		bma_HshMp_put(pClcltdFbs, &nthFib, &nthFib, long, long);
 		bma_Mtx_unlck(pMtx);
+		return BMA_TRUE;
 	}
-	else {
-		size_t oldTasksSz;
-		int nMin2 = (nthFib - 2);
-		int nMin1 = (nthFib - 1);
-		bma_Mtx_lck(pMtx);
-		oldTasksSz = bma_Vec_getSz(pTasks);
-		if (bma_HshMp_get(pClcltdFbs, &nMin2, int, int) == NULL) {
-			/* no other thread has calculated fib(n-2) yet  */
-			bma_Vec_appnd(pTasks, int, &nMin2);
-		}
-		if (bma_HshMp_get(pClcltdFbs, &nMin1, int, int) == NULL) {
-			/* no other thread has calculated fib(n-1) yet  */
-			bma_Vec_appnd(pTasks, int, &nMin1);
-		}
-		bma_Mtx_unlck(pMtx);
-		for (;;) {
-			bma_Mtx_lck(pMtx);
-			if (bma_Vec_getSz(pTasks) <= oldTasksSz) {
-				/* own sub tasks are done: Fib numbers must have been calculated */
-				int val1;
-				int val2;
-				int sum;
-				val1 = *bma_HshMp_get(pClcltdFbs, &nMin1, int, int);
-				val2 = *bma_HshMp_get(pClcltdFbs, &nMin2, int, int);
-				sum = val1 + val2;
-				bma_HshMp_put(pClcltdFbs, &nthFib, &sum, int, int);
-				bma_Mtx_unlck(pMtx);
-			}
-			else {
-				int subTskFib;
-				bma_Vec_rmv(pTasks, (bma_Vec_getSz(pTasks) - 1U), &subTskFib, int);
-				bma_Mtx_unlck(pMtx);
-				test_fnc_prllel_fbncci(&subTskFib, pTaskUsrData, pMtx, pTasks);
-			}
+	nthMin1 = nthFib - 1;
+	nthMin2 = nthFib - 2;
+	/* To solve the nTh we have to solve the (n-1 th),
+	   so we add that as subtask to show how this all works */
+	bma_Mtx_lck(pMtx);
+	hasValue = BMA_FALSE;
+	for (i=0; i<bma_Vec_getSz(pTasks); ++i) {
+		if (*bma_Vec_at(pTasks, i, long) == nthMin1) {
+			hasValue = BMA_TRUE;
+			break;
 		}
 	}
-	return BMA_TRUE;
+	if (!hasValue) {
+		bma_Vec_appnd(pTasks, long, &nthMin1);
+	}
+	bma_Mtx_unlck(pMtx);
+	for (;;) {
+		/* while other threads are working, this thread can also do work */
+		bma_sleepMs(1);
+		bma_Mtx_lck(pMtx);
+		/* First try to solve the current task before working on subtasks */
+		pValNthMin1 = bma_HshMp_get(pClcltdFbs, &nthMin1, long, long);
+		pValNthMin2 = bma_HshMp_get(pClcltdFbs, &nthMin2, long, long);
+		if ((pValNthMin1 != NULL) && (pValNthMin2 != NULL)) {
+			/* task now solvable */
+			long sum = *pValNthMin1 + *pValNthMin2;
+			bma_HshMp_put(pClcltdFbs, &nthFib, &sum, long, long);
+			bma_Mtx_unlck(pMtx);
+			/* This job is done */
+			return BMA_TRUE;
+		}
+		if (nthFib == 2u) {
+			bma_HshMp_put(pClcltdFbs, &nthMin2, &nthMin2, long, long);
+			bma_HshMp_put(pClcltdFbs, &nthMin1, &nthMin1, long, long);
+			bma_Mtx_unlck(pMtx);
+			continue;
+		}
+		if (bma_Vec_getSz(pTasks) > 0) {
+			long subTsk;
+			/* pop sub-task from stack and work on it */
+			bma_Vec_rmv(pTasks, (bma_Vec_getSz(pTasks) - 1U), &subTsk, long);
+			bma_Mtx_unlck(pMtx);
+			bma_sleepMs(1);
+			test_fnc_prllel_fbncci(&subTsk, pTaskUsrData, pMtx, pTasks);
+		}
+		else {
+			bma_Mtx_unlck(pMtx);
+			/* no work to do but have to wait for others to finish their work */
+			bma_sleepMs(1);
+		}
+	}
+	return BMA_TRUE; /* NOLINT: Unreachable code */
 }
 
 void test_prllel_fbncci(void) {
-#define BMA_NUM 7 /* th fibonacci number to calculate */
+	/*
+	A really bad and horrible way of calculating fibs, but
+	this shows how a task can add sub-tasks while executing one,
+	collaborating with other threads to solve a problem
+	*/
+#define BMA_NUM 40 /* th fibonacci number to calculate */
 	bma_bool_t ok;
 	bma_Vec tasks;
 	bma_HshMp clcltdFibs;
-	int i;
-	int result = 0;
-	bma_Vec_ctor(&tasks, int, NULL);
+	long i;
+	bma_Vec_ctor(&tasks, long, NULL);
 	/* Hashmap of already calculated fibonacci numbers */
-	bma_HshMp_ctor(&clcltdFibs, int, int, NULL, NULL, &bma_intHash, &bma_intEq);
+	bma_HshMp_ctor(&clcltdFibs, long, long, NULL, NULL, &bma_longHash, &bma_longEq);
 	i = BMA_NUM;
-	bma_Vec_appnd(&tasks, int, &i); /* task is calculating that fibonacci number */
+	bma_Vec_appnd(&tasks, long, &i); /* task is calculating that fibonacci number */
 	ok = bma_prllel(&tasks, &test_fnc_prllel_fbncci, &clcltdFibs);
 	BMA_EXPECT(ok);
+	BMA_EXPECT(bma_HshMp_getSz(&clcltdFibs) == (BMA_NUM + 1));
 	for (i=0; i<=BMA_NUM; ++i) {
-		int *pVal = bma_HshMp_get(&clcltdFibs, &i, int, int);
+		int *pVal = bma_HshMp_get(&clcltdFibs, &i, long, long);
 		BMA_EXPECT(pVal != NULL);
 		printf("Fib. nr. %d is %d\n", i, *pVal);
 	}

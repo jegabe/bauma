@@ -31,6 +31,7 @@ Bau 'ma's basic multithreading support
 #include <bma/ccal.h>
 
 #include "cmdsl.h"
+#include "cmdsl.h"
 
 #if BMA_IS_WINDOWS
 	#define BMA_HAS_THRDS 1
@@ -839,7 +840,6 @@ out:
 
 BMA_DEF bma_bool_t bma_prllel(bma_Vec *pTasks, bma_prllel_task_t pTaskFunc, void *pTaskUsrData) {
 	size_t i;
-	size_t numCores;
 	size_t numThrds;
 	bma_ThrdVec thrds;
 	bmaPrllThrdFncUsrData thrdUsrData;
@@ -847,8 +847,7 @@ BMA_DEF bma_bool_t bma_prllel(bma_Vec *pTasks, bma_prllel_task_t pTaskFunc, void
 	bma_assert(pTasks != NULL);
 	bma_assert(pTaskFunc != NULL);
 	bma_Mtx_ctor(&mtx);
-	numCores = bma_numCores();
-	bma_assert(numCores > 0);
+	numThrds = bma_numCores() - 1U; /* -1 because the current thread will also do work */
 	thrdUsrData.pMtx = &mtx;
 	thrdUsrData.pTasks = pTasks;
 	thrdUsrData.pTaskFunc = pTaskFunc;
@@ -857,8 +856,7 @@ BMA_DEF bma_bool_t bma_prllel(bma_Vec *pTasks, bma_prllel_task_t pTaskFunc, void
 	bma_ThrdVec_ctor(&thrds);
 	while(thrdUsrData.ok && (bma_Vec_getSz(pTasks) > 0)) {
 		/* -1 because the current thread will also do work */
-		numThrds = bma_min(numCores, (bma_Vec_getSz(pTasks))) - 1U;
-		bma_ThrdVec_rsrv(&thrds, numCores);
+		bma_ThrdVec_rsrv(&thrds, numThrds);
 		for (i=0; i<numThrds; ++i) {
 			bma_Thrd thrd;
 			bma_Thrd_ctor(&thrd, &bma_prllel_thrd_fnc, &thrdUsrData);
@@ -1152,10 +1150,24 @@ void test_prllel_fbncci(void) {
 	ok = bma_prllel(&tasks, &test_fnc_prllel_fbncci, &clcltdFibs);
 	BMA_EXPECT(ok);
 	BMA_EXPECT(bma_HshMp_getSz(&clcltdFibs) == (BMA_NUM + 1));
+	expected = 0;
+	/* Check if calculation was done right */
 	for (i=0; i<=BMA_NUM; ++i) {
-		int *pVal = bma_HshMp_get(&clcltdFibs, &i, long, long);
+		long expected;
+		switch(i) {
+		case 0: expected = 0; break;
+		case 1: expected = 1; break;
+		default: {
+			long iMin1 = i - 1;
+			long iMin2 = i - 2;
+			expected = *bma_HshMp_get(&clcltdFibs, &iMin1, long, long) + 
+				   *bma_HshMp_get(&clcltdFibs, &iMin2, long, long);
+			break;
+		}
+		}
+		long *pVal = bma_HshMp_get(&clcltdFibs, &i, long, long);
 		BMA_EXPECT(pVal != NULL);
-		printf("Fib. nr. %d is %d\n", i, *pVal);
+		BMA_EXPECT(*pVal == expected);
 	}
 	bma_HshMp_dtor(&clcltdFibs, NULL);
 	bma_Vec_dtor(&tasks, NULL);

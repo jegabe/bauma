@@ -30,6 +30,8 @@ Bau 'ma's basic multithreading support
 */
 #include <bma/ccal.h>
 
+#include "cmdsl.h"
+
 #if BMA_IS_WINDOWS
 	#define BMA_HAS_THRDS 1
 	#define BMA_WIN_THRDS 1
@@ -255,13 +257,13 @@ BMA_DEF size_t bma_numCores(void);
 \brief Function type to be executed using bma_prllel.
 The function is called with a pointer to the current task popped from the stack of tasks to process it.
 The function can create sub-tasks by locking pMtx, pushing new tasks onto pTasks and unlocking the mutex again.
-IMPORTANT: The function MUST NOT pop tasks from pTasks, only push new tasks onto it. Popping is done by bma_prllel. But the function
-can observe the size of pTasks periodically (locked by mutex of course) to check if the sub-tasks it pushed had been processed. It should
+IMPORTANT: The function MUST NOT pop existing tasks from pTasks, only push new tasks onto it or pop ones which it has pushed before.
+The function can observe the size of pTasks (locked by mutex of course) to check if the sub-tasks it pushed had been processed. It should
 never wait for any other thread to process the pushed sub-task; it should attempt to try to periodically pop the pushed sub-tasks
 and process it by itself to no stall the system. If other threads have processed the sub-task, it was just luck.
 For most cases, sub tasks aren't needed and pTsksStackMtx/pTasks should be left untouched.
 The mutex which is injected can be used for two different scenarions:
-- To view into pTasks
+- To view into pTasks vector to push new tasks or to pop tasks the function has pushed before
 - To synchronize access to pTaskUsrData
 So, when a result needs to be collected, the mutex can also be locked, result written via pTaskUsrData and then unlocked again
 \param pCrrntTask pointer to a task popped from the stack of tasks. The function should never pop items by its own.
@@ -1015,7 +1017,7 @@ void test_mtx(void) {
 	#endif
 }
 
-static bma_bool_t test_prllel_process(void *pCrrntTask, void *pTaskUsrData, bma_Mtx *pMtx, bma_Vec *pTasks) {
+static bma_bool_t test_fnc_prllel_addInts(void *pCrrntTask, void *pTaskUsrData, bma_Mtx *pMtx, bma_Vec *pTasks) {
 	int* pInt = (int *)pCrrntTask;
 	int* pResult = (int *)pTaskUsrData;
 	(void)pTasks;
@@ -1025,7 +1027,7 @@ static bma_bool_t test_prllel_process(void *pCrrntTask, void *pTaskUsrData, bma_
 	return BMA_TRUE;
 }
 
-void test_prllel(void) {
+void test_prllel_addInts(void) {
 #define BMA_NUM 1000
 	bma_bool_t ok;
 	bma_Vec ints;
@@ -1040,13 +1042,97 @@ void test_prllel(void) {
 		bma_Vec_appnd(&ints, int, &i);
 	}
 	/* sum all ints in the vec using multiple threads */
-	ok = bma_prllel(&ints, &test_prllel_process, &result);
+	ok = bma_prllel(&ints, &test_fnc_prllel_addInts, &result);
 	BMA_EXPECT(ok);
 	BMA_EXPECT(bma_Vec_getSz(&ints) == 0);
 	bma_Vec_dtor(&ints, NULL);
 	BMA_EXPECT(result == expected);
 #undef BMA_NUM
 }
+
+static size_t bma_intHash(const void *pInt) {
+	return (size_t)*(const int*)pInt;
+}
+
+static bma_bool_t bma_intEq(const void* pLhs, const void *pRhs) {
+	return (*(const int*)pLhs) == (*(const int*)pRhs);
+}
+
+static bma_bool_t test_fnc_prllel_fbncci(void *pCrrntTask, void *pTaskUsrData, bma_Mtx *pMtx, bma_Vec *pTasks) {
+	int nthFib = *(int*)pCrrntTask;
+	bma_HshMp* pClcltdFbs = (bma_HshMp*)pTaskUsrData;
+	bma_assert(nthFib >= 0);
+	if ((nthFib >= 0) && (nthFib <= 1)) {
+		/* fib(0) == 0 and fib(1) == 0 */
+		int val = 0;
+		bma_Mtx_lck(pMtx);
+		bma_HshMp_put(pClcltdFbs, &nthFib, &val, int, int);
+		bma_Mtx_unlck(pMtx);
+	}
+	else {
+		size_t oldTasksSz;
+		int nMin2 = (nthFib - 2);
+		int nMin1 = (nthFib - 1);
+		bma_Mtx_lck(pMtx);
+		oldTasksSz = bma_Vec_getSz(pTasks);
+		if (bma_HshMp_get(pClcltdFbs, &nMin2, int, int) == NULL) {
+			/* no other thread has calculated fib(n-2) yet  */
+			bma_Vec_appnd(pTasks, int, &nMin2);
+		}
+		if (bma_HshMp_get(pClcltdFbs, &nMin1, int, int) == NULL) {
+			/* no other thread has calculated fib(n-1) yet  */
+			bma_Vec_appnd(pTasks, int, &nMin1);
+		}
+		bma_Mtx_unlck(pMtx);
+		for (;;) {
+			bma_Mtx_lck(pMtx);
+			if (bma_Vec_getSz(pTasks) <= oldTasksSz) {
+				/* own sub tasks are done: Fib numbers must have been calculated */
+				int val1;
+				int val2;
+				int sum;
+				val1 = *bma_HshMp_get(pClcltdFbs, &nMin1, int, int);
+				val2 = *bma_HshMp_get(pClcltdFbs, &nMin2, int, int);
+				sum = val1 + val2;
+				bma_HshMp_put(pClcltdFbs, &nthFib, &sum, int, int);
+				bma_Mtx_unlck(pMtx);
+			}
+			else {
+				int subTskFib;
+				bma_Vec_rmv(pTasks, (bma_Vec_getSz(pTasks) - 1U), &subTskFib, int);
+				bma_Mtx_unlck(pMtx);
+				test_fnc_prllel_fbncci(&subTskFib, pTaskUsrData, pMtx, pTasks);
+			}
+		}
+	}
+	return BMA_TRUE;
+}
+
+void test_prllel_fbncci(void) {
+#define BMA_NUM 7 /* th fibonacci number to calculate */
+	bma_bool_t ok;
+	bma_Vec tasks;
+	bma_HshMp clcltdFibs;
+	int i;
+	int result = 0;
+	bma_Vec_ctor(&tasks, int, NULL);
+	/* Hashmap of already calculated fibonacci numbers */
+	bma_HshMp_ctor(&clcltdFibs, int, int, NULL, NULL, &bma_intHash, &bma_intEq);
+	i = BMA_NUM;
+	bma_Vec_appnd(&tasks, int, &i); /* task is calculating that fibonacci number */
+	ok = bma_prllel(&tasks, &test_fnc_prllel_fbncci, &clcltdFibs);
+	BMA_EXPECT(ok);
+	for (i=0; i<=BMA_NUM; ++i) {
+		int *pVal = bma_HshMp_get(&clcltdFibs, &i, int, int);
+		BMA_EXPECT(pVal != NULL);
+		printf("Fib. nr. %d is %d\n", i, *pVal);
+	}
+	bma_HshMp_dtor(&clcltdFibs, NULL);
+	bma_Vec_dtor(&tasks, NULL);
+#undef BMA_NUM
+}
+
+
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -1057,7 +1143,8 @@ int main(int argc, char *argv[]) {
 	(void)argv;
 	BMA_TEST(test_shrd_snglThrd);
 	BMA_TEST(test_mtx);
-	BMA_TEST(test_prllel);
+	BMA_TEST(test_prllel_addInts);
+	BMA_TEST(test_prllel_fbncci);
 	printf("All tests passed.\n");
 	fflush(stdout);
 	return 0;

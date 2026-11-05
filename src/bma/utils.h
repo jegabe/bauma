@@ -36,11 +36,13 @@ Random utils
 
 /*!
 \brief Type for representing the type of a scanned #include statement.
-The version with brackets means: Scan system include paths first, then
-the passed include directories and lastly relative to the current file;
-The version with double quote means: Never relative to the current file,
-but: Scan the passed include directories first, then look at the system include paths.
-This is the same as the C/C++ compiler behavior.
+The version with angle brackets (BMA_SCNND_INCLD_STMT_TYPE_SYS_FIRST)
+means: Scan system include paths first, then
+the passed include directories and NEVER relative to the current file;
+The version with double quote (BMA_SCNND_INCLD_STMT_TYPE_LOCAL_FIRST)
+means: First try relative to the current file,
+then scan the passed include directories first and lastly look at the system include paths.
+This is the same as the usual C/C++ compiler behavior.
 */
 typedef unsigned int bma_IncldStmtType;
 

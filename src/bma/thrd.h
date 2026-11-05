@@ -284,14 +284,23 @@ function returns BMA_FALSE as well, possibly leaving pTasks items behind. So, al
 of the pTasks vector properly for clean-up.
 The vector of tasks has undefined element type. This is on purpose: The user can define his own type
 the threads should process.
-When no multithreading is available, this function just processes items sequentially on one core.
-\param pTask Vector used as a stack (LIFO) of work load
+When no multithreading is available, this function just processes items sequentially on one thread.
+The pTaskFunc is also allowed to put additional work items on the stack when locking the passed mutex,
+but then has to ensure that it also will pop work items when there is free time. Regardless of that,
+the current work task (first parameter) must be worked on.
+\param pTasks Vector used as a stack (LIFO) of work load. Can be of any type, only pTaskFunc needs
+       to be able to deal with the exact type
 \param pTaskFunc Function for processing a task, potentially called from multiple threads
 \param pTaskUsrData Optional user data passed to pTaskFunc, for instance for collecting the task results
-\param BMA_TRUE when all pTaskFunc calls returned BMA_TRUE. BMA_FALSE when one of the function calls
+\param canWrkIncrse If BMA_TRUE, this indicates that pTaskFunc might add additional work items to the stack and
+       so this function attempts to allocate as many threads as possible, even if only few (less) work items
+       are on the stack. If BMA_FALSE, the function only allocates as many threads as needed to perform the task,
+       e.g. for two work items on the stack only one additional thread to the current one. For most cases,
+       BMA_FALSE will be the right value to pass.
+\return BMA_TRUE when all pTaskFunc calls returned BMA_TRUE. BMA_FALSE when one of the function calls
        returned BMA_FALSE
 */
-BMA_DEF bma_bool_t bma_prllel(bma_Vec *pTasks, bma_prllel_task_t pTaskFunc, void *pTaskUsrData);
+BMA_DEF bma_bool_t bma_prllel(bma_Vec *pTasks, bma_prllel_task_t pTaskFunc, void *pTaskUsrData, bma_bool_t canWrkIncrse);
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -838,8 +847,9 @@ out:
 
 #endif
 
-BMA_DEF bma_bool_t bma_prllel(bma_Vec *pTasks, bma_prllel_task_t pTaskFunc, void *pTaskUsrData) {
+BMA_DEF bma_bool_t bma_prllel(bma_Vec *pTasks, bma_prllel_task_t pTaskFunc, void *pTaskUsrData, bma_bool_t canWrkIncrse) {
 	size_t i;
+	size_t numCores;
 	size_t numThrds;
 	bma_ThrdVec thrds;
 	bmaPrllThrdFncUsrData thrdUsrData;
@@ -847,7 +857,7 @@ BMA_DEF bma_bool_t bma_prllel(bma_Vec *pTasks, bma_prllel_task_t pTaskFunc, void
 	bma_assert(pTasks != NULL);
 	bma_assert(pTaskFunc != NULL);
 	bma_Mtx_ctor(&mtx);
-	numThrds = bma_numCores() - 1U; /* -1 because the current thread will also do work */
+	numCores = bma_numCores();
 	thrdUsrData.pMtx = &mtx;
 	thrdUsrData.pTasks = pTasks;
 	thrdUsrData.pTaskFunc = pTaskFunc;
@@ -856,6 +866,15 @@ BMA_DEF bma_bool_t bma_prllel(bma_Vec *pTasks, bma_prllel_task_t pTaskFunc, void
 	bma_ThrdVec_ctor(&thrds);
 	while(thrdUsrData.ok && (bma_Vec_getSz(pTasks) > 0)) {
 		/* -1 because the current thread will also do work */
+		if (canWrkIncrse) {
+			/* Possibly more additional threads than work items,
+			   ignoring size of pTasks */
+			numThrds = numCores - 1U;
+		}
+		else {
+			/* Only what is meaningful */
+			numThrds = bma_min(numCores, bma_Vec_getSz(pTasks)) - 1U;
+		}
 		bma_ThrdVec_rsrv(&thrds, numThrds);
 		for (i=0; i<numThrds; ++i) {
 			bma_Thrd thrd;
@@ -1026,6 +1045,7 @@ static bma_bool_t test_fnc_prllel_addInts(void *pCrrntTask, void *pTaskUsrData, 
 	bma_Mtx_lck(pMtx);
 	*pResult += *pInt;
 	bma_Mtx_unlck(pMtx);
+	bma_sleepMs(1);
 	return BMA_TRUE;
 }
 
@@ -1044,7 +1064,7 @@ void test_prllel_addInts(void) {
 		bma_Vec_appnd(&ints, int, &i);
 	}
 	/* sum all ints in the vec using multiple threads */
-	ok = bma_prllel(&ints, &test_fnc_prllel_addInts, &result);
+	ok = bma_prllel(&ints, &test_fnc_prllel_addInts, &result, BMA_FALSE);
 	BMA_EXPECT(ok);
 	BMA_EXPECT(bma_Vec_getSz(&ints) == 0);
 	bma_Vec_dtor(&ints, NULL);
@@ -1147,10 +1167,9 @@ void test_prllel_fbncci(void) {
 	bma_HshMp_ctor(&clcltdFibs, long, long, NULL, NULL, &bma_longHash, &bma_longEq);
 	i = BMA_NUM;
 	bma_Vec_appnd(&tasks, long, &i); /* task is calculating that fibonacci number */
-	ok = bma_prllel(&tasks, &test_fnc_prllel_fbncci, &clcltdFibs);
+	ok = bma_prllel(&tasks, &test_fnc_prllel_fbncci, &clcltdFibs, BMA_TRUE);
 	BMA_EXPECT(ok);
 	BMA_EXPECT(bma_HshMp_getSz(&clcltdFibs) == (BMA_NUM + 1));
-	expected = 0;
 	/* Check if calculation was done right */
 	for (i=0; i<=BMA_NUM; ++i) {
 		long expected;

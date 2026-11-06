@@ -476,13 +476,22 @@ BMA_DEF size_t bma_strTok(char *pStr, const char* pDelim);
 \brief Returns the next token from a tokenized string list.
 Such a string may look like "a\0\0b\0\c\0" and contain the tokens a, b and c.
 Between the tokens, any number of null bytes/characters may appear, which this function skips to find the next token.
-\param pStr The tokenized string to search in.
-\param pLen Pointer to a size_t variable that is set to the full length of the tokenized string (return value)
-            of bma_strTok and will be written/shortened to reflect the remaining length of the string after the current token.
+Usage example:
+\code
+char str[] = "a;b;c";
+char *pStr, *pTok;
+size_t len;
+len = bma_strTok(str, ";");
+pStr = &str[0];
+while ((pTok = bma_strNextTok(&pStr, &len)) != NULL) {
+  ... do sth with pTok
+}
+\endcode
+\param ppStr Pointer to a string pointer, will be incremented to point after the next token after the call
+\param pLen Pointer to a size_t variable that will be adjusted to the remaining string
 \return A pointer to the next token, or NULL if no more tokens are found.
 */
-BMA_DEF char *bma_strNextTok(const char *pStr, size_t* pLen);
-
+BMA_DEF char *bma_strNextTok(char **ppStr, size_t* pLen);
 
 /*!
 \brief Returns pStr if pStr is not NULL, otherwise returns an empty string.
@@ -1180,17 +1189,25 @@ BMA_DEF size_t bma_strTok(char *pStr, const char* pDelim) {
 	return len;
 }
 
-BMA_DEF char *bma_strNextTok(const char *pStr, size_t* pLen) {
-	bma_assert(pStr != NULL);
+BMA_DEF char *bma_strNextTok(char **ppStr, size_t* pLen) {
+	char *pRet;
+	bma_assert(ppStr != NULL);
 	bma_assert(pLen != NULL);
-	while ((*pLen > 0) && (*pStr == '\0')) {
-		++pStr;
+	/* Skip initial nulls */
+	while ((*pLen > 0) && (**ppStr == '\0')) {
+		++(*ppStr);
 		--(*pLen);
 	}
 	if (*pLen == 0) {
 		return NULL;
 	}
-	return (char*)pStr;
+	pRet = *ppStr;
+	/* Skip to the next token, if there is some */
+	while ((*pLen > 0) && (**ppStr != '\0')) {
+		++(*ppStr);
+		--(*pLen);
+	}
+	return pRet;
 }
 
 BMA_DEF const char *bma_getStr(const char *pStr) {
@@ -2383,20 +2400,21 @@ void test_memmem(void) {
 }
 
 void test_strTok(void) {
-	char str[] = "a;b;;:c:";
+	char str[] = ":a;b;;:c:";
 	size_t len;
-	const char *pTok;
+	char *pStr, *pTok;
 	len = bma_strTok(str, ";:");
-	pTok = bma_strNextTok(str, &len);
+	pStr = &str[0];
+	pTok = bma_strNextTok(&pStr, &len);
 	BMA_EXPECT(pTok != NULL);
 	BMA_EXPECT(strcmp(pTok, "a") == 0);
-	pTok = bma_strNextTok(str, &len);
+	pTok = bma_strNextTok(&pStr, &len);
 	BMA_EXPECT(pTok != NULL);
 	BMA_EXPECT(strcmp(pTok, "b") == 0);
-	pTok = bma_strNextTok(str, &len);
+	pTok = bma_strNextTok(&pStr, &len);
 	BMA_EXPECT(pTok != NULL);
 	BMA_EXPECT(strcmp(pTok, "c") == 0);
-	pTok = bma_strNextTok(str, &len);
+	pTok = bma_strNextTok(&pStr, &len);
 	BMA_EXPECT(pTok == NULL);
 }
 

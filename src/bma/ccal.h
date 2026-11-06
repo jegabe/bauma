@@ -458,22 +458,22 @@ BMA_DEF char* bma_strPrintf(const char* pFmt, ...);
 
 /*!
 \brief Tokenizes a string using the specified delimiters which are single characters.
-IPORTANT: This function modifies the string by replacing all characters that match the delimiters with
+IMPORTANT: This function modifies the string by replacing all characters that match the delimiters with
 the '\0' character. This results in many consecutive null terminated substrings which can be accessed individually,
 e.g. with the function bma_strNextTok.
 Example: When calling with the string "a;b:c" and pDelim is set to ";:", the string will be modified to "a\0b\0c"
 and the function will return 5 which is the original string length. When the source string would have been "a;b:c:", the string will be modified to "a\0b\0c\0"
 and the function would return still 5 because a new end marker was introduced, effectively reducing the string by one byte.
-This function  returns the length of the pStr string which needs to be passed to bma_strNextTok to continue tokenization.
+This function returns the length of the pStr string which needs to be passed to bma_strNextTok to continue tokenization.
 \param pStr The string to tokenize. This string will be modified.
 \param pDelim The delimiter string; each character in this string is considered a delimiter.
-\return The length of the original string, possible modified/shortened when additional null chars were insterted
+\return The length of the original string, possible modified/shortened when additional null chars were inserted
         at the end of the source string, effectively reducing its length.
 */
 BMA_DEF size_t bma_strTok(char *pStr, const char* pDelim);
 
 /*!
-\brief Returns the next token from a tokenized string list.
+\brief Returns the next token from a tokenized string previously processed with bma_strTok().
 Such a string may look like "a\0\0b\0\c\0" and contain the tokens a, b and c.
 Between the tokens, any number of null bytes/characters may appear, which this function skips to find the next token.
 Usage example:

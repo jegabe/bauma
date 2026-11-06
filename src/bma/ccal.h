@@ -506,6 +506,7 @@ leads to a smaller string.
 \param pTo replacement, must be smaller or equal in length to pFrom
 \return BMA_TRUE when length of pTo is less or equal to pFrom. BMA_FALSE in all other
         cases, which is that the replacement couldn't be performed.
+        However, when pFrom is an empty string, this function will return BMA_TRUE and do nothing.
         When at compile it can be made sure that BMA_TRUE whould be returned in any case,
         the return value can be ignored.
 */
@@ -521,7 +522,7 @@ BMA_DEF bma_bool_t bma_strRplc(char *pStr, const char *pFrom, const char *pTo);
 \param pAlloc The allocator to be used
 \return A null-terminated copy allocated with pAlloc and filled with the source string where every occurence
         of pFrom has been replaced by pTo.
-        When pFrom is an empty string and pTo isn't, this function returns a NULL pointer as error indicator
+        When pFrom is an empty string, this function just returns a copy of the input string
 */ 
 BMA_DEF char *bma_strRplcDup_ext(const char *pStr, const char *pFrom, const char *pTo, bma_IMemAlloc *pAlloc);
 
@@ -1253,6 +1254,9 @@ BMA_DEF bma_bool_t bma_strRplc(char *pStr, const char *pFrom, const char *pTo) {
 	bma_assert(pTo != NULL);
 	fromLen = strlen(pFrom);
 	toLen = strlen(pTo);
+	if (fromLen == 0) {
+		return BMA_TRUE; /* nothing to replace */
+	}
 	if (toLen > fromLen) {
 		return BMA_FALSE;
 	}
@@ -1273,7 +1277,7 @@ BMA_DEF bma_bool_t bma_strRplc(char *pStr, const char *pFrom, const char *pTo) {
 			len -= rest;
 		}
 		/* jump behind the found substring for the next search */
-		offs = (size_t)((pNeedle + toLen) - pStr);
+		offs = (size_t)(((rest > 0) ? pNeedle : (pNeedle + toLen)) - pStr);
 		pStr += offs;
 		len -= offs;
 	}
@@ -1283,17 +1287,17 @@ BMA_DEF bma_bool_t bma_strRplc(char *pStr, const char *pFrom, const char *pTo) {
 BMA_DEF char *bma_strRplcDup_ext(const char *pStr, const char *pFrom, const char *pTo, bma_IMemAlloc *pAlloc) {
 	size_t len, fromLen, toLen, newLen, offs, origLen;
 	const char *pNeedle, *pOrig;
-	char *pRet;
+	char *pRet, *pRetOrig;
 	bma_assert(pStr != NULL);
 	bma_assert(pFrom != NULL);
 	bma_assert(pTo != NULL);
 	bma_assert(pAlloc != NULL);
+	len = strlen(pStr);
 	fromLen = strlen(pFrom);
 	toLen = strlen(pTo);
-	if ((fromLen == 0) && (toLen > 0)) {
-		return NULL;
+	if (fromLen == 0) {
+		return bma_strndup_ext(pStr, len, pAlloc); /* nothing to replace */
 	}
-	len = strlen(pStr);
 	/* Save initial state */
 	pOrig = pStr;
 	origLen = len;
@@ -1312,13 +1316,14 @@ BMA_DEF char *bma_strRplcDup_ext(const char *pStr, const char *pFrom, const char
 	}
 	/* Allocate memory for new string, +1: also space for null terminator */
 	pRet = (*pAlloc->pRllc)(pAlloc, NULL, (newLen + 1U), NULL);
+	pRetOrig = pRet;
 	pStr = pOrig;
 	len = origLen;
 	while ((pNeedle = (const char *)bma_memmem(pStr, len, pFrom, fromLen)) != NULL) {
 		/* copy all up until needle to pRet */
 		offs = (size_t)(pNeedle - pStr);
 		memcpy(pRet, pStr, offs);
-		pRet += fromLen;
+		pRet += offs;
 		/* copy replacement */
 		memcpy(pRet, pTo, toLen);
 		pRet += toLen;
@@ -1329,7 +1334,7 @@ BMA_DEF char *bma_strRplcDup_ext(const char *pStr, const char *pFrom, const char
 	}
 	/* Maybe there is some leftover at the end. Also copy null terminator from it (+1) */
 	memcpy(pRet, pStr, len + 1U);
-	return pRet;
+	return pRetOrig;
 }
 
 BMA_DEF const char *bma_getStr(const char *pStr) {
@@ -2538,6 +2543,43 @@ void test_strTok(void) {
 	BMA_EXPECT(strcmp(pTok, "c") == 0);
 	pTok = bma_strNextTok(&pStr, &len);
 	BMA_EXPECT(pTok == NULL);
+	{
+		char empty[] = "";
+		len = bma_strTok(empty, ";:");
+		pStr = empty;
+		BMA_EXPECT(len == 0u);
+		BMA_EXPECT(bma_strNextTok(&pStr, &len) == NULL);
+	}
+	{
+		char onlyDelimiters[] = ";::;;";
+		len = bma_strTok(onlyDelimiters, ";:");
+		pStr = onlyDelimiters;
+		BMA_EXPECT(len == 0u);
+		BMA_EXPECT(bma_strNextTok(&pStr, &len) == NULL);
+	}
+	{
+		char noDelimiters[] = "plain";
+		len = bma_strTok(noDelimiters, ";:");
+		pStr = noDelimiters;
+		pTok = bma_strNextTok(&pStr, &len);
+		BMA_EXPECT(len == 0u);
+		BMA_EXPECT(pTok == noDelimiters);
+		BMA_EXPECT(strcmp(pTok, "plain") == 0);
+		BMA_EXPECT(bma_strNextTok(&pStr, &len) == NULL);
+	}
+	{
+		char trailingDelimiters[] = "a;b;;;";
+		len = bma_strTok(trailingDelimiters, ";:");
+		pStr = trailingDelimiters;
+		pTok = bma_strNextTok(&pStr, &len);
+		BMA_EXPECT(pTok == trailingDelimiters);
+		BMA_EXPECT(strcmp(pTok, "a") == 0);
+		pTok = bma_strNextTok(&pStr, &len);
+		BMA_EXPECT(pTok != NULL);
+		BMA_EXPECT(strcmp(pTok, "b") == 0);
+		BMA_EXPECT(len == 0u);
+		BMA_EXPECT(bma_strNextTok(&pStr, &len) == NULL);
+	}
 }
 
 void test_strRplc(void) {
@@ -2553,6 +2595,74 @@ void test_strRplc(void) {
 	memcpy(str, pattern, sizeof(pattern));
 	BMA_EXPECT(bma_strRplc(str, "e", ""));
 	BMA_EXPECT(strcmp(str, "HlloGoodbyHlloGoodbyHllo") == 0);
+	memcpy(str, pattern, sizeof(pattern));
+	BMA_EXPECT(bma_strRplc(str, "missing", "x"));
+	BMA_EXPECT(strcmp(str, pattern) == 0);
+	memcpy(str, pattern, sizeof(pattern));
+	BMA_EXPECT(bma_strRplc(str, "", "x"));
+	BMA_EXPECT(strcmp(str, pattern) == 0);
+	{
+		char adjacent[] = "aaaaa";
+		BMA_EXPECT(bma_strRplc(adjacent, "aa", "b"));
+		BMA_EXPECT(strcmp(adjacent, "bba") == 0);
+	}
+	{
+		char wholeString[] = "remove me";
+		BMA_EXPECT(bma_strRplc(wholeString, "remove me", ""));
+		BMA_EXPECT(strcmp(wholeString, "") == 0);
+	}
+	{
+		char empty[] = "";
+		BMA_EXPECT(bma_strRplc(empty, "x", ""));
+		BMA_EXPECT(strcmp(empty, "") == 0);
+	}
+	memcpy(str, pattern, sizeof(pattern));
+	BMA_EXPECT(!bma_strRplc(str, "e", "longer"));
+	BMA_EXPECT(strcmp(str, pattern) == 0);
+}
+
+void test_strRplcDup(void) {
+	char *p;
+	p = bma_strRplcDup("xxHelloGoodbyeHelloxx", "Hello", "Goodbye");
+	BMA_EXPECT(p != NULL);
+	BMA_EXPECT(strcmp(p, "xxGoodbyeGoodbyeGoodbyexx") == 0);
+	bma_free(p);
+	p = bma_strRplcDup("xxHelloGoodbyeHelloxx", "Goodbye", "Hello");
+	BMA_EXPECT(p != NULL);
+	BMA_EXPECT(strcmp(p, "xxHelloHelloHelloxx") == 0);
+	bma_free(p);
+	p = bma_strRplcDup("xxHelloGoodbyeHelloxx", "", "Hello");
+	BMA_EXPECT(p != NULL);
+	BMA_EXPECT(strcmp(p, "xxHelloGoodbyeHelloxx") == 0);
+	bma_free(p);
+	p = bma_strRplcDup("HelloGoodbyeHello", "o", "ooo");
+	BMA_EXPECT(p != NULL);
+	BMA_EXPECT(strcmp(p, "HelloooGoooooodbyeHellooo") == 0);
+	bma_free(p);
+	p = bma_strRplcDup("unchanged", "missing", "replacement");
+	BMA_EXPECT(p != NULL);
+	BMA_EXPECT(strcmp(p, "unchanged") == 0);
+	bma_free(p);
+	p = bma_strRplcDup("", "x", "replacement");
+	BMA_EXPECT(p != NULL);
+	BMA_EXPECT(strcmp(p, "") == 0);
+	bma_free(p);
+	p = bma_strRplcDup("", "", "replacement");
+	BMA_EXPECT(p != NULL);
+	BMA_EXPECT(strcmp(p, "") == 0);
+	bma_free(p);
+	p = bma_strRplcDup("aaaaa", "aa", "b");
+	BMA_EXPECT(p != NULL);
+	BMA_EXPECT(strcmp(p, "bba") == 0);
+	bma_free(p);
+	p = bma_strRplcDup("delete all", "delete all", "");
+	BMA_EXPECT(p != NULL);
+	BMA_EXPECT(strcmp(p, "") == 0);
+	bma_free(p);
+	p = bma_strRplcDup("xxx", "x", "");
+	BMA_EXPECT(p != NULL);
+	BMA_EXPECT(strcmp(p, "") == 0);
+	bma_free(p);
 }
 
 typedef struct Ints {
@@ -2933,6 +3043,7 @@ int main(int argc, char *argv[]) {
 	BMA_TEST(test_memmem);
 	BMA_TEST(test_strTok);
 	BMA_TEST(test_strRplc);
+	BMA_TEST(test_strRplcDup);
 	BMA_TEST(test_vector_construct);
 	BMA_TEST(test_vector_append);
 	BMA_TEST(test_vector_at);

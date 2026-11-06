@@ -457,6 +457,34 @@ BMA_DEF char* bma_strPrintf(const char* pFmt, ...);
 #define bma_strndup(p, l) bma_strndup_ext(p, l, bma_getDfltMemAlloc())
 
 /*!
+\brief Tokenizes a string using the specified delimiters which are single characters.
+IPORTANT: This function modifies the string by replacing all characters that match the delimiters with
+the '\0' character. This results in many consecutive null terminated substrings which can be accessed individually,
+e.g. with the function bma_strNextTok.
+Example: When calling with the string "a;b:c" and pDelim is set to ";:", the string will be modified to "a\0b\0c"
+and the function will return 5 which is the original string length. When the source string would have been "a;b:c:", the string will be modified to "a\0b\0c\0"
+and the function would return still 5 because a new end marker was introduced, effectively reducing the string by one byte.
+This function  returns the length of the pStr string which needs to be passed to bma_strNextTok to continue tokenization.
+\param pStr The string to tokenize. This string will be modified.
+\param pDelim The delimiter string; each character in this string is considered a delimiter.
+\return The length of the original string, possible modified/shortened when additional null chars were insterted
+        at the end of the source string, effectively reducing its length.
+*/
+BMA_DEF size_t bma_strTok(char *pStr, const char* pDelim);
+
+/*!
+\brief Returns the next token from a tokenized string list.
+Such a string may look like "a\0\0b\0\c\0" and contain the tokens a, b and c.
+Between the tokens, any number of null bytes/characters may appear, which this function skips to find the next token.
+\param pStr The tokenized string to search in.
+\param pLen Pointer to a size_t variable that is set to the full length of the tokenized string (return value)
+            of bma_strTok and will be written/shortened to reflect the remaining length of the string after the current token.
+\return A pointer to the next token, or NULL if no more tokens are found.
+*/
+BMA_DEF char *bma_strNextTok(const char *pStr, size_t* pLen);
+
+
+/*!
 \brief Returns pStr if pStr is not NULL, otherwise returns an empty string.
 To be used to access string pointers that are probably NULL,
 but where a valid null terminated string is needed in any case.
@@ -1134,6 +1162,35 @@ BMA_DEF char* bma_strndup_ext(const char* p, size_t n, bma_IMemAlloc *pAlloc) {
 	memcpy(c, p, n);
 	c[n] = '\0';
 	return c;
+}
+
+BMA_DEF size_t bma_strTok(char *pStr, const char* pDelim) {
+	size_t len;
+	bma_assert(pStr != NULL);
+	bma_assert(pDelim != NULL);
+	len = strlen(pStr);
+	for (size_t i = 0; i < len; ++i) {
+		if (strchr(pDelim, pStr[i]) != NULL) {
+			pStr[i] = '\0';
+		}
+	}
+	while ((len > 0) && (pStr[len - 1] == '\0')) {
+		--len;
+	}
+	return len;
+}
+
+BMA_DEF char *bma_strNextTok(const char *pStr, size_t* pLen) {
+	bma_assert(pStr != NULL);
+	bma_assert(pLen != NULL);
+	while ((*pLen > 0) && (*pStr == '\0')) {
+		++pStr;
+		--(*pLen);
+	}
+	if (*pLen == 0) {
+		return NULL;
+	}
+	return (char*)pStr;
 }
 
 BMA_DEF const char *bma_getStr(const char *pStr) {
@@ -2325,6 +2382,24 @@ void test_memmem(void) {
 	BMA_EXPECT(bma_memmem(h, 5u, "abd", 3u) == NULL);
 }
 
+void test_strTok(void) {
+	char str[] = "a;b;;:c:";
+	size_t len;
+	const char *pTok;
+	len = bma_strTok(str, ";:");
+	pTok = bma_strNextTok(str, &len);
+	BMA_EXPECT(pTok != NULL);
+	BMA_EXPECT(strcmp(pTok, "a") == 0);
+	pTok = bma_strNextTok(str, &len);
+	BMA_EXPECT(pTok != NULL);
+	BMA_EXPECT(strcmp(pTok, "b") == 0);
+	pTok = bma_strNextTok(str, &len);
+	BMA_EXPECT(pTok != NULL);
+	BMA_EXPECT(strcmp(pTok, "c") == 0);
+	pTok = bma_strNextTok(str, &len);
+	BMA_EXPECT(pTok == NULL);
+}
+
 typedef struct Ints {
 	int *items;
 	size_t size;
@@ -2701,6 +2776,7 @@ int main(int argc, char *argv[]) {
 	BMA_TEST(test_strPrintf_ext);
 	BMA_TEST(test_strPrintf);
 	BMA_TEST(test_memmem);
+	BMA_TEST(test_strTok);
 	BMA_TEST(test_vector_construct);
 	BMA_TEST(test_vector_append);
 	BMA_TEST(test_vector_at);

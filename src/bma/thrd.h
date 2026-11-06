@@ -759,7 +759,7 @@ BMA_DEF size_t bma_numCores(void) {
 		if (cores < 1) cores = 1U;
 		return (size_t)cores;
 	#elif BMA_POSIX_THRDS 
-		long n = sysconf(_SC_NPROCESSORS_ONLN);
+		long cores = sysconf(_SC_NPROCESSORS_ONLN);
 		if (cores < 1) cores = 1U;
 		return (size_t)cores;
 	#else

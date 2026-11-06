@@ -544,7 +544,8 @@ BMA_DEF void bma_CmdLn_prseOrExit(int argc, char **argv, const bma_CmdLnCmdDef *
 	BMA_STATIC_ASSERT(BMA_CMDLN_NUM_PRSE_RSLTS == 3U); /* to verify switch is complete */
 	switch(parseResult) {
 		case BMA_CMDLN_PRSE_RSLT_OK: return;
-		default: /* BMA_CMDLN_PRSE_RSLT_ERR */ exitCode = 1; /* and fall through */
+		default: /* BMA_CMDLN_PRSE_RSLT_ERR */ exitCode = 1; /* NOLINT: fall through */
+		/* fall through */
 		case BMA_CMDLN_PRSE_RSLT_HELP_PRINTED: {
 			if (pClnUpFnc != NULL) {
 				(*pClnUpFnc)(pClnUpFncUsrData);

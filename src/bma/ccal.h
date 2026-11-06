@@ -494,6 +494,41 @@ while ((pTok = bma_strNextTok(&pStr, &len)) != NULL) {
 BMA_DEF char *bma_strNextTok(char **ppStr, size_t* pLen);
 
 /*!
+\brief Simplistic in-place string replacement, replacing all occurence of
+pFrom in the string pStr by the pTo string. Works only when the length of
+the pTo substring is less or equal to the pFrom substring, so only when the string
+length can potentially become smaller or stays equal. This is so because this
+function won't allocate memory for a new string.
+What is does though is to squeeze/shrink the pStr string when the replacement
+leads to a smaller string.
+\param pStr String which will be modified by the replacement
+\param pFrom Sub-string in pStr to be replaced by pTo
+\param pTo replacement, must be smaller or equal in length to pFrom
+\return BMA_TRUE when length of pTo is less or equal to pFrom. BMA_FALSE in all other
+        cases, which is that the replacement couldn't be performed.
+        When at compile it can be made sure that BMA_TRUE whould be returned in any case,
+        the return value can be ignored.
+*/
+BMA_DEF bma_bool_t bma_strRplc(char *pStr, const char *pFrom, const char *pTo);
+
+/*!
+\brief Complex replacement-duplication involving allocating a new string using
+       the passed allocator with potential growth of
+       the string. Does not modify input string but returns a new one which must later be de-allocated.
+       In contrast to bma_strRplc, this version can replace a shorter sub-string with a longer one.
+\param pStr Source string which will be read
+\param pFrom Sub-string which should be replaced by pTo
+\param pAlloc The allocator to be used
+\return A null-terminated copy allocated with pAlloc and filled with the source string where every occurence
+        of pFrom has been replaced by pTo.
+        When pFrom is an empty string and pTo isn't, this function returns a NULL pointer as error indicator
+*/ 
+BMA_DEF char *bma_strRplcDup_ext(const char *pStr, const char *pFrom, const char *pTo, bma_IMemAlloc *pAlloc);
+
+/*! \brief Same but using the default memory allocator */
+#define bma_strRplcDup(pStr, pFrom, pTo) bma_strRplcDup_ext(pStr, pFrom, pTo, bma_getDfltMemAlloc())
+
+/*!
 \brief Returns pStr if pStr is not NULL, otherwise returns an empty string.
 To be used to access string pointers that are probably NULL,
 but where a valid null terminated string is needed in any case.
@@ -1207,6 +1242,93 @@ BMA_DEF char *bma_strNextTok(char **ppStr, size_t* pLen) {
 		++(*ppStr);
 		--(*pLen);
 	}
+	return pRet;
+}
+
+BMA_DEF bma_bool_t bma_strRplc(char *pStr, const char *pFrom, const char *pTo) {
+	size_t len, fromLen, toLen, rest, offs;
+	char *pNeedle;
+	bma_assert(pStr != NULL);
+	bma_assert(pFrom != NULL);
+	bma_assert(pTo != NULL);
+	fromLen = strlen(pFrom);
+	toLen = strlen(pTo);
+	if (toLen > fromLen) {
+		return BMA_FALSE;
+	}
+	len = strlen(pStr);
+	if (fromLen > len) {
+		return BMA_TRUE;
+	}
+	rest = fromLen - toLen;
+	/* Search for pFrom (needle) in pStr (haystack) */
+	while ((pNeedle = (char *)bma_memmem(pStr, len, pFrom, fromLen)) != NULL) {
+		memcpy(pNeedle, pTo, toLen); /* replace portion */
+		if (rest > 0) {
+			/* string must become shorter by the replacement */
+			pNeedle += toLen;
+			offs = (size_t)(pNeedle - pStr);
+			/* need to squeeze. +1: Also move the null term. of the string */
+			memmove(pNeedle, pNeedle + rest, len - offs - rest + 1U);
+			len -= rest;
+		}
+		/* jump behind the found substring for the next search */
+		offs = (size_t)((pNeedle + toLen) - pStr);
+		pStr += offs;
+		len -= offs;
+	}
+	return BMA_TRUE;
+}
+
+BMA_DEF char *bma_strRplcDup_ext(const char *pStr, const char *pFrom, const char *pTo, bma_IMemAlloc *pAlloc) {
+	size_t len, fromLen, toLen, newLen, offs, origLen;
+	const char *pNeedle, *pOrig;
+	char *pRet;
+	bma_assert(pStr != NULL);
+	bma_assert(pFrom != NULL);
+	bma_assert(pTo != NULL);
+	bma_assert(pAlloc != NULL);
+	fromLen = strlen(pFrom);
+	toLen = strlen(pTo);
+	if ((fromLen == 0) && (toLen > 0)) {
+		return NULL;
+	}
+	len = strlen(pStr);
+	/* Save initial state */
+	pOrig = pStr;
+	origLen = len;
+	/* calculate how much to allocate */
+	newLen = len;
+	while ((pNeedle = (const char *)bma_memmem(pStr, len, pFrom, fromLen)) != NULL) {
+		if (toLen > fromLen) {
+			newLen += (toLen - fromLen);
+		}
+		else if (toLen < fromLen) {
+			newLen -= (fromLen - toLen);
+		}
+		offs = (size_t)((pNeedle + fromLen) - pStr);
+		pStr += offs;
+		len -= offs;
+	}
+	/* Allocate memory for new string, +1: also space for null terminator */
+	pRet = (*pAlloc->pRllc)(pAlloc, NULL, (newLen + 1U), NULL);
+	pStr = pOrig;
+	len = origLen;
+	while ((pNeedle = (const char *)bma_memmem(pStr, len, pFrom, fromLen)) != NULL) {
+		/* copy all up until needle to pRet */
+		offs = (size_t)(pNeedle - pStr);
+		memcpy(pRet, pStr, offs);
+		pRet += fromLen;
+		/* copy replacement */
+		memcpy(pRet, pTo, toLen);
+		pRet += toLen;
+		offs += fromLen;
+		/* jump behind to find next replacement */
+		pStr += offs;
+		len -= offs;
+	}
+	/* Maybe there is some leftover at the end. Also copy null terminator from it (+1) */
+	memcpy(pRet, pStr, len + 1U);
 	return pRet;
 }
 
@@ -2418,6 +2540,21 @@ void test_strTok(void) {
 	BMA_EXPECT(pTok == NULL);
 }
 
+void test_strRplc(void) {
+	const char pattern[] = "HelloGoodbyeHelloGoodbyeHello";
+	char str[sizeof(pattern)];
+	memcpy(str, pattern, sizeof(pattern));
+	BMA_EXPECT(!bma_strRplc(str, "Hello", "Goodbye"));
+	BMA_EXPECT(bma_strRplc(str, "Goodbye", "Hello"));
+	BMA_EXPECT(strcmp(str, "HelloHelloHelloHelloHello") == 0);
+	memcpy(str, pattern, sizeof(pattern));
+	BMA_EXPECT(bma_strRplc(str, "e", "a"));
+	BMA_EXPECT(strcmp(str, "HalloGoodbyaHalloGoodbyaHallo") == 0);
+	memcpy(str, pattern, sizeof(pattern));
+	BMA_EXPECT(bma_strRplc(str, "e", ""));
+	BMA_EXPECT(strcmp(str, "HlloGoodbyHlloGoodbyHllo") == 0);
+}
+
 typedef struct Ints {
 	int *items;
 	size_t size;
@@ -2795,6 +2932,7 @@ int main(int argc, char *argv[]) {
 	BMA_TEST(test_strPrintf);
 	BMA_TEST(test_memmem);
 	BMA_TEST(test_strTok);
+	BMA_TEST(test_strRplc);
 	BMA_TEST(test_vector_construct);
 	BMA_TEST(test_vector_append);
 	BMA_TEST(test_vector_at);

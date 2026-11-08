@@ -530,6 +530,13 @@ BMA_DEF char *bma_strRplcDup_ext(const char *pStr, const char *pFrom, const char
 #define bma_strRplcDup(pStr, pFrom, pTo) bma_strRplcDup_ext(pStr, pFrom, pTo, bma_getDfltMemAlloc())
 
 /*!
+\brief Looks for leading- and trailing whitespace in the string and shortens the
+string by stripping that whitespace, potentially moving the string to the beginning of the buffer.
+The string is modified in place.
+*/
+BMA_DEF void bma_trmWhtSpc(char *pStr);
+
+/*!
 \brief Returns pStr if pStr is not NULL, otherwise returns an empty string.
 To be used to access string pointers that are probably NULL,
 but where a valid null terminated string is needed in any case.
@@ -1035,6 +1042,7 @@ BMA_DEF bma_bool_t bma_StrTree_rmv_impl(
 #if (defined(BMA_CCAL_IMPL) || defined(BMA_IMPL))
 
 #include <assert.h>
+#include <ctype.h>
 #include <string.h> /* for all kind of memory and string things */
 #include <stdarg.h> /* for variadic functions */
 #include <stdlib.h>
@@ -1336,6 +1344,28 @@ BMA_DEF char *bma_strRplcDup_ext(const char *pStr, const char *pFrom, const char
 	memcpy(pRet, pStr, len + 1U);
 	return pRetOrig;
 }
+
+BMA_DEF void bma_trmWhtSpc(char *pStr) {
+	size_t len, i;
+	bma_assert(pStr != NULL);
+	len = strlen(pStr);
+	/* Trim trailing whitespace */
+	while ((len > 0) && (isspace((unsigned char)pStr[len - 1]))) {
+		--len;
+	}
+	pStr[len] = '\0';
+	/* Trim leading whitespace */
+	i = 0;
+	while ((i < len) && (isspace((unsigned char)pStr[i]))) {
+		++i;
+	}
+	/* Shift the string to the left if necessary.
+	   +1: Also move the null term. of the string */
+	if (i > 0) {
+		memmove(pStr, pStr + i, len - i + 1);
+	}
+}
+
 
 BMA_DEF const char *bma_getStr(const char *pStr) {
 	if (pStr != NULL) {
@@ -2526,6 +2556,21 @@ void test_memmem(void) {
 	BMA_EXPECT(bma_memmem(h, 5u, "abd", 3u) == NULL);
 }
 
+void test_trmWhtSpc(void) {
+	char str1[] = " \t\nhello world\r \f";
+	char str2[] = "\v  value\n\t";
+	char str3[] = "\t \r\n";
+	char str4[] = "hello";
+	bma_trmWhtSpc(str1);
+	BMA_EXPECT(strcmp(str1, "hello world") == 0);
+	bma_trmWhtSpc(str2);
+	BMA_EXPECT(strcmp(str2, "value") == 0);
+	bma_trmWhtSpc(str3);
+	BMA_EXPECT(strcmp(str3, "") == 0);
+	bma_trmWhtSpc(str4);
+	BMA_EXPECT(strcmp(str4, "hello") == 0);
+}
+
 void test_strTok(void) {
 	char str[] = ":a;b;;:c:";
 	size_t len;
@@ -3041,6 +3086,7 @@ int main(int argc, char *argv[]) {
 	BMA_TEST(test_strPrintf_ext);
 	BMA_TEST(test_strPrintf);
 	BMA_TEST(test_memmem);
+	BMA_TEST(test_trmWhtSpc);
 	BMA_TEST(test_strTok);
 	BMA_TEST(test_strRplc);
 	BMA_TEST(test_strRplcDup);

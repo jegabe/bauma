@@ -1,17 +1,55 @@
-#define BMA_IMPL
 #include <stdio.h>
 #include <string.h>
+#define BMA_IMPL
+#include <bma/ccal.h>
 #include <bma/cmdln.h>
 #include <bma/fs.h>
+#include <bma/nj.h>
 #include <bma/utils.h>
 #include <bma/log.h>
 
-#define BMA_CMD_TYPE_GET_INC 1
+#define BMA_CMD_TYPE_BAUMA   1
+#define BMA_CMD_TYPE_GET_INC 2
+
+#define BMA_HME_SUB_DIR ".bauma"
+#define BMA_DFLT_PRFL_NAME "dflt_dbg_prfl.nj"
 
 typedef struct bma_CmdLnArgs {
 	unsigned int cmd;
 	const char *pFilePath;
 } BmaCmdLnArgs;
+
+bma_NjNode* bma_rdNjFile(const char *pPath) {
+	bma_NjNode* pRet = NULL;
+	bma_StrBldr cntnt;
+	bma_StrBldr errFmt;
+	bma_NjParseSrc parseSrc;
+	bma_StrBldr_ctor(&cntnt);
+	bma_StrBldr_ctor(&errFmt);
+	if (!bma_isFile(pPath)) {
+		fprintf(stderr, "File '%s' not found.\n", pPath);
+		fflush(stderr);
+		goto out;
+	}
+	if (!bma_rdFile(pPath, &cntnt)) {
+		fprintf(stderr, "Could not read file '%s'.\n", pPath);
+		fflush(stderr);
+		goto out;
+	}
+	parseSrc.pStr = bma_StrBldr_getStr(&cntnt);
+	parseSrc.pBegin = parseSrc.pStr;
+	parseSrc.len = bma_StrBldr_getSz(&cntnt);
+	pRet = bma_njParseExt(&parseSrc, &errFmt, bma_getDfltMemAlloc());
+	if (pRet == NULL) {
+		fprintf(stderr, "Error parsing file '%s': %s\n", pPath, bma_StrBldr_getStr(&errFmt));
+		fflush(stderr);
+		goto out;
+	}
+out:
+	bma_StrBldr_dtor(&errFmt, NULL);
+	bma_StrBldr_dtor(&cntnt, NULL);
+	return pRet;
+}
 
 static const bma_CmdLnArgDef kGetIncArgs[] = {
 	{
@@ -40,8 +78,8 @@ static const bma_CmdLnCmdDef kMainSubCmds[] = {
 static const bma_CmdLnCmdDef kMainCmd = {
 		 /* pName      */ ""
 		,/* pDesc      */ "Builds the current project"
-		,/* enumOffs   */ BMA_SIZE_MAX
-		,/* enumVal    */ 0
+		,/* enumOffs   */ offsetof(BmaCmdLnArgs, cmd)
+		,/* enumVal    */ BMA_CMD_TYPE_BAUMA
 		,/* pSubCmds   */ kMainSubCmds
 		,/* numSubCmds */ bma_ary_sz(kMainSubCmds)
 		,/* pArgs      */ NULL
@@ -63,6 +101,37 @@ void mainClnUp(void *pClnUpUsrData) {
 	MainClnUpUsrData* pMainClnUpUsrData = (MainClnUpUsrData*)pClnUpUsrData;
 	(void)pMainClnUpUsrData;
 	bma_Log_clnup();
+}
+
+bma_bool_t build(void) {
+	bma_bool_t result = BMA_FALSE;
+	bma_StrBldr path;
+	bma_NjNode *pRoot = NULL;
+	bma_StrBldr_ctor(&path);
+	if (!bma_getHomeDir(&path)) {
+		fprintf(stderr, "Could not determine home directory.\n");
+		fflush(stderr);
+		goto out;	
+	}
+	bma_entrPth(&path, BMA_HME_SUB_DIR);
+	bma_entrPth(&path, BMA_DFLT_PRFL_NAME);
+	if (!bma_isFile(bma_StrBldr_getStr(&path))) {
+		fprintf(stderr, "Default profile file '%s' not found.\n", bma_StrBldr_getStr(&path));
+		fflush(stderr);
+		goto out;
+	}
+	pRoot = bma_rdNjFile(bma_StrBldr_getStr(&path));
+	bma_StrBldr_clear(&path);
+	if (!bma_getCwd(&path)) {
+		fprintf(stderr, "Could not determine current working directory.\n");
+		fflush(stderr);
+		goto out;
+	}
+	result = BMA_TRUE;
+out:
+	bma_njDelete(pRoot);
+	bma_StrBldr_dtor(&path, NULL);
+	return result;
 }
 
 bma_bool_t getinc(const char *pSourceFile) {
@@ -131,6 +200,10 @@ int main(int argc, char *argv[]) {
 	                     &mainClnUpUsrData);
 	switch(cmdLnArgs.cmd)
 	{
+	case BMA_CMD_TYPE_BAUMA: {
+		resultCode = (build()) ? 0 : 1;
+		goto out;
+	}
 	case BMA_CMD_TYPE_GET_INC: {
 		bma_assert(cmdLnArgs.pFilePath != NULL); /* because it was marked as mandatory */
 		resultCode = (getinc(cmdLnArgs.pFilePath)) ? 0 : 1;

@@ -28,11 +28,17 @@ SOFTWARE.
 
 Random utils
 */
+#include <time.h>
 #include <bma/ccal.h>
 
 #ifdef __cplusplus
 	extern "C" {
 #endif
+
+typedef struct bma_MsTime {
+	time_t sec;
+	unsigned int msec;
+} bma_MsTime;
 
 /*!
 \brief Type for representing the type of a scanned #include statement.

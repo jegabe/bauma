@@ -42,6 +42,23 @@ File system utilities
 	#define BMA_FS_SEP "/"
 #endif
 
+typedef unsigned int bma_DirEntType;
+
+#define BMA_DIR_ENT_TYPE_FILE ((bma_DirEntType)1)
+#define BMA_DIR_ENT_TYPE_DIR  ((bma_DirEntType)2)
+
+typedef struct bma_DirEnt {
+	bma_DirEntType type;
+	const char *pName;
+	bma_MsTime lstMod;
+} bma_DirEnt;
+
+BMA_DEF void bma_DirEnt_dtor(bma_DirEnt *pSelf, bma_IMemAlloc *pAlloc);
+
+BMA_DEF_VEC(bma_DirEntVec, bma_DirEnt, (bma_dtor_t)&bma_DirEnt_dtor);
+
+typedef bma_bool_t (*bma_dirEntFltr_t)(const bma_DirEnt *pEnt, void *pOptUsrDta);
+
 BMA_DEF FILE *bma_fopen_rd(const char *pPath);
 BMA_DEF FILE *bma_fopen_wrt(const char *pPath);
 
@@ -49,9 +66,12 @@ BMA_DEF bma_bool_t bma_rdFile(const char *pPath, bma_StrBldr *pOut);
 BMA_DEF bma_bool_t bma_wrtFile(const char *pPath, const char *pData, size_t dataSz);
 
 BMA_DEF bma_bool_t bma_getHomeDir(bma_StrBldr* pOut);
+BMA_DEF bma_bool_t bma_getCwd(bma_StrBldr* pOut);
 BMA_DEF void bma_entrPth(bma_StrBldr *pPath, const char *pSubPth);
 BMA_DEF bma_bool_t bma_leavPth(bma_StrBldr *pSubPth);
 BMA_DEF bma_bool_t bma_isFile(const char *pPath);
+
+BMA_DEF bma_bool_t bma_scnForFiles(const char *pPath, bma_DirEntVec* pOut, bma_bool_t recursive, bma_dirEntFltr_t pFltr, void *pFltrUsrDta);
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -61,8 +81,10 @@ BMA_DEF bma_bool_t bma_isFile(const char *pPath);
 
 #if BMA_IS_WINDOWS
 	#include <bma/win.h>
-#elif BMA_IS_POSIX	
+#elif BMA_IS_POSIX
+	#include <errno.h>
 	#include <sys/stat.h>
+	#include <unistd.h>
 #else
 	#error "Unsupported platform"
 #endif
@@ -70,6 +92,12 @@ BMA_DEF bma_bool_t bma_isFile(const char *pPath);
 #ifdef __cplusplus
 	extern "C" {
 #endif
+
+BMA_DEF void bma_DirEnt_dtor(bma_DirEnt *pSelf, bma_IMemAlloc *pAlloc) {
+	bma_assert(pSelf != NULL);
+	bma_assert(pAlloc != NULL);
+	bma_free_ext(pAlloc, (void*)pSelf->pName);
+}
 
 BMA_DEF FILE *bma_fopen_rd(const char *pPath) {
 	#if BMA_IS_WINDOWS
@@ -189,6 +217,42 @@ BMA_DEF bma_bool_t bma_getHomeDir(bma_StrBldr* pOut) {
 	#endif
 }
 
+BMA_DEF bma_bool_t bma_getCwd(bma_StrBldr* pOut) {
+	#if BMA_IS_WINDOWS
+		DWORD res;
+		size_t i;
+		wchar_t *pContent;
+		char *p;
+		bma_assert(BMA_FALSE); /* Code isn't checked yet */
+		bma_IMemAlloc *pAlloc = bma_getDfltMemAlloc();
+		res = GetCurrentDirectoryW(0, NULL);
+		if (res == 0) return BMA_FALSE;
+		pContent = (*pAlloc->pRllc)(pAlloc, NULL, (size_t)res * sizeof(wchar_t), NULL);
+		(void)GetCurrentDirectoryW(res, pContent);
+		p = bma_wStrDup(pContent);
+		bma_free_ext(pAlloc, pContent);
+		bma_StrBldr_appndStr(pOut, p);
+		bma_free(p);
+		return BMA_TRUE;
+	#elif BMA_IS_POSIX
+		bma_StrBldr_rsz(pOut, 256U); /* initial buffer size */
+		for (;;) {
+			errno = 0;
+			if (getcwd((char *)bma_StrBldr_getStr(pOut), bma_StrBldr_getSz(pOut)) != NULL) {
+				bma_StrBldr_rsz(pOut, strlen(bma_StrBldr_getStr(pOut)));
+				return BMA_TRUE;
+			}
+			if (errno != ERANGE) {
+				bma_StrBldr_clear(pOut);
+				return BMA_FALSE; /* some other error occurred */
+			}
+			bma_StrBldr_rsz(pOut, bma_StrBldr_getSz(pOut) * 2U); /* double the buffer size and try again */
+		}
+	#else
+		return BMA_FALSE;
+	#endif
+}
+
 BMA_DEF void bma_entrPth(bma_StrBldr *pPath, const char *pSubPth) {
 	bma_assert(pPath != NULL);
 	bma_assert(pSubPth != NULL);
@@ -240,6 +304,15 @@ BMA_DEF bma_bool_t bma_isFile(const char *pPath) {
 #else
 	#error "Unsupported platform"
 #endif
+}
+
+BMA_DEF bma_bool_t bma_scnForFiles(const char *pPath, bma_DirEntVec* pOut, bma_bool_t recursive, bma_dirEntFltr_t pFltr, void *pFltrUsrDta) {
+	(void)pPath;
+	(void)pOut;
+	(void)recursive;
+	(void)pFltr;
+	(void)pFltrUsrDta;
+	return BMA_FALSE; /* Not implemented yet */
 }
 
 #ifdef __cplusplus

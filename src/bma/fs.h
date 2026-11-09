@@ -223,7 +223,6 @@ BMA_DEF bma_bool_t bma_getCwd(bma_StrBldr* pOut) {
 		size_t i;
 		wchar_t *pContent;
 		char *p;
-		bma_assert(BMA_FALSE); /* Code isn't checked yet */
 		bma_IMemAlloc *pAlloc = bma_getDfltMemAlloc();
 		res = GetCurrentDirectoryW(0, NULL);
 		if (res == 0) return BMA_FALSE;

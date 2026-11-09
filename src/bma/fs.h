@@ -44,13 +44,13 @@ File system utilities
 
 typedef unsigned int bma_DirEntType;
 
-#define BMA_DIR_ENT_TYPE_FILE ((bma_DirEntType)1)
-#define BMA_DIR_ENT_TYPE_DIR  ((bma_DirEntType)2)
+#define BMA_DIR_ENT_TYPE_UNKNWN  ((bma_DirEntType)0)
+#define BMA_DIR_ENT_TYPE_FILE    ((bma_DirEntType)1)
+#define BMA_DIR_ENT_TYPE_DIR     ((bma_DirEntType)2)
 
 typedef struct bma_DirEnt {
 	bma_DirEntType type;
 	const char *pName;
-	bma_MsTime lstMod;
 } bma_DirEnt;
 
 BMA_DEF void bma_DirEnt_dtor(bma_DirEnt *pSelf, bma_IMemAlloc *pAlloc);
@@ -71,7 +71,7 @@ BMA_DEF void bma_entrPth(bma_StrBldr *pPath, const char *pSubPth);
 BMA_DEF bma_bool_t bma_leavPth(bma_StrBldr *pSubPth);
 BMA_DEF bma_bool_t bma_isFile(const char *pPath);
 
-BMA_DEF bma_bool_t bma_scnForFiles(const char *pPath, bma_DirEntVec* pOut, bma_bool_t recursive, bma_dirEntFltr_t pFltr, void *pFltrUsrDta);
+BMA_DEF bma_bool_t bma_scnFrFles(const char *pPath, bma_DirEntVec* pOut, bma_bool_t recursive, bma_dirEntFltr_t pFltr, void *pFltrUsrDta);
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -85,6 +85,7 @@ BMA_DEF bma_bool_t bma_scnForFiles(const char *pPath, bma_DirEntVec* pOut, bma_b
 	#include <errno.h>
 	#include <sys/stat.h>
 	#include <unistd.h>
+	#include <dirent.h>
 #else
 	#error "Unsupported platform"
 #endif
@@ -256,7 +257,9 @@ BMA_DEF bma_bool_t bma_getCwd(bma_StrBldr* pOut) {
 BMA_DEF void bma_entrPth(bma_StrBldr *pPath, const char *pSubPth) {
 	bma_assert(pPath != NULL);
 	bma_assert(pSubPth != NULL);
-	if (!bma_StrBldr_endsWth(pPath, BMA_FS_SEP) && !bma_strtsWth(pSubPth, BMA_FS_SEP)) {
+	if (!bma_StrBldr_endsWth(pPath, BMA_FS_SEP) &&
+	    !bma_strtsWth(pSubPth, BMA_FS_SEP) &&
+	    (bma_StrBldr_getSz(pPath) > 0)) {
 		bma_StrBldr_appndStr(pPath, BMA_FS_SEP);
 	}
 	bma_StrBldr_appndStr(pPath, pSubPth);
@@ -306,13 +309,75 @@ BMA_DEF bma_bool_t bma_isFile(const char *pPath) {
 #endif
 }
 
-BMA_DEF bma_bool_t bma_scnForFiles(const char *pPath, bma_DirEntVec* pOut, bma_bool_t recursive, bma_dirEntFltr_t pFltr, void *pFltrUsrDta) {
-	(void)pPath;
-	(void)pOut;
-	(void)recursive;
-	(void)pFltr;
-	(void)pFltrUsrDta;
+BMA_DEF bma_bool_t bma_scnFrFles_impl(const char *pPath, const char* pPrefix, bma_DirEntVec* pOut, bma_bool_t recursive, bma_dirEntFltr_t pFltr, void *pFltrUsrDta) {
+#if BMA_IS_WINDOWS
 	return BMA_FALSE; /* Not implemented yet */
+#elif BMA_IS_POSIX
+	DIR *pDir;
+	struct dirent *pEnt;
+	bma_bool_t result = BMA_FALSE;
+	bma_IMemAlloc *pAlloc;
+	bma_assert(pPath != NULL);
+	bma_assert(pPrefix != NULL);
+	bma_assert(pOut != NULL);
+	pAlloc = bma_DirEntVec_getAlloc(pOut);
+	bma_assert(pAlloc != NULL);
+	pDir = opendir(pPath);
+	if (pDir == NULL) {
+		goto out;
+	}
+	while ((pEnt = readdir(pDir)) != NULL) {
+		bma_StrBldr flNm;
+		bma_DirEnt ent;
+		if (strcmp(pEnt->d_name, ".") == 0 || strcmp(pEnt->d_name, "..") == 0) {
+			continue; /* skip current and parent directory entries */
+		}
+		bma_StrBldr_ctor_ext(&flNm, pAlloc);
+		bma_StrBldr_appndStr(&flNm, pPrefix);
+		bma_entrPth(&flNm, pEnt->d_name);
+		ent.pName = bma_StrBldr_rlse(&flNm);
+		bma_StrBldr_dtor(&flNm, NULL);
+		switch (pEnt->d_type) {
+		case DT_REG: ent.type = BMA_DIR_ENT_TYPE_FILE; break;
+		case DT_DIR: ent.type = BMA_DIR_ENT_TYPE_DIR; break;
+		default: ent.type = BMA_DIR_ENT_TYPE_UNKNWN; break;
+		}
+		if ((pFltr == NULL) || (*pFltr)(&ent, pFltrUsrDta)) {
+			bma_DirEntVec_appnd(pOut, &ent);
+		}
+		else {
+			bma_DirEnt_dtor(&ent, pAlloc);
+		}
+		if ((pEnt->d_type == DT_DIR) && recursive) {
+			bma_StrBldr subPath;
+			bma_StrBldr subPrefix;
+			bma_StrBldr_ctor_ext(&subPath, pAlloc);
+			bma_StrBldr_appndStr(&subPath, pPath);
+			bma_entrPth(&subPath, pEnt->d_name);
+			bma_StrBldr_ctor_ext(&subPrefix, pAlloc);
+			bma_StrBldr_appndStr(&subPrefix, pPrefix);
+			bma_entrPth(&subPrefix, pEnt->d_name);
+			result = bma_scnFrFles_impl(bma_StrBldr_getStr(&subPath), bma_StrBldr_getStr(&subPrefix), pOut, recursive, pFltr, pFltrUsrDta);
+			bma_StrBldr_dtor(&subPrefix, pAlloc);
+			bma_StrBldr_dtor(&subPath, pAlloc);
+			if (!result) {
+				goto out;
+			}
+		}
+	}
+	result = BMA_TRUE;
+out:
+	if (pDir != NULL) {
+		(void)closedir(pDir);
+	}
+	return result;
+#else
+	return BMA_FALSE; /* Not implemented yet */
+#endif
+}
+
+BMA_DEF bma_bool_t bma_scnFrFles(const char *pPath, bma_DirEntVec* pOut, bma_bool_t recursive, bma_dirEntFltr_t pFltr, void *pFltrUsrDta) {
+	return bma_scnFrFles_impl(pPath, "", pOut, recursive, pFltr, pFltrUsrDta);
 }
 
 #ifdef __cplusplus

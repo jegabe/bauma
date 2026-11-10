@@ -104,6 +104,11 @@ void mainClnUp(void *pClnUpUsrData) {
 }
 
 bma_bool_t build(void) {
+	bma_DirEntVec v;
+	bma_DirEntVec_ctor(&v);
+	bma_scnFrFles("C:\\projects\\bauma", &v, BMA_TRUE, NULL, NULL);
+	bma_DirEntVec_dtor(&v, NULL);
+
 	bma_bool_t result = BMA_FALSE;
 	bma_StrBldr path;
 	bma_NjNode *pRoot = NULL;

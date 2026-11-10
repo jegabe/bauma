@@ -81,6 +81,7 @@ BMA_DEF bma_bool_t bma_scnFrFles(const char *pPath, bma_DirEntVec* pOut, bma_boo
 
 #if BMA_IS_WINDOWS
 	#include <bma/win.h>
+	#include <wchar.h>
 #elif BMA_IS_POSIX
 	#include <errno.h>
 	#include <sys/stat.h>
@@ -310,7 +311,79 @@ BMA_DEF bma_bool_t bma_isFile(const char *pPath) {
 
 BMA_DEF bma_bool_t bma_scnFrFles_impl(const char *pPath, const char* pPrefix, bma_DirEntVec* pOut, bma_bool_t recursive, bma_dirEntFltr_t pFltr, void *pFltrUsrDta) {
 #if BMA_IS_WINDOWS
-	return BMA_FALSE; /* Not implemented yet */
+	WIN32_FIND_DATAW fData;
+	HANDLE h = INVALID_HANDLE_VALUE;
+	bma_bool_t result = BMA_FALSE;
+	bma_IMemAlloc *pAlloc;
+	wchar_t *pWidePath;
+	bma_StrBldr pathBldr;
+	bma_assert(pPath != NULL);
+	bma_assert(pPrefix != NULL);
+	bma_assert(pOut != NULL);
+	pAlloc = bma_DirEntVec_getAlloc(pOut);
+	bma_assert(pAlloc != NULL);
+	bma_StrBldr_ctor_ext(&pathBldr, pAlloc);
+	bma_StrBldr_appndStr(&pathBldr, pPath);
+	bma_entrPth(&pathBldr, "\\*"); /* append wildcard for FindFirstFileW */
+	pWidePath = bma_strWdup(bma_StrBldr_getStr(&pathBldr));
+	h = FindFirstFileW(pWidePath, &fData);
+	bma_free(pWidePath);
+	bma_StrBldr_dtor(&pathBldr, pAlloc);
+	if (h == INVALID_HANDLE_VALUE) {
+		goto out;
+	}
+	do {
+		bma_DirEnt ent;
+		char *pName;
+		bma_StrBldr flNm;
+		if ((wcscmp(fData.cFileName, L".") == 0) || (wcscmp(fData.cFileName, L"..") == 0)) {
+			continue; /* skip current and parent directory entries */
+		}
+		if ((fData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+			ent.type = BMA_DIR_ENT_TYPE_DIR;
+		} else {
+			ent.type = BMA_DIR_ENT_TYPE_FILE;
+		}
+		pName = bma_wStrDup(fData.cFileName);
+		bma_StrBldr_ctor_ext(&flNm, pAlloc);
+		bma_StrBldr_appndStr(&flNm, pPrefix);
+		bma_entrPth(&flNm, pName);
+		ent.pName = bma_StrBldr_rlse(&flNm);
+		bma_StrBldr_dtor(&flNm, NULL);
+		bma_free(pName);
+		if ((pFltr == NULL) || (*pFltr)(&ent, pFltrUsrDta)) {
+			bma_DirEntVec_appnd(pOut, &ent);
+		}
+		else {
+			bma_DirEnt_dtor(&ent, pAlloc);
+		}
+		if (((fData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) && recursive) {
+			char *pFlNm;
+			bma_StrBldr subPath;
+			bma_StrBldr subPrefix;
+			bma_bool_t subRslt;
+			pFlNm = bma_wStrDup(fData.cFileName);
+			bma_StrBldr_ctor_ext(&subPath, pAlloc);
+			bma_StrBldr_appndStr(&subPath, pPath);
+			bma_entrPth(&subPath, pFlNm);
+			bma_StrBldr_ctor_ext(&subPrefix, pAlloc);
+			bma_StrBldr_appndStr(&subPrefix, pPrefix);
+			bma_entrPth(&subPrefix, pFlNm);
+			bma_free(pFlNm);
+			subRslt = bma_scnFrFles_impl(bma_StrBldr_getStr(&subPath), bma_StrBldr_getStr(&subPrefix), pOut, recursive, pFltr, pFltrUsrDta);
+			bma_StrBldr_dtor(&subPrefix, pAlloc);
+			bma_StrBldr_dtor(&subPath, pAlloc);
+			if (!subRslt) {
+				goto out;
+			}
+		}
+	} while (FindNextFileW(h, &fData));
+	result = BMA_TRUE;
+out:
+	if (h != INVALID_HANDLE_VALUE) {
+		FindClose(h);
+	}
+	return result;
 #elif BMA_IS_POSIX
 	DIR *pDir;
 	struct dirent *pEnt;
@@ -331,16 +404,16 @@ BMA_DEF bma_bool_t bma_scnFrFles_impl(const char *pPath, const char* pPrefix, bm
 		if (strcmp(pEnt->d_name, ".") == 0 || strcmp(pEnt->d_name, "..") == 0) {
 			continue; /* skip current and parent directory entries */
 		}
+		switch (pEnt->d_type) {
+		case DT_REG: ent.type = BMA_DIR_ENT_TYPE_FILE; break;
+		case DT_DIR: ent.type = BMA_DIR_ENT_TYPE_DIR; break;
+		default: continue /* skip unknown types */
+		}
 		bma_StrBldr_ctor_ext(&flNm, pAlloc);
 		bma_StrBldr_appndStr(&flNm, pPrefix);
 		bma_entrPth(&flNm, pEnt->d_name);
 		ent.pName = bma_StrBldr_rlse(&flNm);
 		bma_StrBldr_dtor(&flNm, NULL);
-		switch (pEnt->d_type) {
-		case DT_REG: ent.type = BMA_DIR_ENT_TYPE_FILE; break;
-		case DT_DIR: ent.type = BMA_DIR_ENT_TYPE_DIR; break;
-		default: ent.type = BMA_DIR_ENT_TYPE_UNKNWN; break;
-		}
 		if ((pFltr == NULL) || (*pFltr)(&ent, pFltrUsrDta)) {
 			bma_DirEntVec_appnd(pOut, &ent);
 		}
@@ -350,16 +423,17 @@ BMA_DEF bma_bool_t bma_scnFrFles_impl(const char *pPath, const char* pPrefix, bm
 		if ((pEnt->d_type == DT_DIR) && recursive) {
 			bma_StrBldr subPath;
 			bma_StrBldr subPrefix;
+			bma_bool_t subRslt;
 			bma_StrBldr_ctor_ext(&subPath, pAlloc);
 			bma_StrBldr_appndStr(&subPath, pPath);
 			bma_entrPth(&subPath, pEnt->d_name);
 			bma_StrBldr_ctor_ext(&subPrefix, pAlloc);
 			bma_StrBldr_appndStr(&subPrefix, pPrefix);
 			bma_entrPth(&subPrefix, pEnt->d_name);
-			result = bma_scnFrFles_impl(bma_StrBldr_getStr(&subPath), bma_StrBldr_getStr(&subPrefix), pOut, recursive, pFltr, pFltrUsrDta);
+			subRslt = bma_scnFrFles_impl(bma_StrBldr_getStr(&subPath), bma_StrBldr_getStr(&subPrefix), pOut, recursive, pFltr, pFltrUsrDta);
 			bma_StrBldr_dtor(&subPrefix, pAlloc);
 			bma_StrBldr_dtor(&subPath, pAlloc);
-			if (!result) {
+			if (!subRslt) {
 				goto out;
 			}
 		}

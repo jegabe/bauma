@@ -36,16 +36,17 @@ Sub process management
 
 /*!
 \brief Runs the command pCmd as sub-process and collects the exit code into pExitCode
-and all of the stdout and stderr output is piped into pStdOutStdErr.
+and all of the stdout and stderr output is piped into pOut.
 When the command isn't executable, BMA_FALSE is returned.
 The function blocks until the sub process is terminated.
 \param pCmd The command which is the executable followed by all of its arguments. The first argument is the executable itself.
 \param pExitCode Output parameter receiving the exit code of the process
-\param pStdOutStdErr String builder receiving all of what the sub process has put out on stdout and stderr.
-       It must be constructed as empty object before calling this function.
+\param pOut String builder receiving all of what the sub process has put out on stdout and stderr.
        On POSIX, captured bytes are forwarded unchanged; the command is expected to emit UTF-8.
+       On Windows, captured bytes are assumed to be in the current code page and are converted to UTF-8.
+\return BMA_TRUE when the command was executed and terminated, BMA_FALSE when the command
 */
-BMA_DEF bma_bool_t bma_runCmd(const char *pCmd, int *pExitCode, bma_StrBldr *pStdOutStdErr);
+BMA_DEF bma_bool_t bma_runCmd(const char *pCmd, int *pExitCode, bma_StrBldr *pOut);
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -85,6 +86,9 @@ BMA_DEF bma_bool_t bma_runCmd(const char *pCmd, int *pExitCode, bma_StrBldr *pSt
 #define BMA_PROC_PIPE_READ_CHUNKS 4096U
 
 #if BMA_IS_POSIX
+
+BMA_DEF_VEC(bma_ProcArgVec, char*, NULL)
+
 BMA_DEF void bma_proc_closeExtraFds(int firstFd) {
 #if BMA_PROC_HAS_CLOSEFROM
 	closefrom(firstFd);
@@ -128,31 +132,28 @@ BMA_DEF bma_bool_t bma_proc_moveFdAboveStdio(int *pFd) {
 
 BMA_DEF bma_bool_t bma_proc_parseCmd(
 	const char *pCmd,
-	char ***ppArgv,
+	bma_ProcArgVec *pArgv,
 	char **ppStorage,
 	bma_IMemAlloc *pAlloc
 ) {
 	size_t cmdLen = strlen(pCmd);
-	size_t argc = 0;
 	size_t i = 0;
 	size_t out = 0;
-	char **argv;
 	char *storage;
-	if (cmdLen > (size_t)-1 / sizeof(*argv) - 1U) {
-		return BMA_FALSE;
-	}
-	argv = (char**)(*pAlloc->pRllc)(pAlloc, NULL, (cmdLen + 1U) * sizeof(*argv), NULL);
 	storage = (char*)(*pAlloc->pRllc)(pAlloc, NULL, cmdLen + 1U, NULL);
+	*ppStorage = storage;
 	while (i < cmdLen) {
 		bma_bool_t inQuotes = BMA_FALSE;
 		bma_bool_t tokenStarted = BMA_FALSE;
+		char *pArg;
 		while (i < cmdLen && isspace((unsigned char)pCmd[i])) {
 			++i;
 		}
 		if (i == cmdLen) {
 			break;
 		}
-		argv[argc++] = storage + out;
+		pArg = storage + out;
+		bma_ProcArgVec_appnd(pArgv, &pArg);
 		while (i < cmdLen) {
 			char c = pCmd[i];
 			if (c == '\\' && i + 1U < cmdLen && pCmd[i + 1U] == '"') {
@@ -175,20 +176,17 @@ BMA_DEF bma_bool_t bma_proc_parseCmd(
 			}
 		}
 		if (inQuotes || !tokenStarted) {
-			bma_free_ext(pAlloc, argv);
-			bma_free_ext(pAlloc, storage);
 			return BMA_FALSE;
 		}
 		storage[out++] = '\0';
 	}
-	if (argc == 0) {
-		bma_free_ext(pAlloc, argv);
-		bma_free_ext(pAlloc, storage);
+	if (bma_ProcArgVec_getSz(pArgv) == 0) {
 		return BMA_FALSE;
 	}
-	argv[argc] = NULL;
-	*ppArgv = argv;
-	*ppStorage = storage;
+	{
+		char *pArg = NULL;
+		bma_ProcArgVec_appnd(pArgv, &pArg);
+	}
 	return BMA_TRUE;
 }
 
@@ -208,9 +206,10 @@ BMA_DEF void bma_proc_writeExecError(int errFd, int errorCode) {
 		}
 	}
 }
-#endif
 
-BMA_DEF bma_bool_t bma_runCmd(const char *pCmd, int *pExitCode, bma_StrBldr *pStdOutStdErr) {
+#endif /* BMA_IS_POSIX */
+
+BMA_DEF bma_bool_t bma_runCmd(const char *pCmd, int *pExitCode, bma_StrBldr *pOut) {
 #if BMA_IS_WINDOWS
 	bma_bool_t result = BMA_FALSE;
 	SECURITY_ATTRIBUTES sa;
@@ -223,8 +222,8 @@ BMA_DEF bma_bool_t bma_runCmd(const char *pCmd, int *pExitCode, bma_StrBldr *pSt
 	bma_StrBldr raw;
 	bma_assert(pCmd != NULL);
 	bma_assert(pExitCode != NULL);
-	bma_assert(pStdOutStdErr != NULL);
-	bma_StrBldr_ctor_ext(&raw, bma_StrBldr_getAlloc(pStdOutStdErr));
+	bma_assert(pOut != NULL);
+	bma_StrBldr_ctor_ext(&raw, bma_StrBldr_getAlloc(pOut));
 	*pExitCode = 0;
 	memset(&sa, 0, sizeof(sa));
 	memset(&si, 0, sizeof(si));
@@ -311,7 +310,7 @@ BMA_DEF bma_bool_t bma_runCmd(const char *pCmd, int *pExitCode, bma_StrBldr *pSt
 			(void)WideCharToMultiByte(CP_UTF8, 0, pWide, wideLen, (char*)bma_StrBldr_getStr(&raw), utf8Len, NULL, NULL);
 			bma_free_ext(raw.pAlloc, pWide);
 		}
-		bma_StrBldr_appndStrN(pStdOutStdErr, bma_StrBldr_getStr(&raw), bma_StrBldr_getSz(&raw));
+		bma_StrBldr_appndStrN(pOut, bma_StrBldr_getStr(&raw), bma_StrBldr_getSz(&raw));
 	}
 	result = BMA_TRUE;
 out:
@@ -329,7 +328,7 @@ out:
 #elif BMA_IS_POSIX
 	int outPipe[2] = {-1, -1};
 	int errPipe[2] = {-1, -1};
-	char **argv = NULL;
+	bma_ProcArgVec argv;
 	char *argvStorage = NULL;
 	bma_IMemAlloc *pAlloc = bma_getDfltMemAlloc();
 	pid_t pid;
@@ -341,8 +340,9 @@ out:
 	char buf[BMA_PROC_PIPE_READ_CHUNKS];
 	bma_assert(pCmd != NULL);
 	bma_assert(pExitCode != NULL);
-	bma_assert(pStdOutStdErr != NULL);
+	bma_assert(pOut != NULL);
 	*pExitCode = 0;
+	bma_ProcArgVec_ctor_ext(&argv, pAlloc);
 	if (!bma_proc_parseCmd(pCmd, &argv, &argvStorage, pAlloc)) {
 		goto out;
 	}
@@ -364,6 +364,7 @@ out:
 		goto out;
 	}
 	if (pid == 0) {
+		char **pArgv = bma_ProcArgVec_getData(&argv);
 		int childErrFd;
 		int childErr;
 		(void)close(outPipe[0]);
@@ -386,7 +387,7 @@ out:
 		}
 		/* Keep only the close-on-exec error channel in addition to stdio. */
 		bma_proc_closeExtraFds(4);
-		execvp(argv[0], argv);
+		execvp(pArgv[0], pArgv);
 		childErr = errno;
 		bma_proc_writeExecError(3, childErr);
 		_exit(127);
@@ -417,7 +418,7 @@ out:
 	for (;;) {
 		ssize_t n = read(outPipe[0], buf, sizeof(buf));
 		if (n > 0) {
-			bma_StrBldr_appndStrN(pStdOutStdErr, buf, (size_t)n);
+			bma_StrBldr_appndStrN(pOut, buf, (size_t)n);
 		}
 		else if (n == 0) {
 			break;
@@ -450,14 +451,14 @@ out:
 	if (outPipe[1] >= 0) (void)close(outPipe[1]);
 	if (errPipe[0] >= 0) (void)close(errPipe[0]);
 	if (errPipe[1] >= 0) (void)close(errPipe[1]);
-	if (argv != NULL) bma_free_ext(pAlloc, argv);
-	if (argvStorage != NULL) bma_free_ext(pAlloc, argvStorage);
+	bma_ProcArgVec_dtor(&argv, NULL);
+	bma_free_ext(pAlloc, argvStorage);
 	return result;
 
 #else
 	(void)pCmd;
 	(void)pExitCode;
-	(void)pStdOutStdErr;
+	(void)pOut;
 	return BMA_FALSE;
 #endif
 }

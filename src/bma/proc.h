@@ -337,12 +337,13 @@ out:
 	int execError = 0;
 	size_t execErrorBytes = 0;
 	int status;
-	char buf[BMA_PROC_PIPE_READ_CHUNKS];
+	char *pBuf;
 	bma_assert(pCmd != NULL);
 	bma_assert(pExitCode != NULL);
 	bma_assert(pOut != NULL);
 	*pExitCode = 0;
 	bma_ProcArgVec_ctor_ext(&argv, pAlloc);
+	pBuf = (char*)(*pAlloc->pRllc)(pAlloc, NULL, BMA_PROC_PIPE_READ_CHUNKS, NULL);
 	if (!bma_proc_parseCmd(pCmd, &argv, &argvStorage, pAlloc)) {
 		goto out;
 	}
@@ -416,9 +417,9 @@ out:
 	(void)close(errPipe[0]);
 	errPipe[0] = -1;
 	for (;;) {
-		ssize_t n = read(outPipe[0], buf, sizeof(buf));
+		ssize_t n = read(outPipe[0], pBuf, BMA_PROC_PIPE_READ_CHUNKS);
 		if (n > 0) {
-			bma_StrBldr_appndStrN(pOut, buf, (size_t)n);
+			bma_StrBldr_appndStrN(pOut, pBuf, (size_t)n);
 		}
 		else if (n == 0) {
 			break;
@@ -453,6 +454,7 @@ out:
 	if (errPipe[1] >= 0) (void)close(errPipe[1]);
 	bma_ProcArgVec_dtor(&argv, NULL);
 	bma_free_ext(pAlloc, argvStorage);
+	bma_free_ext(pAlloc, pBuf);
 	return result;
 
 #else

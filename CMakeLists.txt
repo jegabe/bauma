@@ -38,11 +38,18 @@ target_compile_definitions(test_log PRIVATE BMA_IMPL BMA_LOG_TEST)
 add_executable(test_nj src/bma/nj.h)
 target_compile_definitions(test_nj PRIVATE BMA_IMPL BMA_NJ_TEST)
 
+add_executable(test_proc src/bma/proc.h)
+target_compile_definitions(test_proc PRIVATE BMA_IMPL BMA_PROC_TEST)
+
+add_executable(test_scninc src/bma/scninc.h)
+target_compile_definitions(test_scninc PRIVATE BMA_IMPL BMA_SCNINC_TEST)
+
 add_executable(test_thrd src/bma/thrd.h)
 target_compile_definitions(test_thrd PRIVATE BMA_IMPL BMA_THRD_TEST)
 
 add_executable(test_utils src/bma/utils.h)
 target_compile_definitions(test_utils PRIVATE BMA_IMPL BMA_UTILS_TEST)
+
 
 add_executable(bauma src/bma/main.c)
 
@@ -54,5 +61,7 @@ add_test(NAME test_cmdsl COMMAND test_cmdsl)
 add_test(NAME test_fs COMMAND test_fs)
 add_test(NAME test_log COMMAND test_log)
 add_test(NAME test_nj COMMAND test_nj)
+add_test(NAME test_proc COMMAND test_proc)
+add_test(NAME test_scninc COMMAND test_scninc)
 add_test(NAME test_thrd COMMAND test_thrd)
 add_test(NAME test_utils COMMAND test_utils)

@@ -926,7 +926,7 @@ BMA_DEF void bma_StrBldr_appndCdPntUtf8(bma_StrBldr *pSelf, unsigned long cdPnt)
 BMA_DEF void bma_StrBldr_clear(bma_StrBldr *pSelf);
 BMA_DEF bma_bool_t bma_StrBldr_strtsWth(bma_StrBldr *pSelf, const char* pStr);
 BMA_DEF bma_bool_t bma_StrBldr_endsWth(bma_StrBldr *pSelf, const char* pStr);
-
+BMA_DEF void bma_StrBldr_rplc(bma_StrBldr *pSelf, const char* pFrom, const char *pTo);
 
 typedef struct bma_StrTreeNodeHdr_ bma_StrTreeNodeHdr_;
 
@@ -2248,6 +2248,71 @@ BMA_DEF bma_bool_t bma_StrBldr_endsWth(bma_StrBldr *pSelf, const char* pStr) {
 	return (memcmp(pSelf->pStr + pSelf->size - l, pStr, l) == 0);
 }
 
+BMA_DEF void bma_StrBldr_rplc(bma_StrBldr *pSelf, const char* pFrom, const char *pTo) {
+	size_t fromLen, toLen, offs, rest, cnt, newSz, realNewCap;
+	const char *pSrc, *pNeedle;
+	char *pDst, *pNew;
+	bma_assert(pSelf != NULL);
+	bma_assert(pSelf->pAlloc != NULL);
+	bma_assert(pFrom != NULL);
+	bma_assert(pTo != NULL);
+	fromLen = strlen(pFrom);
+	toLen = strlen(pTo);
+	if (fromLen == 0 || fromLen > pSelf->size) {
+		return;
+	}
+	if (toLen <= fromLen) {
+		/* Compact in place: the write position never overtakes the read position */
+		pSrc = pSelf->pStr;
+		pDst = pSelf->pStr;
+		rest = pSelf->size;
+		while ((pNeedle = (const char *)bma_memmem(pSrc, rest, pFrom, fromLen)) != NULL) {
+			offs = (size_t)(pNeedle - pSrc);
+			memmove(pDst, pSrc, offs);
+			pDst += offs;
+			memcpy(pDst, pTo, toLen);
+			pDst += toLen;
+			pSrc = pNeedle + fromLen;
+			rest -= offs + fromLen;
+		}
+		memmove(pDst, pSrc, rest);
+		pSelf->size = (size_t)(pDst - pSelf->pStr) + rest;
+		pSelf->pStr[pSelf->size] = '\0';
+		return;
+	}
+	cnt = 0;
+	pSrc = pSelf->pStr;
+	rest = pSelf->size;
+	while ((pNeedle = (const char *)bma_memmem(pSrc, rest, pFrom, fromLen)) != NULL) {
+		++cnt;
+		rest -= (size_t)(pNeedle - pSrc) + fromLen;
+		pSrc = pNeedle + fromLen;
+	}
+	if (cnt == 0) {
+		return;
+	}
+	newSz = pSelf->size + cnt * (toLen - fromLen);
+	pNew = (*pSelf->pAlloc->pRllc)(pSelf->pAlloc, NULL, newSz + 1U, &realNewCap);
+	pSrc = pSelf->pStr;
+	pDst = pNew;
+	rest = pSelf->size;
+	while ((pNeedle = (const char *)bma_memmem(pSrc, rest, pFrom, fromLen)) != NULL) {
+		offs = (size_t)(pNeedle - pSrc);
+		memcpy(pDst, pSrc, offs);
+		pDst += offs;
+		memcpy(pDst, pTo, toLen);
+		pDst += toLen;
+		pSrc = pNeedle + fromLen;
+		rest -= offs + fromLen;
+	}
+	memcpy(pDst, pSrc, rest);
+	bma_free_ext(pSelf->pAlloc, pSelf->pStr);
+	pSelf->pStr = pNew;
+	pSelf->size = newSz;
+	pSelf->cap = realNewCap - 1U;
+	pSelf->pStr[pSelf->size] = '\0';
+}
+
 struct bma_StrTreeNodeHdr_ {
 	bma_StrTreeNodeHdr_ *pParent;
 	bma_StrN key;
@@ -2967,6 +3032,41 @@ void test_stringBuilder_appendBool(void) {
 	bma_StrBldr_dtor(&sb, NULL);
 }
 
+static void test_stringBuilder_replaceOne(const char *pIn, const char *pFrom, const char *pTo, const char *pExp) {
+	bma_StrBldr sb;
+	bma_StrBldr_ctor(&sb);
+	bma_StrBldr_appndStr(&sb, pIn);
+	bma_StrBldr_rplc(&sb, pFrom, pTo);
+	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&sb), pExp) == 0);
+	BMA_EXPECT(bma_StrBldr_getSz(&sb) == strlen(pExp));
+	BMA_EXPECT(sb.pStr[sb.size] == '\0');
+	BMA_EXPECT(sb.size <= sb.cap || sb.cap == 0);
+	bma_StrBldr_dtor(&sb, NULL);
+}
+
+void test_stringBuilder_replace(void) {
+	/* empty builder */
+	test_stringBuilder_replaceOne("", "a", "b", "");
+	/* empty pFrom */
+	test_stringBuilder_replaceOne("abc", "", "x", "abc");
+	/* no match */
+	test_stringBuilder_replaceOne("abc", "x", "yy", "abc");
+	test_stringBuilder_replaceOne("abc", "abcd", "y", "abc");
+	/* same length */
+	test_stringBuilder_replaceOne("abcabc", "b", "x", "axcaxc");
+	/* shrinking */
+	test_stringBuilder_replaceOne("aXXbXXc", "XX", "y", "aybyc");
+	test_stringBuilder_replaceOne("XXaXX", "XX", "", "a");
+	test_stringBuilder_replaceOne("XXXX", "XX", "", "");
+	/* growing */
+	test_stringBuilder_replaceOne("a.b.c", ".", "--", "a--b--c");
+	test_stringBuilder_replaceOne(".", ".", "0123456789012345678901234567890123456789",
+	                              "0123456789012345678901234567890123456789");
+	/* replacement contains pFrom: must not be re-scanned */
+	test_stringBuilder_replaceOne("aa", "a", "aa", "aaaa");
+	test_stringBuilder_replaceOne("aaa", "aa", "a", "aa");
+}
+
 void test_hashMap_constructDestruct(void) {
 	bma_HshMp h;
 	bma_HshMp_ctor(&h, char*, char*, &bma_memblck_dtor, &bma_memblck_dtor, &bma_strhash, &bma_streq);
@@ -3107,6 +3207,7 @@ int main(int argc, char *argv[]) {
 	BMA_TEST(test_stringBuilder_appendUnsigned);
 	BMA_TEST(test_stringBuilder_appendDouble);
 	BMA_TEST(test_stringBuilder_appendBool);
+	BMA_TEST(test_stringBuilder_replace);
 	BMA_TEST(test_hashMap_constructDestruct);
 	BMA_TEST(test_hashMap_putGet);
 	BMA_TEST(test_hashMap_manyElements);

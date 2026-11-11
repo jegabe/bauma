@@ -325,9 +325,9 @@ BMA_DEF bma_bool_t bma_scnFrFles_impl(const char *pPath, const char* pPrefix, bm
 	bma_StrBldr_ctor_ext(&pathBldr, pAlloc);
 	bma_StrBldr_appndStr(&pathBldr, pPath);
 	bma_entrPth(&pathBldr, "\\*"); /* append wildcard for FindFirstFileW */
-	pWidePath = bma_strWdup(bma_StrBldr_getStr(&pathBldr));
+	pWidePath = bma_strWdup_ext(bma_StrBldr_getStr(&pathBldr), pAlloc);
 	h = FindFirstFileW(pWidePath, &fData);
-	bma_free(pWidePath);
+	bma_free_ext(pAlloc, pWidePath);
 	bma_StrBldr_dtor(&pathBldr, pAlloc);
 	if (h == INVALID_HANDLE_VALUE) {
 		goto out;
@@ -344,13 +344,13 @@ BMA_DEF bma_bool_t bma_scnFrFles_impl(const char *pPath, const char* pPrefix, bm
 		} else {
 			ent.type = BMA_DIR_ENT_TYPE_FILE;
 		}
-		pName = bma_wStrDup(fData.cFileName);
+		pName = bma_wStrDup_ext(fData.cFileName, pAlloc);
 		bma_StrBldr_ctor_ext(&flNm, pAlloc);
 		bma_StrBldr_appndStr(&flNm, pPrefix);
 		bma_entrPth(&flNm, pName);
 		ent.pName = bma_StrBldr_rlse(&flNm);
 		bma_StrBldr_dtor(&flNm, NULL);
-		bma_free(pName);
+		bma_free_ext(pAlloc, pName);
 		if ((pFltr == NULL) || (*pFltr)(&ent, pFltrUsrDta)) {
 			bma_DirEntVec_appnd(pOut, &ent);
 		}
@@ -362,14 +362,14 @@ BMA_DEF bma_bool_t bma_scnFrFles_impl(const char *pPath, const char* pPrefix, bm
 			bma_StrBldr subPath;
 			bma_StrBldr subPrefix;
 			bma_bool_t subRslt;
-			pFlNm = bma_wStrDup(fData.cFileName);
+			pFlNm = bma_wStrDup_ext(fData.cFileName, pAlloc);
 			bma_StrBldr_ctor_ext(&subPath, pAlloc);
 			bma_StrBldr_appndStr(&subPath, pPath);
 			bma_entrPth(&subPath, pFlNm);
 			bma_StrBldr_ctor_ext(&subPrefix, pAlloc);
 			bma_StrBldr_appndStr(&subPrefix, pPrefix);
 			bma_entrPth(&subPrefix, pFlNm);
-			bma_free(pFlNm);
+			bma_free_ext(pAlloc, pFlNm);
 			subRslt = bma_scnFrFles_impl(bma_StrBldr_getStr(&subPath), bma_StrBldr_getStr(&subPrefix), pOut, recursive, pFltr, pFltrUsrDta);
 			bma_StrBldr_dtor(&subPrefix, pAlloc);
 			bma_StrBldr_dtor(&subPath, pAlloc);

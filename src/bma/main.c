@@ -5,7 +5,7 @@
 #include <bma/cmdln.h>
 #include <bma/fs.h>
 #include <bma/nj.h>
-#include <bma/utils.h>
+#include <bma/scninc.h>
 #include <bma/log.h>
 
 #define BMA_CMD_TYPE_BAUMA   1

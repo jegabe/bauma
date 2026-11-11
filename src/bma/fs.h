@@ -407,7 +407,7 @@ out:
 		switch (pEnt->d_type) {
 		case DT_REG: ent.type = BMA_DIR_ENT_TYPE_FILE; break;
 		case DT_DIR: ent.type = BMA_DIR_ENT_TYPE_DIR; break;
-		default: continue /* skip unknown types */
+		default: continue; /* skip unknown types */
 		}
 		bma_StrBldr_ctor_ext(&flNm, pAlloc);
 		bma_StrBldr_appndStr(&flNm, pPrefix);

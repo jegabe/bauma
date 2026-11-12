@@ -475,6 +475,7 @@ out:
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <bma/fs.h>
 
 #ifdef __cplusplus
 	extern "C" {

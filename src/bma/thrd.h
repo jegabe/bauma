@@ -30,9 +30,6 @@ Bau 'ma's basic multithreading support
 */
 #include <bma/ccal.h>
 
-#include "cmdsl.h"
-#include "cmdsl.h"
-
 #if BMA_IS_WINDOWS
 	#define BMA_HAS_THRDS 1
 	#define BMA_WIN_THRDS 1

@@ -219,11 +219,14 @@ BMA_DEF bma_bool_t bma_runCmd(const char *pCmd, int *pExitCode, bma_StrBldr *pOu
 	STARTUPINFOW si;
 	PROCESS_INFORMATION pi;
 	wchar_t* pWcmdLn = NULL;
+	wchar_t *pWide = NULL;
+	bma_IMemAlloc *pAlloc = bma_StrBldr_getAlloc(pOut);
 	bma_StrBldr raw;
 	bma_assert(pCmd != NULL);
 	bma_assert(pExitCode != NULL);
 	bma_assert(pOut != NULL);
-	bma_StrBldr_ctor_ext(&raw, bma_StrBldr_getAlloc(pOut));
+	bma_assert(pAlloc != NULL);
+	bma_StrBldr_ctor_ext(&raw, pAlloc);
 	*pExitCode = 0;
 	memset(&sa, 0, sizeof(sa));
 	memset(&si, 0, sizeof(si));
@@ -242,7 +245,7 @@ BMA_DEF bma_bool_t bma_runCmd(const char *pCmd, int *pExitCode, bma_StrBldr *pOu
 	si.hStdOutput = hWrite;
 	si.hStdError = hWrite;
 	si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-	pWcmdLn = bma_strWdup(pCmd);
+	pWcmdLn = bma_strWdup_ext(pCmd, pAlloc);
 	if (!CreateProcessW(NULL,
 	                    pWcmdLn,
 	                    NULL,
@@ -292,32 +295,28 @@ BMA_DEF bma_bool_t bma_runCmd(const char *pCmd, int *pExitCode, bma_StrBldr *pOu
 			cp = GetOEMCP();
 		}
 		if (cp != CP_UTF8) {
-			wchar_t *pWide;
 			int wideLen, utf8Len;
 			/* Convert to native windows (UTF-16) and back to UTF-8*/
 			wideLen = MultiByteToWideChar(cp, 0, bma_StrBldr_getStr(&raw), (int)bma_StrBldr_getSz(&raw), NULL, 0);
 			if (wideLen <= 0) {
 				goto out;
 			}
-			pWide = (*raw.pAlloc->pRllc)(raw.pAlloc, NULL, (size_t)wideLen * sizeof(wchar_t), NULL);
+			pWide = (*pAlloc->pRllc)(pAlloc, NULL, (size_t)wideLen * sizeof(wchar_t), NULL);
 			(void)MultiByteToWideChar(cp, 0, bma_StrBldr_getStr(&raw), (int)bma_StrBldr_getSz(&raw), pWide, wideLen);
 			utf8Len = WideCharToMultiByte(CP_UTF8, 0, pWide, wideLen, NULL, 0, NULL, NULL);
 			if (utf8Len <= 0) {
-				bma_free_ext(raw.pAlloc, pWide);
 				goto out;
 			}
 			bma_StrBldr_rsz(&raw, (size_t)utf8Len);
 			(void)WideCharToMultiByte(CP_UTF8, 0, pWide, wideLen, (char*)bma_StrBldr_getStr(&raw), utf8Len, NULL, NULL);
-			bma_free_ext(raw.pAlloc, pWide);
 		}
 		bma_StrBldr_appndStrN(pOut, bma_StrBldr_getStr(&raw), bma_StrBldr_getSz(&raw));
 	}
 	result = BMA_TRUE;
 out:
+	bma_free_ext(pAlloc, pWide);
 	bma_StrBldr_dtor(&raw, NULL);
-	if (pWcmdLn != NULL) {
-		bma_free(pWcmdLn);
-	}
+	bma_free_ext(pAlloc, pWcmdLn);
 	if (hRead != NULL) {
 		CloseHandle(hRead);
 	}
@@ -563,6 +562,41 @@ void test_missingCommand(void) {
 #endif
 }
 
+void test_getVsIncDir(void) {
+#if BMA_IS_WINDOWS
+	bma_StrBldr cmd;
+	bma_StrBldr out;
+	int exitCode = 0;
+	char *pProgFiles;
+	char *pVsInsDir;
+	bma_StrBldr_ctor(&cmd);
+	bma_StrBldr_ctor(&out);
+	pProgFiles = getenv("ProgramFiles(x86)"); /* TODO need UTF_8 getenv */
+	BMA_EXPECT(pProgFiles != NULL);
+	bma_StrBldr_appndChr(&cmd, '\"', 1U);
+	bma_StrBldr_appndStr(&cmd, pProgFiles);
+	bma_entrPth(&cmd, "Microsoft Visual Studio");
+	bma_entrPth(&cmd, "Installer");
+	bma_entrPth(&cmd, "vswhere.exe");
+	bma_StrBldr_appndStr(&cmd, "\" -latest -property installationPath");
+	BMA_EXPECT(bma_runCmd(bma_StrBldr_getStr(&cmd), &exitCode, &out));
+	pVsInsDir = bma_StrBldr_rlse(&out); /* now "out" is empty again */
+	bma_trmWhtSpc(pVsInsDir); /* get rid of the newline */
+	bma_StrBldr_clear(&cmd);
+	bma_StrBldr_appndStr(&cmd, "cmd.exe /C \"call ");
+	bma_StrBldr_appndStr(&cmd, pVsInsDir);
+	bma_free(pVsInsDir);
+	bma_entrPth(&cmd, "Common7");
+	bma_entrPth(&cmd, "Tools");
+	bma_entrPth(&cmd, "VsDevCmd.bat -arch=x64 -host_arch=x64");
+	bma_StrBldr_appndStr(&cmd, " >NUL && set INCLUDE\"");
+	BMA_EXPECT(bma_runCmd(bma_StrBldr_getStr(&cmd), &exitCode, &out));
+	BMA_EXPECT(bma_strtsWth(bma_StrBldr_getStr(&out), "INCLUDE="));
+	bma_StrBldr_dtor(&out, NULL);
+	bma_StrBldr_dtor(&cmd, NULL);
+#endif
+}
+
 int main(int argc, char *argv[]) {
 	(void)argc;
 	(void)argv;
@@ -570,6 +604,7 @@ int main(int argc, char *argv[]) {
 	BMA_TEST(test_echoNonAscii);
 	BMA_TEST(test_quotedArgsAndExitCode);
 	BMA_TEST(test_missingCommand);
+	BMA_TEST(test_getVsIncDir);
 
 	printf("All tests passed.\n");
 	fflush(stdout);

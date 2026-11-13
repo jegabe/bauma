@@ -314,7 +314,9 @@ BMA_DEF void bma_Env_dtor(bma_Env *pEnv, bma_IMemAlloc *pAlloc_) {
 	while(i-- > 0) {
 		(*pAlloc->pRllc)(pAlloc, pEnv->pEnvp[i], 0, NULL);
 	}
-	(*pAlloc->pRllc)(pAlloc, pEnv->pEnvp, 0, NULL);
+	if (pEnv->pEnvp != BMA_NULL_ENV) {
+		(*pAlloc->pRllc)(pAlloc, pEnv->pEnvp, 0, NULL);
+	}
 #endif
 #if BMA_DBG
 	memset(pEnv, 0xFF, sizeof(*pEnv));
@@ -419,6 +421,8 @@ BMA_DEF void bma_Env_set(bma_Env *pEnv, const char *pName, const char *pValue) {
 	size_t addLen;
 	wchar_t *pDst;
 	bma_assert(pEnv != NULL);
+	bma_assert(pName != NULL);
+	bma_assert(pValue != NULL);
 	pWideName = bma_strWdup(pName);
 	pWideNewVal = bma_strWdup(pValue);
 	wideNameLen = wcslen(pWideName);
@@ -461,6 +465,43 @@ out:
 	bma_free(pWideNewVal);
 	bma_free(pWideName);
 #elif BMA_IS_POSIX
+	bma_IMemAlloc *pAlloc;
+	size_t i;
+	size_t nameLen;
+	size_t valueLen;
+	char *pEq;
+	char *pNewEntry;
+	char **pNewEnvp;
+	char **pOldEnvp;
+	size_t prefixLen;
+	bma_assert(pEnv != NULL);
+	bma_assert(pName != NULL);
+	bma_assert(pValue != NULL);
+	pAlloc = bma_getDfltMemAlloc();
+	nameLen = strlen(pName);
+	valueLen = strlen(pValue);
+	prefixLen = nameLen + 1U;
+	for (i = 0; i < pEnv->num; ++i) {
+		pEq = strchr(pEnv->pEnvp[i], '=');
+		if (pEq == NULL) {
+			continue;
+		}
+		if (((size_t)(pEq - pEnv->pEnvp[i]) == nameLen) && (memcmp(pEnv->pEnvp[i], pName, nameLen) == 0)) {
+			pEnv->pEnvp[i] = (char*)(*pAlloc->pRllc)(pAlloc, pEnv->pEnvp[i], prefixLen + valueLen + 1U, NULL);
+			memcpy(pEnv->pEnvp[i] + prefixLen, pValue, valueLen + 1U);
+			return;
+		}
+	}
+	pOldEnvp = (pEnv->pEnvp == BMA_NULL_ENV) ? NULL : pEnv->pEnvp;
+	pNewEnvp = (char**)(*pAlloc->pRllc)(pAlloc, pOldEnvp, (pEnv->num + 2U) * sizeof(char*), NULL);
+	pEnv->pEnvp = pNewEnvp;
+	pNewEntry = (char*)(*pAlloc->pRllc)(pAlloc, NULL, prefixLen + valueLen + 1U, NULL);
+	memcpy(pNewEntry, pName, nameLen);
+	pNewEntry[nameLen] = '=';
+	memcpy(pNewEntry + prefixLen, pValue, valueLen + 1U);
+	pEnv->pEnvp[pEnv->num] = pNewEntry;
+	++pEnv->num;
+	pEnv->pEnvp[pEnv->num] = NULL;
 #endif
 }
 
@@ -795,6 +836,25 @@ void test_envGetPath(void) {
 	bma_StrBldr_dtor(&value, NULL);
 }
 
+void test_envGetSet(void) {
+	bma_Env vars;
+	bma_StrBldr value;
+	bma_StrBldr_ctor(&value);
+	bma_Env_ctor(&vars);
+	bma_Env_rdFrmOs(&vars);
+	bma_Env_set(&vars, "PATH", "value");
+	bma_Env_get(&vars, "PATH", &value);
+	BMA_EXPECT(memcmp(bma_StrBldr_getStr(&value), "value", 5U) == 0);
+	bma_StrBldr_clear(&value);
+	bma_Env_dtor(&vars, NULL);
+	/* Fresh, untouched env: */
+	bma_Env_ctor(&vars);
+	bma_Env_set(&vars, "PATH", "other");
+	bma_Env_get(&vars, "PATH", &value);
+	BMA_EXPECT(memcmp(bma_StrBldr_getStr(&value), "other", 5U) == 0);
+	bma_StrBldr_dtor(&value, NULL);
+}
+
 void test_echo(void) {
 	bma_StrBldr out;
 	int exitCode = 0;
@@ -892,6 +952,7 @@ int main(int argc, char *argv[]) {
 	(void)argc;
 	(void)argv;
 	BMA_TEST(test_envGetPath);
+	BMA_TEST(test_envGetSet);
 	BMA_TEST(test_echo);
 	BMA_TEST(test_echoNonAscii);
 	BMA_TEST(test_quotedArgsAndExitCode);

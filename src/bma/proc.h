@@ -451,6 +451,7 @@ BMA_DEF void bma_Env_set(bma_Env *pEnv, const char *pName, const char *pValue) {
 		}
 	}
 	/* not found: append "name=value\0" before the final terminator */
+	TODO under Windows, the env block must be sorted alpabetically
 	size_t addLen = wideNameLen + 1U + newValLen + 1U;
 	wchar_t *pDst;
 	bma_Env_ensureCap(pEnv, pEnv->sz + addLen + 1U);

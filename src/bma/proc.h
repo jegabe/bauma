@@ -34,15 +34,41 @@ Sub process management
 	extern "C" {
 #endif
 
-typedef struct bma_EnvVars bma_EnvVars;
+/*!
+\brief Set of operating system environment variables.
+Implementation is platform dependent to be able to
+quickly launch new processes with a modified environment
+without too much conversion involved.
+Don't use the members directly, use the bma_Env_* functions instead.
+*/
+typedef struct bma_Env {
+#if BMA_IS_WINDOWS
+	wchar_t* pEnvBlock; /* double null terminated string list as created by GetEnvironmentStringsW() API */
+	size_t sz;
+	size_t cap; /* capacity of pEnvBlock including the double null terminator */
+#elif BMA_IS_POSIX
+	char **pEnvp; /* NULL terminated array of strings as created by execve() API */
+	size_t num; /* number of strings in pEnvp excluding the final NULL pointer */
+#else
+	#error "Unsupported platform"
+#endif
+} bma_Env;
 
-BMA_DEF bma_EnvVars *bma_EnvVars_create(void);
-BMA_DEF void bma_EnvVars_destroy(bma_EnvVars *pEnvVars);
-BMA_DEF void bma_EnvVars_rdFrmOs(bma_EnvVars *pEnvVars);
-BMA_DEF bma_bool_t bma_EnvVars_get(bma_EnvVars *pEnvVars, const char *pName, bma_StrBldr *pOutValue);
-BMA_DEF bma_bool_t bma_EnvVars_set(bma_EnvVars *pEnvVars, const char *pName, const char *pValue);
-BMA_DEF bma_bool_t bma_EnvVars_prpnd(bma_EnvVars *pEnvVars, const char *pName, const char *pValue);
-BMA_DEF bma_bool_t bma_EnvVars_appnd(bma_EnvVars *pEnvVars, const char *pName, const char *pValue);
+#if BMA_IS_WINDOWS
+	/*! \brief Separator for multiple values in one env. var., like "Path" in Windows */
+	#define BMA_ENV_VAL_SEP ";"
+#elif BMA_IS_POSIX
+	/*! \brief Separator for multiple values in one env. var., like "PATH" in POSIX */
+	#define BMA_ENV_VAL_SEP ":"
+#endif
+
+BMA_DEF void bma_Env_ctor(bma_Env *pEnv);
+BMA_DEF void bma_Env_dtor(bma_Env *pEnv, bma_IMemAlloc *pAlloc);
+BMA_DEF void bma_Env_rdFrmOs(bma_Env *pEnv);
+BMA_DEF void bma_Env_get(bma_Env *pEnvVars, const char *pName, bma_StrBldr *pOutValue);
+BMA_DEF void bma_Env_set(bma_Env *pEnvVars, const char *pName, const char *pValue);
+/* Joins the existing value (if any) and pValue with ';'(Win)/':'(POSIX) and stores the result */
+BMA_DEF void bma_EnvVars_jn(bma_Env *pEnv, const char *pName, const char *pValue, bma_bool_t prepend);
 
 /*!
 \brief Runs the command pCmd as sub-process and collects the exit code into pExitCode
@@ -87,6 +113,11 @@ BMA_DEF bma_bool_t bma_runCmd(const char *pCmd, int *pExitCode, bma_StrBldr *pOu
 		extern void closefrom(int);
 	#else
 		#define BMA_PROC_HAS_CLOSEFROM 0
+	#endif
+	#ifdef __cplusplus
+		extern "C" char **environ;
+	#else
+		extern char **environ;
 	#endif
 #endif
 
@@ -222,69 +253,125 @@ BMA_DEF void bma_proc_writeExecError(int errFd, int errorCode) {
 
 #if BMA_IS_WINDOWS
 
-struct bma_EnvVars {
-	wchar_t* pEnvBlock; /* double null terminated string list as created by GetEnvironmentStringsW() API */
-	size_t sz;
-	size_t cap; /* capacity of pEnvBlock including the double null terminator */
-};
+static const wchar_t bma_kNullStr[2] = { L'\0', L'\0' };
+#define BMA_ENV_NULLSTR ((wchar_t*)&bma_kNullStr[0])
+#define BMA_ENV_EXTRA_CAP 256U
 
-#define BMA_ENVVARS_EXTRA_CAP 256U
-
-BMA_DEF bma_EnvVars *bma_EnvVars_create(void) {
+/* Grows pEnvBlock so that it can hold at least minCap wchar_t's */
+static void bma_Env_ensureCap(bma_Env *pEnv, size_t minCap) {
 	bma_IMemAlloc *pAlloc;
-	bma_EnvVars *pEnvVars;
+	wchar_t *pOld, *pNew;
 	size_t realSz = 0;
+	if (minCap <= pEnv->cap) return BMA_TRUE;
 	pAlloc = bma_getDfltMemAlloc();
-	pEnvVars = bma_malloc_ext(pAlloc, bma_EnvVars);
-	pEnvVars->pEnvBlock = (*pAlloc->pRllc)(pAlloc, NULL, 2U * sizeof(wchar_t), &realSz);
-	realSz /= sizeof(wchar_t);
-	pEnvVars->pEnvBlock[0] = pEnvVars->pEnvBlock[1] = L'\0';
-	pEnvVars->sz = 0;
-	pEnvVars->cap = realSz;
-	return pEnvVars;
+	if (pEnv->pEnvBlock == BMA_ENV_NULLSTR) {
+		pOld = NULL;
+	}
+	else {
+		pOld = pEnv->pEnvBlock;
+	}
+	pNew = (wchar_t*)(*pAlloc->pRllc)(pAlloc, pOld, (minCap + BMA_ENVVARS_EXTRA_CAP) * sizeof(wchar_t), &realSz);
+	pEnv->pEnvBlock = pNew;
+	pEnv->cap = realSz / sizeof(wchar_t);
 }
 
-BMA_DEF void bma_EnvVars_destroy(bma_EnvVars *pEnvVars) {
-	bma_IMemAlloc *pAlloc;
-	if (pEnvVars == NULL) return;
-	pAlloc = bma_getDfltMemAlloc();
-	(*pAlloc->pRllc)(pAlloc, pEnvVars->pEnvBlock, 0, NULL);
-	(*pAlloc->pRllc)(pAlloc, pEnvVars, 0, NULL);
-#if BMA_DBG
-	memset(pEnvVars, 0xFF, sizeof(*pEnvVars));
+#elif BMA_IS_POSIX
+
+static const char *const bma_kNullEnv[1] = { NULL };
+#define BMA_NULL_ENV ((char**)&bma_kNullEnv[0])
+
+#endif /* BMA_IS_... */
+
+BMA_DEF void bma_Env_ctor(bma_Env *pEnv) {
+#if BMA_IS_WINDOWS
+	bma_assert(pEnv != NULL);
+	pEnv->pEnvBlock = BMA_ENV_NULLSTR;
+	pEnv->sz = 0;
+	pEnv->cap = 0;
+#elif BMA_IS_POSIX
+	pEnv->pEnvp = BMA_NULL_ENV;
+	pEnv->num = 0;
 #endif
 }
 
-BMA_DEF void bma_EnvVars_rdFrmOs(bma_EnvVars *pEnvVars) {
+BMA_DEF void bma_Env_dtor(bma_Env *pEnv, bma_IMemAlloc *pAlloc_) {
+#if BMA_IS_WINDOWS
+	bma_IMemAlloc *pAlloc;
+	bma_assert(pEnv != NULL);
+	(void)pAlloc_;
+	pAlloc = bma_getDfltMemAlloc();
+	if (pEnv->pEnvBlock != BMA_ENV_NULLSTR) {
+		pAlloc = bma_getDfltMemAlloc();
+		(*pAlloc->pRllc)(pAlloc, pEnv->pEnvBlock, 0, NULL);
+	}
+#elif BMA_IS_POSIX
+	bma_IMemAlloc *pAlloc;
+	size_t i;
+	bma_assert(pEnv != NULL);
+	(void)pAlloc_;
+	pAlloc = bma_getDfltMemAlloc();
+	i = pEnv->num;
+	while(i-- > 0) {
+		(*pAlloc->pRllc)(pAlloc, pEnv->pEnvp[i], 0, NULL);
+	}
+	(*pAlloc->pRllc)(pAlloc, pEnv->pEnvp, 0, NULL);
+#endif
+#if BMA_DBG
+	memset(pEnv, 0xFF, sizeof(*pEnv));
+#endif
+}
+
+BMA_DEF void bma_Env_rdFrmOs(bma_Env *pEnv) {
+#if BMA_IS_WINDOWS
 	bma_IMemAlloc *pAlloc;
 	const wchar_t *pCurr, *p;
 	size_t len;
-	bma_assert(pEnvVars != NULL);
+	bma_assert(pEnv != NULL);
 	pAlloc = bma_getDfltMemAlloc();
 	pCurr = GetEnvironmentStringsW();
 	bma_assert(pCurr != NULL);
 	len = bma_dblNllTrmStrLen(pCurr);
-	if ((len + 2U) > pEnvVars->cap) {
-		size_t realSz = 0;
-		/* free old mem */
-		(*pAlloc->pRllc)(pAlloc, pEnvVars->pEnvBlock, 0, NULL);
-		/* allocate enough mem */
-		pEnvVars->pEnvBlock = (*pAlloc->pRllc)(pAlloc, NULL, (len + 2U + BMA_ENVVARS_EXTRA_CAP) * sizeof(wchar_t), &realSz);
-		realSz /= sizeof(wchar_t);
-		pEnvVars->cap = realSz;
+	bma_Env_ensureCap(pEnv, len + 1U);
+	memcpy(pEnv->pEnvBlock, pCurr, (len + 1U) * sizeof(wchar_t));
+	pEnv->sz = len;
+#elif BMA_IS_POSIX
+	bma_IMemAlloc *pAlloc;
+	char **p;
+	size_t i;
+	size_t len = 0;
+	bma_assert(pEnv != NULL);
+	pAlloc = bma_getDfltMemAlloc();
+	if (pEnv->pEnvp != BMA_NULL_ENV) {
+		i = pEnv->num;
+		while(i-- > 0) {
+			(*pAlloc->pRllc)(pAlloc, pEnv->pEnvp[i], 0, NULL);
+		}
+		(*pAlloc->pRllc)(pAlloc, pEnv->pEnvp, 0, NULL);
 	}
-	memcpy(pEnvVars->pEnvBlock, pCurr, (len + 2U) * sizeof(wchar_t));
-	pEnvVars->sz = len;
+	for (p = environ; *p != NULL; p++) {
+		++len;
+	}
+	pEnv->pEnvp = (char**)(pAlloc->pRllc)(pAlloc, NULL, (len + 1U) * sizeof(char*), NULL);
+	p = environ;
+	for (i=0; i<len; ++i) {
+		pEnv->pEnvp[i] = bma_strdup_ext(*p, pAlloc);
+		++p;
+	}
+	pEnv->pEnvp[len] = NULL;
+	pEnv->num = len;
+#endif
 }
 
-BMA_DEF bma_bool_t bma_EnvVars_get(bma_EnvVars *pEnvVars, const char *pName, bma_StrBldr *pOutValue) {
-	bma_bool_t result = BMA_FALSE;
+BMA_DEF void bma_Env_get(bma_Env *pEnv, const char *pName, bma_StrBldr *pOutValue) {
+#if BMA_IS_WINDOWS
 	wchar_t *pWideName, *p;
 	size_t wideNameLen;
-	bma_assert(pEnvVars != NULL);
+	bma_assert(pEnv != NULL);
+	bma_assert(pName != NULL);
+	bma_assert(pOutValue != NULL);
 	pWideName = bma_strWdup(pName);
 	wideNameLen = wcslen(pWideName);
-	for (p = pEnvVars->pEnvBlock; (p[0] != L'\0'); p = p + wcslen(p) + 1U) {
+	for (p = pEnv->pEnvBlock; (p[0] != L'\0'); p = p + wcslen(p) + 1U) {
 		const wchar_t *pEq;
 		size_t len;
 		if (p[0] == L'=') continue;
@@ -298,40 +385,45 @@ BMA_DEF bma_bool_t bma_EnvVars_get(bma_EnvVars *pEnvVars, const char *pName, bma
 			pVal = bma_wStrDup(pEq);
 			bma_StrBldr_appndStr(pOutValue, pVal);
 			bma_free(pVal);
-			result = BMA_TRUE;
 			goto out;
 		}
 	}
 out:
 	bma_free(pWideName);
-	return result;
+#elif BMA_IS_POSIX
+	size_t i, nameLen;
+	char *pEq;
+	char *pCurr;
+	bma_assert(pEnv != NULL);
+	bma_assert(pName != NULL);
+	bma_assert(pOutValue != NULL);
+	nameLen = strlen(pName);
+	for (i=0; i<pEnv->num; ++i) {
+		pCurr = pEnv->pEnvp[i];
+		pEq = strchr(pCurr, '=');
+		if (pEq == NULL) continue;
+		if (((size_t)(pEq - pCurr) == nameLen) && (memcmp(pCurr, pName, nameLen) == 0)) {
+			++pEq; /* skip the '=' to go to the value */
+			bma_StrBldr_appndStr(pOutValue, pEq);
+			return;
+		}
+	}
+#endif
 }
 
-/* Grows pEnvBlock so that it can hold at least minCap wchar_t's */
-static bma_bool_t bma_EnvVars_ensureCap(bma_EnvVars *pEnvVars, size_t minCap) {
-	bma_IMemAlloc *pAlloc;
-	wchar_t *pNew;
-	size_t realSz = 0;
-	if (minCap <= pEnvVars->cap) return BMA_TRUE;
-	pAlloc = bma_getDfltMemAlloc();
-	pNew = (wchar_t*)(*pAlloc->pRllc)(pAlloc, pEnvVars->pEnvBlock, (minCap + BMA_ENVVARS_EXTRA_CAP) * sizeof(wchar_t), &realSz);
-	if (pNew == NULL) return BMA_FALSE;
-	pEnvVars->pEnvBlock = pNew;
-	pEnvVars->cap = realSz / sizeof(wchar_t);
-	return BMA_TRUE;
-}
-
-BMA_DEF bma_bool_t bma_EnvVars_set(bma_EnvVars *pEnvVars, const char *pName, const char *pValue) {
-	bma_bool_t result = BMA_FALSE;
+BMA_DEF void bma_Env_set(bma_Env *pEnv, const char *pName, const char *pValue) {
+#if BMA_IS_WINDOWS
 	wchar_t *pWideName, *p;
 	wchar_t *pWideNewVal;
 	size_t wideNameLen, newValLen;
-	bma_assert(pEnvVars != NULL);
+	size_t addLen;
+	wchar_t *pDst;
+	bma_assert(pEnv != NULL);
 	pWideName = bma_strWdup(pName);
 	pWideNewVal = bma_strWdup(pValue);
 	wideNameLen = wcslen(pWideName);
 	newValLen = wcslen(pWideNewVal);
-	for (p = pEnvVars->pEnvBlock; (p[0] != L'\0'); p = p + wcslen(p) + 1U) {
+	for (p = pEnv->pEnvBlock; (p[0] != L'\0'); p = p + wcslen(p) + 1U) {
 		const wchar_t *pEq;
 		size_t len;
 		if (p[0] == L'=') continue;
@@ -340,71 +432,57 @@ BMA_DEF bma_bool_t bma_EnvVars_set(bma_EnvVars *pEnvVars, const char *pName, con
 		len = (size_t)(pEq - p);
 		/* Windows env var names are case insensitive */
 		if ((len == wideNameLen) && (_wcsnicmp(p, pWideName, wideNameLen) == 0)) {
-			size_t valOffs = (size_t)(pEq - pEnvVars->pEnvBlock) + 1U; /* skip "=" */
-			size_t oldValLen = wcslen(pEnvVars->pEnvBlock + valOffs);
-			size_t tailLen = pEnvVars->sz + 2U - (valOffs + oldValLen); /* from the var's terminator to the end */
+			size_t valOffs = (size_t)(pEq - pEnv->pEnvBlock) + 1U; /* skip "=" */
+			size_t oldValLen = wcslen(pEnv->pEnvBlock + valOffs);
+			size_t tailLen = pEnv->sz + 2U - (valOffs + oldValLen); /* from the var's terminator to the end */
 			wchar_t *pVal;
 			if (newValLen > oldValLen) {
-				if (!bma_EnvVars_ensureCap(pEnvVars, pEnvVars->sz + 2U + (newValLen - oldValLen))) goto out;
+				bma_Env_ensureCap(pEnv, pEnv->sz + 2U + (newValLen - oldValLen));
 			}
-			pVal = pEnvVars->pEnvBlock + valOffs;
+			pVal = pEnv->pEnvBlock + valOffs;
 			memmove(pVal + newValLen, pVal + oldValLen, tailLen * sizeof(wchar_t));
 			memcpy(pVal, pWideNewVal, newValLen * sizeof(wchar_t));
-			pEnvVars->sz = pEnvVars->sz - oldValLen + newValLen;
-			result = BMA_TRUE;
+			pEnv->sz = pEnv->sz - oldValLen + newValLen;
 			goto out;
 		}
 	}
 	/* not found: append "name=value\0" before the final terminator */
-	{
-		size_t addLen = wideNameLen + 1U + newValLen + 1U;
-		wchar_t *pDst;
-		if (!bma_EnvVars_ensureCap(pEnvVars, pEnvVars->sz + addLen + 1U)) goto out;
-		pDst = pEnvVars->pEnvBlock + pEnvVars->sz;
-		memcpy(pDst, pWideName, wideNameLen * sizeof(wchar_t));
-		pDst[wideNameLen] = L'=';
-		memcpy(pDst + wideNameLen + 1U, pWideNewVal, newValLen * sizeof(wchar_t));
-		pDst[addLen - 1U] = L'\0';
-		pDst[addLen] = L'\0';
-		pEnvVars->sz += addLen;
-		result = BMA_TRUE;
-	}
+	size_t addLen = wideNameLen + 1U + newValLen + 1U;
+	wchar_t *pDst;
+	bma_Env_ensureCap(pEnv, pEnv->sz + addLen + 1U);
+	pDst = pEnv->pEnvBlock + pEnv->sz;
+	memcpy(pDst, pWideName, wideNameLen * sizeof(wchar_t));
+	pDst[wideNameLen] = L'=';
+	memcpy(pDst + wideNameLen + 1U, pWideNewVal, newValLen * sizeof(wchar_t));
+	pDst[addLen - 1U] = L'\0';
+	pDst[addLen] = L'\0';
+	pEnv->sz += addLen;
 out:
 	bma_free(pWideNewVal);
 	bma_free(pWideName);
-	return result;
+#elif BMA_IS_POSIX
+#endif
 }
 
 /* Joins the existing value (if any) and pValue with ';' and stores the result */
-static bma_bool_t bma_EnvVars_join(bma_EnvVars *pEnvVars, const char *pName, const char *pValue, bma_bool_t prepend) {
-	bma_bool_t result;
+BMA_DEF void bma_EnvVars_jn(bma_Env *pEnv, const char *pName, const char *pValue, bma_bool_t prepend) {
 	bma_StrBldr joined, old;
-	bma_assert(pEnvVars != NULL);
+	bma_assert(pEnv != NULL);
 	bma_StrBldr_ctor(&old);
-	if (!bma_EnvVars_get(pEnvVars, pName, &old) || (bma_StrBldr_getSz(&old) == 0U)) {
-		result = bma_EnvVars_set(pEnvVars, pName, pValue);
+	bma_Env_get(pEnv, pName, &old);
+	if (bma_StrBldr_getSz(&old) == 0U) {
+		bma_Env_set(pEnv, pName, pValue);
 	}
 	else {
 		bma_StrBldr_ctor(&joined);
 		bma_StrBldr_appndStr(&joined, prepend ? pValue : bma_StrBldr_getStr(&old));
-		bma_StrBldr_appndChr(&joined, ';', 1U);
+		bma_StrBldr_appndStr(&joined, BMA_ENV_VAL_SEP);
 		bma_StrBldr_appndStr(&joined, prepend ? bma_StrBldr_getStr(&old) : pValue);
-		result = bma_EnvVars_set(pEnvVars, pName, bma_StrBldr_getStr(&joined));
+		bma_Env_set(pEnv, pName, bma_StrBldr_getStr(&joined));
 		bma_StrBldr_dtor(&joined, NULL);
 	}
 	bma_StrBldr_dtor(&old, NULL);
-	return result;
 }
-
-BMA_DEF bma_bool_t bma_EnvVars_prpnd(bma_EnvVars *pEnvVars, const char *pName, const char *pValue) {
-	return bma_EnvVars_join(pEnvVars, pName, pValue, BMA_TRUE);
-}
-
-BMA_DEF bma_bool_t bma_EnvVars_appnd(bma_EnvVars *pEnvVars, const char *pName, const char *pValue) {
-	return bma_EnvVars_join(pEnvVars, pName, pValue, BMA_FALSE);
-}
-
-#endif
 
 BMA_DEF bma_bool_t bma_runCmd(const char *pCmd, int *pExitCode, bma_StrBldr *pOut) {
 #if BMA_IS_WINDOWS
@@ -703,17 +781,17 @@ void bma_test_exit_fail(const char *exp, const char *file, int line) {
 #endif
 
 void test_envGetPath(void) {
-	bma_EnvVars *pVars;
+	bma_Env vars;
 	bma_StrBldr value;
 	bma_StrBldr_ctor(&value);
-	pVars = bma_EnvVars_create();
-	bma_EnvVars_rdFrmOs(pVars);
-	BMA_EXPECT(bma_EnvVars_get(pVars, "PATH", &value));
+	bma_Env_ctor(&vars);
+	bma_Env_rdFrmOs(&vars);
+	bma_Env_get(&vars, "PATH", &value);
 	BMA_EXPECT(bma_StrBldr_getSz(&value) > 0);
 	bma_StrBldr_clear(&value);
-	BMA_EXPECT(!bma_EnvVars_get(pVars, "unknown_env_var", &value));
+	bma_Env_get(&vars, "unknown_env_var", &value);
 	BMA_EXPECT(bma_StrBldr_getSz(&value) == 0);
-	bma_EnvVars_destroy(pVars);
+	bma_Env_dtor(&vars, NULL);
 	bma_StrBldr_dtor(&value, NULL);
 }
 

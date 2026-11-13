@@ -55,7 +55,7 @@ BMA_DEF char *bma_wStrDup_ext(const wchar_t *pStr, bma_IMemAlloc *pAlloc);
 /*!
 \brief Returns size of a Windows double-null-terminated string, as one
 returned by the function GetEnvironmentStringsW(),
-without counting the two terminating null's
+without counting the final terminating null character
 */
 BMA_DEF size_t bma_dblNllTrmStrLen(const wchar_t *p);
 
@@ -123,7 +123,7 @@ BMA_DEF size_t bma_dblNllTrmStrLen(const wchar_t *p) {
 	size_t len = 0;
 	bma_assert(p != NULL);
 	for (;;) {
-		if ((p[0] == '\0') && (p[1] == '\0')) return len;
+		if ((p[0] == '\0') && (p[1] == '\0')) return len + 1U;
 		++p;
 		++len;
 	}

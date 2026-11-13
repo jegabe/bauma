@@ -1740,7 +1740,7 @@ BMA_DEF void bma_HshMp_ctor_impl(
 	/* data structure stored in the buckets: dynamic array of [hashCode, key, value] */
 	pSelf->keyOffs = bma_memgap(sizeof(size_t) /* hash code */, pSelf->keySz);
 	pSelf->valueOffs = bma_memgap(pSelf->keyOffs + pSelf->keySz, pSelf->valueSz);
-	pSelf->bcktSz = bma_memgap(pSelf->valueOffs + pSelf->valueSz, sizeof(size_t) /* next hashCode */);
+	pSelf->bcktSz = bma_memgap(pSelf->valueOffs + pSelf->valueSz, sizeof(bma_max_align_t));
 	pSelf->pKeyDtor = pKeyDtor;
 	pSelf->pValueDtor = pValueDtor;
 	pSelf->pKeyHash = pKeyHsh;

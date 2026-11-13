@@ -52,6 +52,13 @@ BMA_DEF char *bma_wStrDup_ext(const wchar_t *pStr, bma_IMemAlloc *pAlloc);
 
 #define bma_wStrDup(pStr) bma_wStrDup_ext(pStr, bma_getDfltMemAlloc())
 
+/*!
+\brief Returns size of a Windows double-null-terminated string, as one
+returned by the function GetEnvironmentStringsW(),
+without counting the two terminating null's
+*/
+BMA_DEF size_t bma_dblNllTrmStrLen(const wchar_t *p);
+
 #endif
 
 #ifdef __cplusplus
@@ -110,6 +117,16 @@ BMA_DEF char *bma_wStrDup_ext(const wchar_t *pStr, bma_IMemAlloc *pAlloc) {
 	(void)WideCharToMultiByte(CP_UTF8, 0, pStr, (int)len, pResult, numChars, NULL, NULL);
 	pResult[numChars] = '\0';
 	return pResult;
+}
+
+BMA_DEF size_t bma_dblNllTrmStrLen(const wchar_t *p) {
+	size_t len = 0;
+	bma_assert(p != NULL);
+	for (;;) {
+		if ((p[0] == '\0') && (p[1] == '\0')) return len;
+		++p;
+		++len;
+	}
 }
 
 #endif

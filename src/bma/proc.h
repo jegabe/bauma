@@ -84,7 +84,7 @@ When the command isn't executable, BMA_FALSE is returned.
 The function blocks until the sub process is terminated.
 \param pCmd The command which is the executable followed by all of its arguments. The first argument is the executable itself.
        Single arguments are separated by whitespace and can by escaped by putting double quotes around them, so
-       a string "cmd arg1 \"escaped arg 2\"" yields two arguments for cmd, the first being "arg1" and
+       a string 'cmd arg1 "escaped arg 2"' yields two arguments for cmd, the first being "arg1" and
        the second "escaped arg 2". The first item is the executable name which is either an absolute path or, if only
        a name is specified, looked-up using PATH (POSIX) or the default search paths for CreateProcessW() (Windows)
 \param pExitCode Output parameter receiving the exit code of the process. Must not be NULL.

@@ -39,6 +39,8 @@ Sub process management
 Implementation is platform dependent to be able to
 quickly launch new processes with a modified environment
 without too much conversion involved.
+Windows environment blocks are kept sorted using ordinal,
+case-insensitive name comparison.
 Don't use the members directly, use the bma_Env_* functions instead.
 */
 typedef struct bma_Env {
@@ -69,6 +71,8 @@ BMA_DEF void bma_Env_get(bma_Env *pEnvVars, const char *pName, bma_StrBldr *pOut
 BMA_DEF void bma_Env_set(bma_Env *pEnvVars, const char *pName, const char *pValue);
 /* Joins the existing value (if any) and pValue with ';'(Win)/':'(POSIX) and stores the result */
 BMA_DEF void bma_EnvVars_jn(bma_Env *pEnv, const char *pName, const char *pValue, bma_bool_t prepend);
+#define bma_EnvVars_prpnd(pEnv, pName, pValue) bma_EnvVars_jn(pEnv, pName, pValue, BMA_TRUE)
+#define bma_EnvVars_appnd(pEnv, pName, pValue) bma_EnvVars_jn(pEnv, pName, pValue, BMA_FALSE)
 
 /*!
 \brief Runs the command pCmd as sub-process and collects the exit code into pExitCode
@@ -80,9 +84,16 @@ The function blocks until the sub process is terminated.
 \param pOut String builder receiving all of what the sub process has put out on stdout and stderr.
        On POSIX, captured bytes are forwarded unchanged; the command is expected to emit UTF-8.
        On Windows, captured bytes are assumed to be in the current code page and are converted to UTF-8.
+\param pEnv If passed, the new command is executed with that set of environment variables. If NULL, the
+       environment of the parent (current process) is used.
 \return BMA_TRUE when the command was executed and terminated, BMA_FALSE when the command
 */
-BMA_DEF bma_bool_t bma_runCmd(const char *pCmd, int *pExitCode, bma_StrBldr *pOut);
+BMA_DEF bma_bool_t bma_runCmd_ext(const char *pCmd, int *pExitCode, bma_StrBldr *pOut, bma_Env *pEnv);
+
+/*!
+\brief Simplified version without modified environment variables
+*/
+#define bma_runCmd(pCmd, pExitCode, pOut) bma_runCmd_ext(pCmd, pExitCode, pOut, NULL)
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -257,6 +268,28 @@ static const wchar_t bma_kNullStr[2] = { L'\0', L'\0' };
 #define BMA_ENV_NULLSTR ((wchar_t*)&bma_kNullStr[0])
 #define BMA_ENV_EXTRA_CAP 256U
 
+static int bma_Env_compareNames(
+	const wchar_t *pName1,
+	size_t name1Len,
+	const wchar_t *pName2,
+	size_t name2Len
+) {
+	int result;
+	if (name1Len > (size_t)INT_MAX || name2Len > (size_t)INT_MAX) {
+		bma_exit_err("Environment variable name is too long");
+	}
+	result = CompareStringOrdinal(
+		pName1, (int)name1Len, pName2, (int)name2Len, TRUE);
+	if (result == 0) {
+		bma_exit_err("CompareStringOrdinal failed");
+	}
+	return result - CSTR_EQUAL;
+}
+
+static const wchar_t *bma_Env_findNameEnd(const wchar_t *pEntry) {
+	return wcschr(pEntry + ((pEntry[0] == L'=') ? 1U : 0U), L'=');
+}
+
 /* Grows pEnvBlock so that it can hold at least minCap wchar_t's */
 static void bma_Env_ensureCap(bma_Env *pEnv, size_t minCap) {
 	bma_IMemAlloc *pAlloc;
@@ -270,7 +303,7 @@ static void bma_Env_ensureCap(bma_Env *pEnv, size_t minCap) {
 	else {
 		pOld = pEnv->pEnvBlock;
 	}
-	pNew = (wchar_t*)(*pAlloc->pRllc)(pAlloc, pOld, (minCap + BMA_ENVVARS_EXTRA_CAP) * sizeof(wchar_t), &realSz);
+	pNew = (wchar_t*)(*pAlloc->pRllc)(pAlloc, pOld, (minCap + BMA_ENV_EXTRA_CAP) * sizeof(wchar_t), &realSz);
 	pEnv->pEnvBlock = pNew;
 	pEnv->cap = realSz / sizeof(wchar_t);
 }
@@ -377,11 +410,11 @@ BMA_DEF void bma_Env_get(bma_Env *pEnv, const char *pName, bma_StrBldr *pOutValu
 		const wchar_t *pEq;
 		size_t len;
 		if (p[0] == L'=') continue;
-		pEq = wcschr(p, L'=');
+		pEq = bma_Env_findNameEnd(p);
 		if (pEq == NULL) continue;
 		len = (size_t)(pEq - p);
 		/* Windows env var names are case insensitive */
-		if ((len == wideNameLen) && (_wcsnicmp(p, pWideName, wideNameLen) == 0)) {
+		if (bma_Env_compareNames(p, len, pWideName, wideNameLen) == 0) {
 			char *pVal;
 			++pEq; /* skip "=" to go to value */
 			pVal = bma_wStrDup(pEq);
@@ -431,14 +464,14 @@ BMA_DEF void bma_Env_set(bma_Env *pEnv, const char *pName, const char *pValue) {
 		const wchar_t *pEq;
 		size_t len;
 		if (p[0] == L'=') continue;
-		pEq = wcschr(p, L'=');
+		pEq = bma_Env_findNameEnd(p);
 		if (pEq == NULL) continue;
 		len = (size_t)(pEq - p);
 		/* Windows env var names are case insensitive */
-		if ((len == wideNameLen) && (_wcsnicmp(p, pWideName, wideNameLen) == 0)) {
+		if (bma_Env_compareNames(p, len, pWideName, wideNameLen) == 0) {
 			size_t valOffs = (size_t)(pEq - pEnv->pEnvBlock) + 1U; /* skip "=" */
 			size_t oldValLen = wcslen(pEnv->pEnvBlock + valOffs);
-			size_t tailLen = pEnv->sz + 2U - (valOffs + oldValLen); /* from the var's terminator to the end */
+			size_t tailLen = pEnv->sz + 1U - (valOffs + oldValLen); /* include the final null */
 			wchar_t *pVal;
 			if (newValLen > oldValLen) {
 				bma_Env_ensureCap(pEnv, pEnv->sz + 2U + (newValLen - oldValLen));
@@ -450,18 +483,38 @@ BMA_DEF void bma_Env_set(bma_Env *pEnv, const char *pName, const char *pValue) {
 			goto out;
 		}
 	}
-	/* not found: append "name=value\0" before the final terminator */
-	TODO under Windows, the env block must be sorted alpabetically
-	size_t addLen = wideNameLen + 1U + newValLen + 1U;
-	wchar_t *pDst;
-	bma_Env_ensureCap(pEnv, pEnv->sz + addLen + 1U);
-	pDst = pEnv->pEnvBlock + pEnv->sz;
-	memcpy(pDst, pWideName, wideNameLen * sizeof(wchar_t));
-	pDst[wideNameLen] = L'=';
-	memcpy(pDst + wideNameLen + 1U, pWideNewVal, newValLen * sizeof(wchar_t));
-	pDst[addLen - 1U] = L'\0';
-	pDst[addLen] = L'\0';
-	pEnv->sz += addLen;
+	/* Insert before the first greater name to keep the environment block sorted. */
+	{
+		size_t oldSz = (pEnv->pEnvBlock[0] == L'\0') ? 0U : pEnv->sz;
+		size_t insertOff = oldSz;
+		size_t tailLen;
+		addLen = wideNameLen + 1U + newValLen + 1U;
+		for (p = pEnv->pEnvBlock; p[0] != L'\0'; p = p + wcslen(p) + 1U) {
+			const wchar_t *pEq = bma_Env_findNameEnd(p);
+			size_t len;
+			if (pEq == NULL) continue;
+			len = (size_t)(pEq - p);
+			if (bma_Env_compareNames(p, len, pWideName, wideNameLen) > 0) {
+				insertOff = (size_t)(p - pEnv->pEnvBlock);
+				break;
+			}
+		}
+		tailLen = oldSz - insertOff + 1U;
+		bma_Env_ensureCap(pEnv, oldSz + addLen + 1U);
+		memmove(
+			pEnv->pEnvBlock + insertOff + addLen,
+			pEnv->pEnvBlock + insertOff,
+			tailLen * sizeof(wchar_t));
+		pDst = pEnv->pEnvBlock + insertOff;
+		memcpy(pDst, pWideName, wideNameLen * sizeof(wchar_t));
+		pDst[wideNameLen] = L'=';
+		memcpy(pDst + wideNameLen + 1U, pWideNewVal, newValLen * sizeof(wchar_t));
+		pDst[addLen - 1U] = L'\0';
+		if (oldSz == 0U) {
+			pDst[addLen] = L'\0';
+		}
+		pEnv->sz = oldSz + addLen;
+	}
 out:
 	bma_free(pWideNewVal);
 	bma_free(pWideName);
@@ -526,7 +579,7 @@ BMA_DEF void bma_EnvVars_jn(bma_Env *pEnv, const char *pName, const char *pValue
 	bma_StrBldr_dtor(&old, NULL);
 }
 
-BMA_DEF bma_bool_t bma_runCmd(const char *pCmd, int *pExitCode, bma_StrBldr *pOut) {
+BMA_DEF bma_bool_t bma_runCmd_ext(const char *pCmd, int *pExitCode, bma_StrBldr *pOut, bma_Env *pEnv) {
 #if BMA_IS_WINDOWS
 	bma_bool_t result = BMA_FALSE;
 	SECURITY_ATTRIBUTES sa;
@@ -817,6 +870,23 @@ void bma_test_exit_fail(const char *exp, const char *file, int line) {
 		f(); \
 	} while(0)
 
+#if BMA_IS_WINDOWS
+static void bma_testEnvIsSorted(const bma_Env *pEnv) {
+	const wchar_t *p, *pPrev = NULL;
+	size_t prevLen = 0;
+	for (p = pEnv->pEnvBlock; p[0] != L'\0'; p = p + wcslen(p) + 1U) {
+		const wchar_t *pEq = bma_Env_findNameEnd(p);
+		size_t nameLen;
+		if (pEq == NULL) continue;
+		nameLen = (size_t)(pEq - p);
+		if (pPrev != NULL) {
+			BMA_EXPECT(bma_Env_compareNames(pPrev, prevLen, p, nameLen) <= 0);
+		}
+		pPrev = p;
+		prevLen = nameLen;
+	}
+}
+#endif
 
 #ifdef __cplusplus
 	} /* extern "C" */
@@ -855,6 +925,35 @@ void test_envGetSet(void) {
 	BMA_EXPECT(memcmp(bma_StrBldr_getStr(&value), "other", 5U) == 0);
 	bma_StrBldr_dtor(&value, NULL);
 }
+
+#if BMA_IS_WINDOWS
+void test_envWindowsSorted(void) {
+	bma_Env vars;
+	bma_Env_ctor(&vars);
+	bma_Env_set(&vars, "zeta", "last");
+	bma_Env_set(&vars, "Beta", "old");
+	bma_Env_set(&vars, "alpha", "first");
+	bma_Env_set(&vars, "Aardvark", "before alpha");
+	bma_Env_set(&vars, "\xC3\xA4-name", "unicode");
+	bma_Env_set(&vars, "\xC3\x84-NAME", "updated");
+	bma_Env_set(&vars, "BETA", "a longer value");
+	bma_testEnvIsSorted(&vars);
+	{
+		bma_StrBldr value;
+		size_t numEntries = 0;
+		wchar_t *p;
+		bma_StrBldr_ctor(&value);
+		bma_Env_get(&vars, "beta", &value);
+		BMA_EXPECT(strcmp(bma_StrBldr_getStr(&value), "a longer value") == 0);
+		for (p = vars.pEnvBlock; p[0] != L'\0'; p = p + wcslen(p) + 1U) {
+			++numEntries;
+		}
+		BMA_EXPECT(numEntries == 5U);
+		bma_StrBldr_dtor(&value, NULL);
+	}
+	bma_Env_dtor(&vars, NULL);
+}
+#endif
 
 void test_echo(void) {
 	bma_StrBldr out;
@@ -954,6 +1053,9 @@ int main(int argc, char *argv[]) {
 	(void)argv;
 	BMA_TEST(test_envGetPath);
 	BMA_TEST(test_envGetSet);
+#if BMA_IS_WINDOWS
+	BMA_TEST(test_envWindowsSorted);
+#endif
 	BMA_TEST(test_echo);
 	BMA_TEST(test_echoNonAscii);
 	BMA_TEST(test_quotedArgsAndExitCode);

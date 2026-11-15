@@ -29,6 +29,9 @@ SOFTWARE.
 Sub process management
 */
 #include <bma/ccal.h>
+#include <bma/fs.h>
+#include <bma/utils.h>
+
 
 #ifdef __cplusplus
 	extern "C" {
@@ -69,13 +72,6 @@ BMA_DEF void bma_Env_dtor(bma_Env *pEnv, bma_IMemAlloc *pAlloc);
 BMA_DEF void bma_Env_rdFrmOs(bma_Env *pEnv);
 BMA_DEF void bma_Env_get(bma_Env *pEnvVars, const char *pName, bma_StrBldr *pOutValue);
 BMA_DEF void bma_Env_set(bma_Env *pEnvVars, const char *pName, const char *pValue);
-#if BMA_IS_POSIX
-/*!
-\brief Finds an executable file directly or by searching PATH.
-Searches the current process's PATH. On success, appends the absolute path to pOut.
-*/
-BMA_DEF bma_bool_t bma_lkupExeUsngPth(const char *pExe, bma_StrBldr *pOut);
-#endif
 /* Joins the existing value (if any) and pValue with ';'(Win)/':'(POSIX) and stores the result */
 BMA_DEF void bma_EnvVars_jn(bma_Env *pEnv, const char *pName, const char *pValue, bma_bool_t prepend);
 #define bma_EnvVars_prpnd(pEnv, pName, pValue) bma_EnvVars_jn(pEnv, pName, pValue, BMA_TRUE)
@@ -87,13 +83,19 @@ and all of the stdout and stderr output is piped into pOut.
 When the command isn't executable, BMA_FALSE is returned.
 The function blocks until the sub process is terminated.
 \param pCmd The command which is the executable followed by all of its arguments. The first argument is the executable itself.
-\param pExitCode Output parameter receiving the exit code of the process
+       Single arguments are separated by whitespace and can by escaped by putting double quotes around them, so
+       a string "cmd arg1 \"escaped arg 2\"" yields two arguments for cmd, the first being "arg1" and
+       the second "escaped arg 2". The first item is the executable name which is either an absolute path or, if only
+       a name is specified, looked-up using PATH (POSIX) or the default search paths for CreateProcessW() (Windows)
+\param pExitCode Output parameter receiving the exit code of the process. Must not be NULL.
 \param pOut String builder receiving all of what the sub process has put out on stdout and stderr.
        On POSIX, captured bytes are forwarded unchanged; the command is expected to emit UTF-8.
        On Windows, captured bytes are assumed to be in the current code page and are converted to UTF-8.
+       Also, on Windows, any CRLF sequence is converted to LF to match the C programming language better.
 \param pEnv If passed, the new command is executed with that set of environment variables. If NULL, the
-       environment of the parent (current process) is used.
-       On POSIX, its PATH is also used to locate the command when pEnv is not NULL.
+       environment of the parent (current process) is used. Searching for the command though is not done with
+       the passed environment but always using the PATH of the current running process, so pEnv is soley for
+       the new process.
 \return BMA_TRUE when the command was executed and terminated, BMA_FALSE when the command
 */
 BMA_DEF bma_bool_t bma_runCmd_ext(const char *pCmd, int *pExitCode, bma_StrBldr *pOut, bma_Env *pEnv);
@@ -114,7 +116,6 @@ BMA_DEF bma_bool_t bma_runCmd_ext(const char *pCmd, int *pExitCode, bma_StrBldr 
 	#include <string.h>
 	#include <wchar.h>
 	#include <bma/win.h>
-	#include <bma/utils.h>
 #elif BMA_IS_POSIX
 	#include <ctype.h>
 	#include <errno.h>
@@ -126,7 +127,6 @@ BMA_DEF bma_bool_t bma_runCmd_ext(const char *pCmd, int *pExitCode, bma_StrBldr 
 	#include <sys/types.h>
 	#include <sys/wait.h>
 	#include <unistd.h>
-	#include <bma/fs.h>
 	#if (defined(__GLIBC__) && defined(__GLIBC_PREREQ) && __GLIBC_PREREQ(2, 34)) || \
 	    defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || \
 	    defined(__DragonFly__) || defined(__APPLE__)
@@ -1024,6 +1024,7 @@ void test_envGetSet(void) {
 	bma_Env_set(&vars, "PATH", "other");
 	bma_Env_get(&vars, "PATH", &value);
 	BMA_EXPECT(memcmp(bma_StrBldr_getStr(&value), "other", 5U) == 0);
+	bma_Env_dtor(&vars, NULL);
 	bma_StrBldr_dtor(&value, NULL);
 }
 

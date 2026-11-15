@@ -72,7 +72,7 @@ BMA_DEF void bma_Env_set(bma_Env *pEnvVars, const char *pName, const char *pValu
 #if BMA_IS_POSIX
 /*!
 \brief Finds an executable file directly or by searching PATH.
-On success, appends its absolute path to pOut.
+Searches the current process's PATH. On success, appends the absolute path to pOut.
 */
 BMA_DEF bma_bool_t bma_lkupExeUsngPth(const char *pExe, bma_StrBldr *pOut);
 #endif
@@ -93,6 +93,7 @@ The function blocks until the sub process is terminated.
        On Windows, captured bytes are assumed to be in the current code page and are converted to UTF-8.
 \param pEnv If passed, the new command is executed with that set of environment variables. If NULL, the
        environment of the parent (current process) is used.
+       On POSIX, its PATH is also used to locate the command when pEnv is not NULL.
 \return BMA_TRUE when the command was executed and terminated, BMA_FALSE when the command
 */
 BMA_DEF bma_bool_t bma_runCmd_ext(const char *pCmd, int *pExitCode, bma_StrBldr *pOut, bma_Env *pEnv);
@@ -795,13 +796,19 @@ out:
 	size_t execErrorBytes = 0;
 	int status;
 	char *pBuf;
+	bma_StrBldr exePath;
 	bma_assert(pCmd != NULL);
 	bma_assert(pExitCode != NULL);
 	bma_assert(pOut != NULL);
 	*pExitCode = 0;
 	bma_ProcArgVec_ctor_ext(&argv, pAlloc);
+	bma_StrBldr_ctor(&exePath);
 	pBuf = (char*)(*pAlloc->pRllc)(pAlloc, NULL, BMA_PROC_PIPE_READ_CHUNKS, NULL);
 	if (!bma_proc_parseCmd(pCmd, &argv, &argvStorage, pAlloc)) {
+		goto out;
+	}
+	if (!bma_lkupExeUsngPth(
+		*bma_ProcArgVec_getData(&argv), &exePath)) {
 		goto out;
 	}
 	if (pipe(outPipe) != 0 || pipe(errPipe) != 0) {
@@ -845,7 +852,12 @@ out:
 		}
 		/* Keep only the close-on-exec error channel in addition to stdio. */
 		bma_proc_closeExtraFds(4);
-		execvp(pArgv[0], pArgv);
+		if (pEnv == NULL) {
+			execv(bma_StrBldr_getStr(&exePath), pArgv);
+		}
+		else {
+			execve(bma_StrBldr_getStr(&exePath), pArgv, pEnv->pEnvp);
+		}
 		childErr = errno;
 		bma_proc_writeExecError(3, childErr);
 		_exit(127);
@@ -912,6 +924,7 @@ out:
 	bma_ProcArgVec_dtor(&argv, NULL);
 	bma_free_ext(pAlloc, argvStorage);
 	bma_free_ext(pAlloc, pBuf);
+	bma_StrBldr_dtor(&exePath, NULL);
 	return result;
 
 #else
@@ -1033,6 +1046,24 @@ void test_lkupExeUsngPth(void) {
 	BMA_EXPECT(!bma_lkupExeUsngPth("/", &exePath));
 	BMA_EXPECT(bma_StrBldr_getSz(&exePath) == 0U);
 	bma_StrBldr_dtor(&exePath, NULL);
+}
+
+void test_runCmdCustomEnv(void) {
+	bma_Env env;
+	bma_StrBldr out;
+	int exitCode = 0;
+	bma_Env_ctor(&env);
+	bma_StrBldr_ctor(&out);
+	bma_Env_set(&env, "PATH", "/path/used/only/by/the/child");
+	bma_Env_set(&env, "BMA_PROC_TEST_MARKER", "present");
+	BMA_EXPECT(bma_runCmd_ext("env", &exitCode, &out, &env));
+	BMA_EXPECT(exitCode == 0);
+	BMA_EXPECT(strstr(
+		bma_StrBldr_getStr(&out), "BMA_PROC_TEST_MARKER=present") != NULL);
+	BMA_EXPECT(strstr(
+		bma_StrBldr_getStr(&out), "PATH=/path/used/only/by/the/child") != NULL);
+	bma_StrBldr_dtor(&out, NULL);
+	bma_Env_dtor(&env, NULL);
 }
 #endif
 
@@ -1165,6 +1196,7 @@ int main(int argc, char *argv[]) {
 	BMA_TEST(test_envGetSet);
 #if BMA_IS_POSIX
 	BMA_TEST(test_lkupExeUsngPth);
+	BMA_TEST(test_runCmdCustomEnv);
 #endif
 #if BMA_IS_WINDOWS
 	BMA_TEST(test_envWindowsSorted);

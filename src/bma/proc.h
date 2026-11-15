@@ -69,6 +69,13 @@ BMA_DEF void bma_Env_dtor(bma_Env *pEnv, bma_IMemAlloc *pAlloc);
 BMA_DEF void bma_Env_rdFrmOs(bma_Env *pEnv);
 BMA_DEF void bma_Env_get(bma_Env *pEnvVars, const char *pName, bma_StrBldr *pOutValue);
 BMA_DEF void bma_Env_set(bma_Env *pEnvVars, const char *pName, const char *pValue);
+#if BMA_IS_POSIX
+/*!
+\brief Finds an executable file directly or by searching PATH.
+On success, appends its absolute path to pOut.
+*/
+BMA_DEF bma_bool_t bma_lkupExeUsngPth(const char *pExe, bma_StrBldr *pOut);
+#endif
 /* Joins the existing value (if any) and pValue with ';'(Win)/':'(POSIX) and stores the result */
 BMA_DEF void bma_EnvVars_jn(bma_Env *pEnv, const char *pName, const char *pValue, bma_bool_t prepend);
 #define bma_EnvVars_prpnd(pEnv, pName, pValue) bma_EnvVars_jn(pEnv, pName, pValue, BMA_TRUE)
@@ -114,9 +121,11 @@ BMA_DEF bma_bool_t bma_runCmd_ext(const char *pCmd, int *pExitCode, bma_StrBldr 
 	#include <limits.h>
 	#include <string.h>
 	#include <sys/resource.h>
+	#include <sys/stat.h>
 	#include <sys/types.h>
 	#include <sys/wait.h>
 	#include <unistd.h>
+	#include <bma/fs.h>
 	#if (defined(__GLIBC__) && defined(__GLIBC_PREREQ) && __GLIBC_PREREQ(2, 34)) || \
 	    defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || \
 	    defined(__DragonFly__) || defined(__APPLE__)
@@ -268,7 +277,7 @@ static const wchar_t bma_kNullStr[2] = { L'\0', L'\0' };
 #define BMA_ENV_NULLSTR ((wchar_t*)&bma_kNullStr[0])
 #define BMA_ENV_EXTRA_CAP 256U
 
-static int bma_Env_compareNames(
+BMA_DEF int bma_Env_compareNames(
 	const wchar_t *pName1,
 	size_t name1Len,
 	const wchar_t *pName2,
@@ -286,12 +295,12 @@ static int bma_Env_compareNames(
 	return result - CSTR_EQUAL;
 }
 
-static const wchar_t *bma_Env_findNameEnd(const wchar_t *pEntry) {
+BMA_DEF const wchar_t *bma_Env_findNameEnd(const wchar_t *pEntry) {
 	return wcschr(pEntry + ((pEntry[0] == L'=') ? 1U : 0U), L'=');
 }
 
 /* Grows pEnvBlock so that it can hold at least minCap wchar_t's */
-static void bma_Env_ensureCap(bma_Env *pEnv, size_t minCap) {
+BMA_DEF void bma_Env_ensureCap(bma_Env *pEnv, size_t minCap) {
 	bma_IMemAlloc *pAlloc;
 	wchar_t *pOld, *pNew;
 	size_t realSz = 0;
@@ -312,6 +321,85 @@ static void bma_Env_ensureCap(bma_Env *pEnv, size_t minCap) {
 
 static const char *const bma_kNullEnv[1] = { NULL };
 #define BMA_NULL_ENV ((char**)&bma_kNullEnv[0])
+
+static bma_bool_t bma_proc_isExecutableFile(const char *pPath) {
+	struct stat st;
+	return (stat(pPath, &st) == 0) && S_ISREG(st.st_mode) && (access(pPath, X_OK) == 0);
+}
+
+BMA_DEF bma_bool_t bma_lkupExeUsngPth(const char *pExe, bma_StrBldr *pOut) {
+	const char *p, *pPath;
+	const char *pCandidate;
+	bma_StrBldr pthBldr, cwd, absPath;
+	bma_bool_t cwdReady = BMA_FALSE;
+	bma_bool_t result = BMA_FALSE;
+	bma_assert(pExe != NULL);
+	bma_assert(pOut != NULL);
+	bma_StrBldr_ctor(&pthBldr);
+	bma_StrBldr_ctor(&cwd);
+	bma_StrBldr_ctor(&absPath);
+	if (strchr(pExe, '/') != NULL) {
+		bma_StrBldr_appndStr(&pthBldr, pExe);
+	}
+	else {
+		pPath = getenv("PATH");
+		if (pPath == NULL) {
+			goto out;
+		}
+		for (;;) {
+			bma_StrBldr_clear(&pthBldr);
+			p = strchr(pPath, ':');
+			if (p == NULL) {
+				bma_StrBldr_appndStr(&pthBldr, pPath);
+			}
+			else {
+				bma_StrBldr_appndStrN(&pthBldr, pPath, (size_t)(p - pPath));
+			}
+			bma_entrPth(&pthBldr, pExe);
+			pCandidate = bma_StrBldr_getStr(&pthBldr);
+			if (pCandidate[0] != '/') {
+				if (!cwdReady) {
+					if (!bma_getCwd(&cwd)) {
+						if (p == NULL) goto out;
+						pPath = p + 1U;
+						continue;
+					}
+					cwdReady = BMA_TRUE;
+				}
+				bma_StrBldr_clear(&absPath);
+				bma_StrBldr_appndStr(&absPath, bma_StrBldr_getStr(&cwd));
+				bma_entrPth(&absPath, pCandidate);
+				pCandidate = bma_StrBldr_getStr(&absPath);
+			}
+			if (bma_proc_isExecutableFile(pCandidate)) {
+				bma_StrBldr_appndStr(pOut, pCandidate);
+				result = BMA_TRUE;
+				goto out;
+			}
+			if (p == NULL) break;
+			pPath = p + 1U;
+		}
+		goto out;
+	}
+	pCandidate = bma_StrBldr_getStr(&pthBldr);
+	if (pCandidate[0] != '/') {
+		if (!bma_getCwd(&cwd)) {
+			goto out;
+		}
+		bma_StrBldr_appndStr(&absPath, bma_StrBldr_getStr(&cwd));
+		bma_entrPth(&absPath, pCandidate);
+		pCandidate = bma_StrBldr_getStr(&absPath);
+	}
+	if (bma_proc_isExecutableFile(pCandidate)) {
+		bma_StrBldr_appndStr(pOut, pCandidate);
+		result = BMA_TRUE;
+	}
+out:
+	bma_StrBldr_dtor(&absPath, NULL);
+	bma_StrBldr_dtor(&cwd, NULL);
+	bma_StrBldr_dtor(&pthBldr, NULL);
+	return result;
+}
 
 #endif /* BMA_IS_... */
 
@@ -926,6 +1014,28 @@ void test_envGetSet(void) {
 	bma_StrBldr_dtor(&value, NULL);
 }
 
+#if BMA_IS_POSIX
+void test_lkupExeUsngPth(void) {
+	bma_StrBldr exePath;
+	bma_StrBldr_ctor(&exePath);
+	BMA_EXPECT(bma_lkupExeUsngPth("ls", &exePath));
+	BMA_EXPECT(bma_StrBldr_getStr(&exePath)[0] == '/');
+	{
+		bma_StrBldr resolvedPath;
+		bma_StrBldr_ctor(&resolvedPath);
+		BMA_EXPECT(bma_lkupExeUsngPth(bma_StrBldr_getStr(&exePath), &resolvedPath));
+		BMA_EXPECT(strcmp(
+			bma_StrBldr_getStr(&exePath),
+			bma_StrBldr_getStr(&resolvedPath)) == 0);
+		bma_StrBldr_dtor(&resolvedPath, NULL);
+	}
+	bma_StrBldr_clear(&exePath);
+	BMA_EXPECT(!bma_lkupExeUsngPth("/", &exePath));
+	BMA_EXPECT(bma_StrBldr_getSz(&exePath) == 0U);
+	bma_StrBldr_dtor(&exePath, NULL);
+}
+#endif
+
 #if BMA_IS_WINDOWS
 void test_envWindowsSorted(void) {
 	bma_Env vars;
@@ -1053,6 +1163,9 @@ int main(int argc, char *argv[]) {
 	(void)argv;
 	BMA_TEST(test_envGetPath);
 	BMA_TEST(test_envGetSet);
+#if BMA_IS_POSIX
+	BMA_TEST(test_lkupExeUsngPth);
+#endif
 #if BMA_IS_WINDOWS
 	BMA_TEST(test_envWindowsSorted);
 #endif

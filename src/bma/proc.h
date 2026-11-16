@@ -709,6 +709,8 @@ BMA_DEF bma_bool_t bma_runCmd_ext(const char *pCmd, int *pExitCode, bma_StrBldr 
 	si.hStdError = hWrite;
 	si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
 	pWcmdLn = bma_strWdup_ext(pCmd, pAlloc);
+	/* Look-up executable manually because when passing a custom
+	   environment to CreateProcessW(), it doesn't search the PATH. */
 	if (pWcmdLn[0] == L'"') {
 		wchar_t *pEnd;
 		size_t appNmLen;

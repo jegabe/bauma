@@ -55,7 +55,7 @@ typedef struct bma_DirEnt {
 
 BMA_DEF void bma_DirEnt_dtor(bma_DirEnt *pSelf, bma_IMemAlloc *pAlloc);
 
-BMA_DEF_VEC(bma_DirEntVec, bma_DirEnt, (bma_dtor_t)&bma_DirEnt_dtor);
+BMA_DEF_VEC(bma_DirEntVec, bma_DirEnt, (bma_dtor_t)&bma_DirEnt_dtor)
 
 typedef bma_bool_t (*bma_dirEntFltr_t)(const bma_DirEnt *pEnt, void *pOptUsrDta);
 

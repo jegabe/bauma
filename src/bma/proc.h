@@ -32,7 +32,6 @@ Sub process management
 #include <bma/fs.h>
 #include <bma/utils.h>
 
-
 #ifdef __cplusplus
 	extern "C" {
 #endif
@@ -83,7 +82,7 @@ and all of the stdout and stderr output is piped into pOut.
 When the command isn't executable, BMA_FALSE is returned.
 The function blocks until the sub process is terminated.
 \param pCmd The command which is the executable followed by all of its arguments. The first argument is the executable itself.
-       Single arguments are separated by whitespace and can by escaped by putting double quotes around them, so
+       Single arguments are separated by whitespace and can be escaped by putting double quotes around them, so
        a string 'cmd arg1 "escaped arg 2"' yields two arguments for cmd, the first being "arg1" and
        the second "escaped arg 2". The first item is the executable name which is either an absolute path or, if only
        a name is specified, looked-up using PATH (POSIX) or the default search paths for CreateProcessW() (Windows)
@@ -94,8 +93,8 @@ The function blocks until the sub process is terminated.
        Also, on Windows, any CRLF sequence is converted to LF to match the C programming language better.
 \param pEnv If passed, the new command is executed with that set of environment variables. If NULL, the
        environment of the parent (current process) is used. Searching for the command though is not done with
-       the passed environment but always using the PATH of the current running process, so pEnv is soley for
-       the new process.
+       the passed environment but always using the PATH of the current running process, so pEnv is only used
+       after the executable had been resolved and the process is started.
 \return BMA_TRUE when the command was executed and terminated, BMA_FALSE when the command
 */
 BMA_DEF bma_bool_t bma_runCmd_ext(const char *pCmd, int *pExitCode, bma_StrBldr *pOut, bma_Env *pEnv);

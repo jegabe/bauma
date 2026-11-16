@@ -305,7 +305,9 @@ BMA_DEF void bma_Env_ensureCap(bma_Env *pEnv, size_t minCap) {
 	bma_IMemAlloc *pAlloc;
 	wchar_t *pOld, *pNew;
 	size_t realSz = 0;
-	if (minCap <= pEnv->cap) return BMA_TRUE;
+	if (minCap <= pEnv->cap) {
+		return;
+	}
 	pAlloc = bma_getDfltMemAlloc();
 	if (pEnv->pEnvBlock == BMA_ENV_NULLSTR) {
 		pOld = NULL;
@@ -674,11 +676,13 @@ BMA_DEF bma_bool_t bma_runCmd_ext(const char *pCmd, int *pExitCode, bma_StrBldr 
 	SECURITY_ATTRIBUTES sa;
 	HANDLE hRead = NULL;
 	HANDLE hWrite = NULL;
-	DWORD bytesRead, exitCode;
+	DWORD bytesRead, exitCode, needed;
 	STARTUPINFOW si;
 	PROCESS_INFORMATION pi;
 	wchar_t* pWcmdLn = NULL;
 	wchar_t *pWide = NULL;
+	wchar_t* pApplNm = NULL;
+	wchar_t* pAppPth = NULL;
 	bma_IMemAlloc *pAlloc = bma_StrBldr_getAlloc(pOut);
 	bma_StrBldr raw;
 	bma_assert(pCmd != NULL);
@@ -705,13 +709,45 @@ BMA_DEF bma_bool_t bma_runCmd_ext(const char *pCmd, int *pExitCode, bma_StrBldr 
 	si.hStdError = hWrite;
 	si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
 	pWcmdLn = bma_strWdup_ext(pCmd, pAlloc);
-	if (!CreateProcessW(NULL,
+	if (pWcmdLn[0] == L'"') {
+		wchar_t *pEnd;
+		size_t appNmLen;
+		pEnd = wcschr(pWcmdLn+1, L'"');
+		if (pEnd == NULL) {
+			goto out;
+		}
+		appNmLen = (size_t)(pEnd - (pWcmdLn + 1));
+		pApplNm = (*pAlloc->pRllc)(pAlloc, NULL, (appNmLen + 1U) * sizeof(wchar_t), NULL);
+		memcpy(pApplNm, pWcmdLn + 1, appNmLen*sizeof(wchar_t));
+		pApplNm[appNmLen] = L'\0';
+	}
+	else {
+		wchar_t *pEnd;
+		size_t appNmLen;
+		pEnd = wcschr(pWcmdLn, L' ');
+		if (pEnd == NULL) {
+			appNmLen = wcslen(pWcmdLn);
+		}
+		else {
+			appNmLen = (size_t)(pEnd - pWcmdLn);
+		}
+		pApplNm = (*pAlloc->pRllc)(pAlloc, NULL, (appNmLen + 1U) * sizeof(wchar_t), NULL);
+		memcpy(pApplNm, pWcmdLn, appNmLen*sizeof(wchar_t));
+		pApplNm[appNmLen] = L'\0';
+	}
+	needed = SearchPathW(NULL, pApplNm, L".exe", 0, NULL, NULL);
+	if (needed == 0) {
+		goto out;
+	}
+	pAppPth = (*pAlloc->pRllc)(pAlloc, NULL, needed * sizeof(wchar_t), NULL);
+	(void)SearchPathW(NULL, pApplNm, L".exe", needed, pAppPth, NULL);
+	if (!CreateProcessW(pAppPth,
 	                    pWcmdLn,
 	                    NULL,
 	                    NULL,
 	                    TRUE,
-	                    0,
-	                    NULL,
+	                    (pEnv != NULL) ? CREATE_UNICODE_ENVIRONMENT : 0,
+	                    (pEnv != NULL) ? pEnv->pEnvBlock : NULL,
 	                    NULL,
 	                    &si,
 	                    &pi)) {
@@ -773,6 +809,8 @@ BMA_DEF bma_bool_t bma_runCmd_ext(const char *pCmd, int *pExitCode, bma_StrBldr 
 	}
 	result = BMA_TRUE;
 out:
+	bma_free_ext(pAlloc, pAppPth);
+	bma_free_ext(pAlloc, pApplNm);
 	bma_free_ext(pAlloc, pWide);
 	bma_StrBldr_dtor(&raw, NULL);
 	bma_free_ext(pAlloc, pWcmdLn);
@@ -1049,24 +1087,39 @@ void test_lkupExeUsngPth(void) {
 	bma_StrBldr_dtor(&exePath, NULL);
 }
 
+#endif
+
 void test_runCmdCustomEnv(void) {
 	bma_Env env;
 	bma_StrBldr out;
 	int exitCode = 0;
 	bma_Env_ctor(&env);
 	bma_StrBldr_ctor(&out);
+#if BMA_IS_WINDOWS
+	bma_Env_set(&env, "PATH", "C:\\path\\used\\only\\by\\the\\child");
+#else
 	bma_Env_set(&env, "PATH", "/path/used/only/by/the/child");
+#endif
 	bma_Env_set(&env, "BMA_PROC_TEST_MARKER", "present");
+#if BMA_IS_WINDOWS
+	BMA_EXPECT(bma_runCmd_ext("cmd /C set", &exitCode, &out, &env));
+#else
 	BMA_EXPECT(bma_runCmd_ext("env", &exitCode, &out, &env));
+#endif
 	BMA_EXPECT(exitCode == 0);
 	BMA_EXPECT(strstr(
 		bma_StrBldr_getStr(&out), "BMA_PROC_TEST_MARKER=present") != NULL);
+#if BMA_IS_WINDOWS
+	BMA_EXPECT(strstr(
+		bma_StrBldr_getStr(&out), "PATH=C:\\path\\used\\only\\by\\the\\child") != NULL);
+#else
 	BMA_EXPECT(strstr(
 		bma_StrBldr_getStr(&out), "PATH=/path/used/only/by/the/child") != NULL);
+#endif
 	bma_StrBldr_dtor(&out, NULL);
 	bma_Env_dtor(&env, NULL);
 }
-#endif
+
 
 #if BMA_IS_WINDOWS
 void test_envWindowsSorted(void) {
@@ -1197,8 +1250,8 @@ int main(int argc, char *argv[]) {
 	BMA_TEST(test_envGetSet);
 #if BMA_IS_POSIX
 	BMA_TEST(test_lkupExeUsngPth);
-	BMA_TEST(test_runCmdCustomEnv);
 #endif
+	BMA_TEST(test_runCmdCustomEnv);
 #if BMA_IS_WINDOWS
 	BMA_TEST(test_envWindowsSorted);
 #endif

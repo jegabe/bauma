@@ -543,6 +543,50 @@ but where a valid null terminated string is needed in any case.
 */
 BMA_DEF const char *bma_getStr(const char *pStr);
 
+#if BMA_IS_WINDOWS
+
+/*!
+\brief Calculates the buffers size needed to encode the passed
+UTF-16 string into a UTF-8 encoded buffer, without the terminating
+'\0'. Can be used to pre-determine the needed buffer size for
+a later conversion.
+Since Windows is very UTF-16 centric and we use UTF-8 in this
+library, having such a function to quickly calculate is useful.
+*/
+BMA_DEF size_t bma_utf16ToUtf8Len(const wchar_t* pUtf16);
+
+
+/*!
+\brief Calculates the buffer size needed to encode the passed UTF-8 string into
+a UTF-16 encoded buffer, without the terminating '\0'.
+Can be used to prepare for WinAPI calls which are natively UTF-16.
+\param pUtf8 A null-terminated UTF-8 string
+\return The size of the buffer needed for the UTF-16 encoded string
+*/
+BMA_DEF size_t bma_utf8ToUtf16Len(const char* pUtf8);
+
+/*!
+\brief Converts UTF-16 into UTF-8, e.g. to convert the result of WinAPI
+functions. The buffer size must be big enough to also hold the terminating
+'\0' character, i.e. at least bma_utf16ToUtf8Len(pUtf16) + 1.
+Unpaired surrogates are replaced by U+FFFD.
+\return BMA_FALSE if the buffer is too small; then an empty string is
+written to pUtf8 (if utf8BufSize > 0).
+*/
+BMA_DEF bma_bool_t bma_utf16ToUtf8(char* pUtf8, size_t utf8BufSize, const wchar_t* pUtf16);
+
+/*!
+\brief Converts UTF-8 into UTF-16, e.g. to prepare strings for WinAPI calls.
+The buffer size must be big enough to also hold the terminating '\0' character,
+i.e. at least bma_utf8ToUtf16Len(pUtf8) + 1.
+Each byte not being part of a well-formed UTF-8 sequence is replaced by U+FFFD.
+\return BMA_FALSE if the buffer is too small; then an empty string is
+written to pUtf16 (if utf16BufSize > 0).
+*/
+BMA_DEF bma_bool_t bma_utf8ToUtf16(wchar_t* pUtf16, size_t utf16BufSize, const char* pUtf8);
+
+#endif /* BMA_IS_WINDOWS */
+
 /*!
 \brief Checks if all bytes in a field are zero.
 */
@@ -923,10 +967,50 @@ BMA_DEF void bma_StrBldr_appndUnsgnd(bma_StrBldr *pSelf, bma_uintmax_t i);
 BMA_DEF void bma_StrBldr_appndDbl(bma_StrBldr *pSelf, double d);
 BMA_DEF void bma_StrBldr_appndBool(bma_StrBldr *pSelf, bma_bool_t b);
 BMA_DEF void bma_StrBldr_appndCdPntUtf8(bma_StrBldr *pSelf, unsigned long cdPnt);
+#if BMA_IS_WINDOWS
+BMA_DEF void bma_StrBldr_appndUtf16(bma_StrBldr *pSelf, const wchar_t *p);
+#endif
+
 BMA_DEF void bma_StrBldr_clear(bma_StrBldr *pSelf);
 BMA_DEF bma_bool_t bma_StrBldr_strtsWth(bma_StrBldr *pSelf, const char* pStr);
 BMA_DEF bma_bool_t bma_StrBldr_endsWth(bma_StrBldr *pSelf, const char* pStr);
 BMA_DEF void bma_StrBldr_rplc(bma_StrBldr *pSelf, const char* pFrom, const char *pTo);
+
+#if BMA_IS_WINDOWS
+
+typedef struct bma_Utf16StrBldr {
+	wchar_t *pStr;
+	size_t size; /* not counting the null terminator */
+	size_t cap;
+	bma_IMemAlloc *pAlloc;
+} bma_Utf16StrBldr;
+
+BMA_DEF void bma_Utf16StrBldr_ctor_ext(bma_Utf16StrBldr *pSelf, bma_IMemAlloc *pAlloc);
+#define bma_Utf16StrBldr_ctor(pSelf) bma_Utf16StrBldr_ctor_ext((pSelf), bma_getDfltMemAlloc())
+BMA_DEF void bma_Utf16StrBldr_dtor(bma_Utf16StrBldr *pSelf, bma_IMemAlloc *pAlloc);
+#define bma_Utf16StrBldr_getUtf16Str(pSelf) ((const wchar_t* const)((pSelf)->pStr))
+#define bma_Utf16StrBldr_getAlloc(pSelf) ((bma_IMemAlloc* const)((pSelf)->pAlloc))
+
+#if BMA_DBG
+	BMA_DEF wchar_t bma_Utf16StrBldr_at_impl_D(bma_Utf16StrBldr *pSelf, size_t index);
+	#define bma_Utf16StrBldr_at(pSelf, index) \
+		bma_Utf16StrBldr_at_impl_D(pSelf, index)
+#else
+	#define bma_Utf16StrBldr_at(pSelf, index) \
+		((const wchar_t)(pSelf)->pStr[index])
+#endif
+
+#define bma_Utf16StrBldr_getSz(pSelf) ((const size_t)((pSelf)->size))
+BMA_DEF wchar_t *bma_Utf16StrBldr_rlse(bma_Utf16StrBldr *pSelf);
+BMA_DEF void bma_Utf16StrBldr_rsrv(bma_Utf16StrBldr *pSelf, size_t num);
+BMA_DEF void bma_Utf16StrBldr_rsz(bma_Utf16StrBldr *pSelf, size_t newSz);
+BMA_DEF void bma_Utf16StrBldr_appndStr(bma_Utf16StrBldr *pSelf, const char *p);
+BMA_DEF void bma_Utf16StrBldr_appndUtf16Str(bma_Utf16StrBldr *pSelf, const wchar_t *p);
+BMA_DEF void bma_Utf16StrBldr_clear(bma_Utf16StrBldr *pSelf);
+BMA_DEF bma_bool_t bma_Utf16StrBldr_strtsWthUtf16(bma_Utf16StrBldr *pSelf, const wchar_t* pStr);
+BMA_DEF bma_bool_t bma_Utf16StrBldr_endsWthUtf16(bma_Utf16StrBldr *pSelf, const wchar_t* pStr);
+
+#endif /* BMA_IS_WINDOWS */
 
 typedef struct bma_StrTreeNodeHdr_ bma_StrTreeNodeHdr_;
 
@@ -1047,6 +1131,9 @@ BMA_DEF bma_bool_t bma_StrTree_rmv_impl(
 #include <stdarg.h> /* for variadic functions */
 #include <stdlib.h>
 #include <stdio.h>
+#if BMA_IS_WINDOWS
+	#include <wchar.h> /* for wcslen */
+#endif
 
 #ifdef bma_ccal_cstm_assert
 	#define bma_assert(x) bma_ccal_cstm_assert(x)
@@ -1366,13 +1453,194 @@ BMA_DEF void bma_trmWhtSpc(char *pStr) {
 	}
 }
 
-
 BMA_DEF const char *bma_getStr(const char *pStr) {
 	if (pStr != NULL) {
 		return pStr;
 	}
 	return "";
 }
+
+#if BMA_IS_WINDOWS
+
+BMA_DEF size_t bma_utf16ToUtf8Len(const wchar_t* pUtf16) {
+	size_t len = 0;
+	unsigned int c;
+	bma_assert(pUtf16 != NULL);
+	for (; (c = (unsigned int)*pUtf16) != 0u; ++pUtf16) {
+		if (c < 0x80u) {
+			len += 1u;
+		} else if (c < 0x800u) {
+			len += 2u;
+		} else if (((c - 0xD800u) < 0x400u) &&
+		           (((unsigned int)pUtf16[1] - 0xDC00u) < 0x400u)) {
+			/* Valid surrogate pair (high followed by low) -> 4 byte sequence.
+			   Reading pUtf16[1] is safe, as c != '\0'. */
+			len += 4u;
+			++pUtf16;
+		} else {
+			/* BMP code point; unpaired surrogates are counted as 3 bytes,
+			   which matches both U+FFFD replacement and WTF-8 encoding */
+			len += 3u;
+		}
+	}
+	return len;
+}
+
+/* Decodes one code point from a UTF-8 string (*p must not be '\0') and
+   returns the number of bytes consumed.
+   Validates according to Unicode "Well-Formed UTF-8 Byte Sequences"
+   (rejects overlongs, surrogates and code points > U+10FFFF).
+   A byte not being the start of a well-formed sequence is decoded as
+   U+FFFD and consumes exactly one byte.
+   The && chains never read past the terminator, as '\0' is no
+   continuation byte. */
+BMA_DEF size_t bma_utf8DecImpl(const unsigned char* p, unsigned long* pCp) {
+	unsigned int c = p[0], lo, hi;
+	if (c < 0x80u) {
+		*pCp = c;
+		return 1u;
+	}
+	if ((c >= 0xC2u) && (c <= 0xDFu)) {
+		if ((p[1] & 0xC0u) == 0x80u) {
+			*pCp = ((unsigned long)(c & 0x1Fu) << 6) | (p[1] & 0x3Fu);
+			return 2u;
+		}
+	} else if ((c >= 0xE0u) && (c <= 0xEFu)) {
+		lo = (c == 0xE0u) ? 0xA0u : 0x80u;
+		hi = (c == 0xEDu) ? 0x9Fu : 0xBFu;
+		if ((p[1] >= lo) && (p[1] <= hi) && ((p[2] & 0xC0u) == 0x80u)) {
+			*pCp = ((unsigned long)(c & 0x0Fu) << 12) |
+			       ((unsigned long)(p[1] & 0x3Fu) << 6) | (p[2] & 0x3Fu);
+			return 3u;
+		}
+	} else if ((c >= 0xF0u) && (c <= 0xF4u)) {
+		lo = (c == 0xF0u) ? 0x90u : 0x80u;
+		hi = (c == 0xF4u) ? 0x8Fu : 0xBFu;
+		if ((p[1] >= lo) && (p[1] <= hi) &&
+		    ((p[2] & 0xC0u) == 0x80u) && ((p[3] & 0xC0u) == 0x80u)) {
+			*pCp = ((unsigned long)(c & 0x07u) << 18) |
+			       ((unsigned long)(p[1] & 0x3Fu) << 12) |
+			       ((unsigned long)(p[2] & 0x3Fu) << 6) | (p[3] & 0x3Fu);
+			return 4u;
+		}
+	}
+	*pCp = 0xFFFDul;
+	return 1u;
+}
+
+BMA_DEF size_t bma_utf8ToUtf16Len(const char* pUtf8) {
+	const unsigned char* p = (const unsigned char*)pUtf8;
+	size_t len = 0;
+	unsigned long cp;
+	bma_assert(pUtf8 != NULL);
+	while (*p != 0u) {
+		if (*p < 0x80u) {
+			len += 1u;
+			p += 1;
+		} else {
+			p += bma_utf8DecImpl(p, &cp);
+			/* Supplementary plane -> surrogate pair */
+			len += (cp < 0x10000ul) ? 1u : 2u;
+		}
+	}
+	return len;
+}
+
+BMA_DEF bma_bool_t bma_utf16ToUtf8(char* pUtf8, size_t utf8BufSize, const wchar_t* pUtf16) {
+	unsigned char* q = (unsigned char*)pUtf8;
+	size_t rem, n;
+	unsigned long cp;
+	unsigned int c, c2;
+	bma_assert(pUtf8 != NULL);
+	bma_assert(pUtf16 != NULL);
+	if (utf8BufSize == 0u) {
+		return BMA_FALSE;
+	}
+	rem = utf8BufSize - 1u; /* Reserve space for '\0' */
+	for (; (c = (unsigned int)*pUtf16) != 0u; ++pUtf16) {
+		cp = c;
+		if (c < 0x80u) {
+			n = 1u;
+		} else if (c < 0x800u) {
+			n = 2u;
+		} else if ((c - 0xD800u) < 0x800u) {
+			c2 = (unsigned int)pUtf16[1];
+			if ((c < 0xDC00u) && ((c2 - 0xDC00u) < 0x400u)) {
+				cp = 0x10000ul + ((unsigned long)(c - 0xD800u) << 10) + (c2 - 0xDC00u);
+				n = 4u;
+				++pUtf16;
+			} else {
+				/* Unpaired surrogate */
+				cp = 0xFFFDul;
+				n = 3u;
+			}
+		} else {
+			n = 3u;
+		}
+		if (n > rem) {
+			*pUtf8 = '\0';
+			return BMA_FALSE;
+		}
+		rem -= n;
+		switch (n) {
+		case 1u:
+			q[0] = (unsigned char)cp;
+			break;
+		case 2u:
+			q[0] = (unsigned char)(0xC0u | (cp >> 6));
+			q[1] = (unsigned char)(0x80u | (cp & 0x3Fu));
+			break;
+		case 3u:
+			q[0] = (unsigned char)(0xE0u | (cp >> 12));
+			q[1] = (unsigned char)(0x80u | ((cp >> 6) & 0x3Fu));
+			q[2] = (unsigned char)(0x80u | (cp & 0x3Fu));
+			break;
+		default:
+			q[0] = (unsigned char)(0xF0u | (cp >> 18));
+			q[1] = (unsigned char)(0x80u | ((cp >> 12) & 0x3Fu));
+			q[2] = (unsigned char)(0x80u | ((cp >> 6) & 0x3Fu));
+			q[3] = (unsigned char)(0x80u | (cp & 0x3Fu));
+			break;
+		}
+		q += n;
+	}
+	*q = '\0';
+	return BMA_TRUE;
+}
+
+BMA_DEF bma_bool_t bma_utf8ToUtf16(wchar_t* pUtf16, size_t utf16BufSize, const char* pUtf8) {
+	const unsigned char* p = (const unsigned char*)pUtf8;
+	wchar_t* q = pUtf16;
+	size_t rem, n;
+	unsigned long cp;
+	bma_assert(pUtf16 != NULL);
+	bma_assert(pUtf8 != NULL);
+	if (utf16BufSize == 0u) {
+		return BMA_FALSE;
+	}
+	rem = utf16BufSize - 1u; /* Reserve space for '\0' */
+	while (*p != 0u) {
+		p += bma_utf8DecImpl(p, &cp);
+		n = (cp < 0x10000ul) ? 1u : 2u;
+		if (n > rem) {
+			*pUtf16 = L'\0';
+			return BMA_FALSE;
+		}
+		rem -= n;
+		if (n == 1u) {
+			q[0] = (wchar_t)cp;
+		} else {
+			cp -= 0x10000ul;
+			q[0] = (wchar_t)(0xD800ul + (cp >> 10));
+			q[1] = (wchar_t)(0xDC00ul + (cp & 0x3FFul));
+		}
+		q += n;
+	}
+	*q = L'\0';
+	return BMA_TRUE;
+}
+
+#endif /* BMA_IS_WINDOWS */
 
 BMA_DEF size_t bma_printfSz(const char* pFmt, va_list args) {
 #if BMA_MDRN_C
@@ -2222,6 +2490,27 @@ BMA_DEF void bma_StrBldr_appndCdPntUtf8(bma_StrBldr *pSelf, unsigned long cdPnt)
 	bma_StrBldr_appndStrN(pSelf, (const char*)&c[0], l);
 }
 
+#if BMA_IS_WINDOWS
+
+BMA_DEF void bma_StrBldr_appndUtf16(bma_StrBldr *pSelf, const wchar_t *p) {
+	size_t len;
+	bma_bool_t rslt;
+	bma_assert(pSelf != NULL);
+	bma_assert(pSelf->pAlloc != NULL);
+	bma_assert(p != NULL);
+	if (*p == L'\0') return;
+	len = bma_utf16ToUtf8Len(p);
+	bma_assert(len > 0);
+	bma_StrBldr_rsrv(pSelf, len);
+	rslt = bma_utf16ToUtf8(pSelf->pStr + pSelf->size, len + 1u, p);
+	bma_assert(rslt); (void)rslt;
+	pSelf->size += len;
+	pSelf->pStr[pSelf->size] = '\0';
+}
+
+#endif /* BMA_IS_WINDOWS */
+
+
 BMA_DEF void bma_StrBldr_clear(bma_StrBldr *pSelf) {
 	bma_assert(pSelf != NULL);
 	if (pSelf->cap > 0) {
@@ -2312,6 +2601,169 @@ BMA_DEF void bma_StrBldr_rplc(bma_StrBldr *pSelf, const char* pFrom, const char 
 	pSelf->cap = realNewCap - 1U;
 	pSelf->pStr[pSelf->size] = '\0';
 }
+
+#if BMA_IS_WINDOWS
+
+/* Same purpose as BMA_NULLSTR, but for bma_Utf16StrBldr */
+static const wchar_t BMA_NULLWSTR_[1] = {L'\0'};
+#define BMA_NULLWSTR ((wchar_t*)BMA_NULLWSTR_)
+
+BMA_DEF void bma_Utf16StrBldr_ctor_ext(bma_Utf16StrBldr *pSelf, bma_IMemAlloc *pAlloc) {
+	bma_assert(pSelf != NULL);
+	bma_assert(pAlloc != NULL);
+	pSelf->pStr = BMA_NULLWSTR;
+	pSelf->size = 0;
+	pSelf->cap = 0;
+	pSelf->pAlloc = pAlloc;
+}
+
+BMA_DEF void bma_Utf16StrBldr_dtor(bma_Utf16StrBldr *pSelf, bma_IMemAlloc *pAlloc) {
+	bma_assert(pSelf != NULL);
+	(void)pAlloc; /* strbldr has its own */
+	bma_assert(pSelf->pAlloc != NULL);
+	if (pSelf->pStr != BMA_NULLWSTR) {
+		bma_free_ext(pSelf->pAlloc, pSelf->pStr);
+	}
+#if BMA_DBG
+	memset(pSelf, 0xFF, sizeof(*pSelf));
+#endif
+}
+
+#if BMA_DBG
+
+BMA_DEF wchar_t bma_Utf16StrBldr_at_impl_D(bma_Utf16StrBldr *pSelf, size_t index) {
+	bma_assert(pSelf != NULL);
+	bma_assert(pSelf->pStr != NULL);
+	bma_assert(index < pSelf->size);
+	return pSelf->pStr[index];
+}
+
+#endif
+
+BMA_DEF wchar_t *bma_Utf16StrBldr_rlse(bma_Utf16StrBldr *pSelf) {
+	wchar_t *p;
+	bma_assert(pSelf != NULL);
+	bma_assert(pSelf->pStr != NULL);
+	bma_assert(pSelf->pStr[pSelf->size] == L'\0');
+	bma_assert(pSelf->pAlloc != NULL);
+	if (pSelf->pStr == BMA_NULLWSTR) {
+		/* Give client always something on the heap */
+		p = (wchar_t*)(*pSelf->pAlloc->pRllc)(pSelf->pAlloc, NULL, sizeof(wchar_t), NULL);
+		p[0] = L'\0';
+	}
+	else {
+		p = pSelf->pStr;
+		pSelf->pStr = BMA_NULLWSTR;
+	}
+	pSelf->size = 0;
+	pSelf->cap = 0;
+	return p;
+}
+
+/* Sizes passed to and returned by the allocator are in bytes, capacities in wchar_t */
+BMA_DEF void bma_Utf16StrBldr_rsrv(bma_Utf16StrBldr *pSelf, size_t num) {
+	size_t newCap;
+	size_t realNewSz;
+	bma_assert(pSelf != NULL);
+	bma_assert(pSelf->pAlloc != NULL);
+	if ((pSelf->size + num) <= (pSelf->cap)) {
+		return;
+	}
+	newCap = (pSelf->cap == 0) ? BMA_INIT_CAP : pSelf->cap;
+	while((pSelf->size + num) > newCap) {
+		newCap = bma_cap_incr(newCap);
+	}
+	if (pSelf->pStr == BMA_NULLWSTR) {
+		pSelf->pStr = (wchar_t*)(*pSelf->pAlloc->pRllc)(pSelf->pAlloc, NULL, (newCap + 1u) * sizeof(wchar_t), &realNewSz);
+		pSelf->pStr[0] = L'\0';
+	}
+	else {
+		pSelf->pStr = (wchar_t*)(*pSelf->pAlloc->pRllc)(pSelf->pAlloc, pSelf->pStr, (newCap + 1u) * sizeof(wchar_t), &realNewSz);
+	}
+	pSelf->cap = (realNewSz / sizeof(wchar_t)) - 1u;
+}
+
+BMA_DEF void bma_Utf16StrBldr_rsz(bma_Utf16StrBldr *pSelf, size_t newSz) {
+	size_t realNewSz;
+	bma_assert(pSelf != NULL);
+	bma_assert(pSelf->pAlloc != NULL);
+	if (newSz == 0) {
+		if (pSelf->pStr != BMA_NULLWSTR) {
+			bma_free_ext(pSelf->pAlloc, pSelf->pStr);
+			pSelf->pStr = BMA_NULLWSTR;
+		}
+		pSelf->size = 0;
+		pSelf->cap = 0;
+		return;
+	}
+	if (newSz <= pSelf->cap) {
+		pSelf->size = newSz;
+		pSelf->pStr[newSz] = L'\0';
+		return;
+	}
+	if (pSelf->pStr == BMA_NULLWSTR) {
+		pSelf->pStr = (wchar_t*)(*pSelf->pAlloc->pRllc)(pSelf->pAlloc, NULL, (newSz + 1u) * sizeof(wchar_t), &realNewSz);
+	}
+	else {
+		pSelf->pStr = (wchar_t*)(*pSelf->pAlloc->pRllc)(pSelf->pAlloc, pSelf->pStr, (newSz + 1u) * sizeof(wchar_t), &realNewSz);
+	}
+	pSelf->pStr[newSz] = L'\0';
+	pSelf->size = newSz;
+	pSelf->cap = (realNewSz / sizeof(wchar_t)) - 1u;
+}
+
+BMA_DEF void bma_Utf16StrBldr_appndStr(bma_Utf16StrBldr *pSelf, const char *p) {
+	size_t len;
+	bma_bool_t rslt;
+	bma_assert(pSelf != NULL);
+	bma_assert(p != NULL);
+	if (*p == '\0') return;
+	len = bma_utf8ToUtf16Len(p);
+	bma_assert(len > 0);
+	bma_Utf16StrBldr_rsrv(pSelf, len);
+	rslt = bma_utf8ToUtf16(pSelf->pStr + pSelf->size, len + 1u, p);
+	bma_assert(rslt); (void)rslt;
+	pSelf->size += len;
+}
+
+BMA_DEF void bma_Utf16StrBldr_appndUtf16Str(bma_Utf16StrBldr *pSelf, const wchar_t *p) {
+	size_t l;
+	bma_assert(pSelf != NULL);
+	bma_assert(p != NULL);
+	l = wcslen(p);
+	if (l == 0) return;
+	bma_Utf16StrBldr_rsrv(pSelf, l);
+	memcpy(pSelf->pStr + pSelf->size, p, (l + 1u) * sizeof(wchar_t));
+	pSelf->size += l;
+}
+
+BMA_DEF void bma_Utf16StrBldr_clear(bma_Utf16StrBldr *pSelf) {
+	bma_assert(pSelf != NULL);
+	if (pSelf->cap > 0) {
+		pSelf->pStr[0] = L'\0';
+		pSelf->size = 0;
+	}
+}
+
+BMA_DEF bma_bool_t bma_Utf16StrBldr_strtsWthUtf16(bma_Utf16StrBldr *pSelf, const wchar_t* pStr) {
+	size_t l;
+	bma_assert(pSelf != NULL);
+	bma_assert(pStr != NULL);
+	l = wcslen(pStr);
+	if (l > pSelf->size) return BMA_FALSE;
+	return (memcmp(pSelf->pStr, pStr, l * sizeof(wchar_t)) == 0);
+}
+
+BMA_DEF bma_bool_t bma_Utf16StrBldr_endsWthUtf16(bma_Utf16StrBldr *pSelf, const wchar_t* pStr) {
+	size_t l;
+	bma_assert(pSelf != NULL);
+	bma_assert(pStr != NULL);
+	l = wcslen(pStr);
+	if (l > pSelf->size) return BMA_FALSE;
+	return (memcmp(pSelf->pStr + pSelf->size - l, pStr, l * sizeof(wchar_t)) == 0);
+}
+
+#endif /* BMA_IS_WINDOWS */
 
 struct bma_StrTreeNodeHdr_ {
 	bma_StrTreeNodeHdr_ *pParent;
@@ -3032,6 +3484,115 @@ void test_stringBuilder_appendBool(void) {
 	bma_StrBldr_dtor(&sb, NULL);
 }
 
+#if BMA_IS_WINDOWS
+
+void test_stringBuilder_appendUtf16(void) {
+	static const wchar_t empty[] = { 0 };
+	static const wchar_t mixed[] = { 0x00E4, 0x20AC, 0xD83D, 0xDE00, 0xDE00, 0 };
+	bma_StrBldr sb;
+	bma_StrBldr_ctor(&sb);
+	bma_StrBldr_appndUtf16(&sb, empty);
+	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&sb), "") == 0);
+	bma_StrBldr_appndStr(&sb, "a");
+	bma_StrBldr_appndUtf16(&sb, mixed);
+	bma_StrBldr_appndStr(&sb, "b");
+	BMA_EXPECT(strcmp(bma_StrBldr_getStr(&sb),
+		"a\xC3\xA4\xE2\x82\xAC\xF0\x9F\x98\x80\xEF\xBF\xBD" "b") == 0);
+	BMA_EXPECT(sb.size == 14u);
+	bma_StrBldr_dtor(&sb, NULL);
+}
+
+void test_utf16StrBldr_ctorRlse(void) {
+	bma_Utf16StrBldr sb;
+	wchar_t *p;
+	bma_Utf16StrBldr_ctor(&sb);
+	BMA_EXPECT(sb.pStr == BMA_NULLWSTR);
+	BMA_EXPECT(sb.size == 0);
+	BMA_EXPECT(sb.cap == 0);
+	BMA_EXPECT(wcscmp(bma_Utf16StrBldr_getUtf16Str(&sb), L"") == 0);
+	bma_Utf16StrBldr_appndUtf16Str(&sb, L"Hello");
+	p = bma_Utf16StrBldr_rlse(&sb);
+	BMA_EXPECT(wcscmp(p, L"Hello") == 0);
+	bma_free(p);
+	BMA_EXPECT(sb.pStr == BMA_NULLWSTR);
+	BMA_EXPECT(sb.size == 0);
+	BMA_EXPECT(sb.cap == 0);
+	/* Release of empty string should heap-allocate: */
+	p = bma_Utf16StrBldr_rlse(&sb);
+	BMA_EXPECT(p != BMA_NULLWSTR);
+	BMA_EXPECT(p[0] == L'\0');
+	bma_free(p);
+	bma_Utf16StrBldr_dtor(&sb, NULL);
+}
+
+void test_utf16StrBldr_rsrvRsz(void) {
+	bma_Utf16StrBldr sb;
+	bma_Utf16StrBldr_ctor(&sb);
+	bma_Utf16StrBldr_rsrv(&sb, 1u);
+	BMA_EXPECT(sb.pStr != BMA_NULLWSTR);
+	BMA_EXPECT(sb.pStr[0] == L'\0');
+	BMA_EXPECT(sb.size == 0);
+	BMA_EXPECT(sb.cap >= BMA_INIT_CAP);
+	bma_Utf16StrBldr_appndUtf16Str(&sb, L"Hello");
+	bma_Utf16StrBldr_rsz(&sb, 2u);
+	BMA_EXPECT(wcscmp(bma_Utf16StrBldr_getUtf16Str(&sb), L"He") == 0);
+	BMA_EXPECT(bma_Utf16StrBldr_getSz(&sb) == 2u);
+	bma_Utf16StrBldr_rsz(&sb, 100u);
+	BMA_EXPECT(sb.size == 100u);
+	BMA_EXPECT(sb.cap >= 100u);
+	BMA_EXPECT(sb.pStr[100] == L'\0');
+	BMA_EXPECT(wcsncmp(sb.pStr, L"He", 2u) == 0);
+	bma_Utf16StrBldr_rsz(&sb, 0u);
+	BMA_EXPECT(sb.pStr == BMA_NULLWSTR);
+	BMA_EXPECT(sb.cap == 0);
+	bma_Utf16StrBldr_dtor(&sb, NULL);
+}
+
+void test_utf16StrBldr_append(void) {
+	static const wchar_t exp[] = { 'a', 0x00E4, 0x20AC, 0xD83D, 0xDE00, 0xFFFD, 'b', 'c', 'd', 0 };
+	bma_Utf16StrBldr sb;
+	size_t i;
+	bma_Utf16StrBldr_ctor(&sb);
+	bma_Utf16StrBldr_appndStr(&sb, "");
+	bma_Utf16StrBldr_appndUtf16Str(&sb, L"");
+	BMA_EXPECT(sb.pStr == BMA_NULLWSTR);
+	/* UTF-8 input with an invalid byte, which becomes U+FFFD */
+	bma_Utf16StrBldr_appndStr(&sb, "a\xC3\xA4\xE2\x82\xAC\xF0\x9F\x98\x80\x80" "b");
+	bma_Utf16StrBldr_appndUtf16Str(&sb, L"cd");
+	BMA_EXPECT(wcscmp(bma_Utf16StrBldr_getUtf16Str(&sb), exp) == 0);
+	BMA_EXPECT(bma_Utf16StrBldr_getSz(&sb) == 9u);
+	BMA_EXPECT(bma_Utf16StrBldr_at(&sb, 5) == 0xFFFD);
+	/* Grow beyond the initial capacity */
+	for (i = 0; i < 100u; ++i) {
+		bma_Utf16StrBldr_appndStr(&sb, "x");
+	}
+	BMA_EXPECT(sb.size == 109u);
+	BMA_EXPECT(sb.pStr[109] == L'\0');
+	BMA_EXPECT(wcsncmp(sb.pStr, exp, 9u) == 0);
+	bma_Utf16StrBldr_clear(&sb);
+	BMA_EXPECT(sb.size == 0);
+	BMA_EXPECT(wcscmp(bma_Utf16StrBldr_getUtf16Str(&sb), L"") == 0);
+	bma_Utf16StrBldr_dtor(&sb, NULL);
+}
+
+void test_utf16StrBldr_strtsEndsWth(void) {
+	bma_Utf16StrBldr sb;
+	bma_Utf16StrBldr_ctor(&sb);
+	BMA_EXPECT(bma_Utf16StrBldr_strtsWthUtf16(&sb, L""));
+	BMA_EXPECT(bma_Utf16StrBldr_endsWthUtf16(&sb, L""));
+	BMA_EXPECT(!bma_Utf16StrBldr_strtsWthUtf16(&sb, L"a"));
+	bma_Utf16StrBldr_appndStr(&sb, "Hello World");
+	BMA_EXPECT(bma_Utf16StrBldr_strtsWthUtf16(&sb, L"Hello"));
+	BMA_EXPECT(!bma_Utf16StrBldr_strtsWthUtf16(&sb, L"World"));
+	BMA_EXPECT(bma_Utf16StrBldr_endsWthUtf16(&sb, L"World"));
+	BMA_EXPECT(!bma_Utf16StrBldr_endsWthUtf16(&sb, L"Hello"));
+	BMA_EXPECT(bma_Utf16StrBldr_strtsWthUtf16(&sb, L"Hello World"));
+	BMA_EXPECT(!bma_Utf16StrBldr_endsWthUtf16(&sb, L"xHello World"));
+	bma_Utf16StrBldr_dtor(&sb, NULL);
+}
+
+#endif /* BMA_IS_WINDOWS */
+
 static void test_stringBuilder_replaceOne(const char *pIn, const char *pFrom, const char *pTo, const char *pExp) {
 	bma_StrBldr sb;
 	bma_StrBldr_ctor(&sb);
@@ -3175,6 +3736,96 @@ void test_StrTree(void) {
 	bma_StrTree_dtor(&t, NULL);
 }
 
+#if BMA_IS_WINDOWS
+
+void test_utf16ToUtf8Len(void) {
+	static const wchar_t ascii[] = { 'a', 'b', 0 };
+	static const wchar_t twoByte[] = { 0x00E4, 0x07FF, 0 };
+	static const wchar_t threeByte[] = { 0x0800, 0x20AC, 0xFFFF, 0 };
+	static const wchar_t pair[] = { 0xD83D, 0xDE00, 'x', 0 };
+	static const wchar_t loneHigh[] = { 0xD83D, 'x', 0 };
+	static const wchar_t loneHighAtEnd[] = { 0xD83D, 0 };
+	static const wchar_t loneLow[] = { 0xDE00, 0xD83D, 0 };
+	static const wchar_t empty[] = { 0 };
+	BMA_EXPECT(bma_utf16ToUtf8Len(empty) == 0u);
+	BMA_EXPECT(bma_utf16ToUtf8Len(ascii) == 2u);
+	BMA_EXPECT(bma_utf16ToUtf8Len(twoByte) == 4u);
+	BMA_EXPECT(bma_utf16ToUtf8Len(threeByte) == 9u);
+	BMA_EXPECT(bma_utf16ToUtf8Len(pair) == 5u);
+	BMA_EXPECT(bma_utf16ToUtf8Len(loneHigh) == 4u);
+	BMA_EXPECT(bma_utf16ToUtf8Len(loneHighAtEnd) == 3u);
+	BMA_EXPECT(bma_utf16ToUtf8Len(loneLow) == 6u);
+}
+
+void test_utf8ToUtf16Len(void) {
+	BMA_EXPECT(bma_utf8ToUtf16Len("") == 0u);
+	BMA_EXPECT(bma_utf8ToUtf16Len("ab") == 2u);
+	BMA_EXPECT(bma_utf8ToUtf16Len("\xC3\xA4\xDF\xBF") == 2u);        /* U+00E4 U+07FF */
+	BMA_EXPECT(bma_utf8ToUtf16Len("\xE0\xA0\x80\xE2\x82\xAC") == 2u); /* U+0800 U+20AC */
+	BMA_EXPECT(bma_utf8ToUtf16Len("\xF0\x9F\x98\x80x") == 3u);        /* U+1F600 'x' */
+	BMA_EXPECT(bma_utf8ToUtf16Len("\xF4\x8F\xBF\xBF") == 2u);         /* U+10FFFF */
+	/* Invalid: each offending byte counts as one code unit */
+	BMA_EXPECT(bma_utf8ToUtf16Len("\x80") == 1u);                     /* stray continuation */
+	BMA_EXPECT(bma_utf8ToUtf16Len("\xC0\xAF") == 2u);                 /* overlong */
+	BMA_EXPECT(bma_utf8ToUtf16Len("\xE0\x80\xAF") == 3u);             /* overlong */
+	BMA_EXPECT(bma_utf8ToUtf16Len("\xED\xA0\x80") == 3u);             /* surrogate */
+	BMA_EXPECT(bma_utf8ToUtf16Len("\xF4\x90\x80\x80") == 4u);         /* > U+10FFFF */
+	BMA_EXPECT(bma_utf8ToUtf16Len("\xF0\x9F\x98") == 3u);             /* truncated at end */
+	BMA_EXPECT(bma_utf8ToUtf16Len("\xE2\x82x") == 3u);                /* truncated mid */
+}
+
+void test_utf16ToUtf8One(const wchar_t* pIn, const char* pExp) {
+	char buf[32];
+	size_t len = bma_utf16ToUtf8Len(pIn);
+	BMA_EXPECT(len == strlen(pExp));
+	BMA_EXPECT(bma_utf16ToUtf8(buf, len + 1u, pIn));
+	BMA_EXPECT(strcmp(buf, pExp) == 0);
+	buf[0] = 'z';
+	BMA_EXPECT(!bma_utf16ToUtf8(buf, len, pIn) || (len == 0u));
+	BMA_EXPECT((len == 0u) || (buf[0] == '\0'));
+}
+
+void test_utf16ToUtf8(void) {
+	static const wchar_t empty[] = { 0 };
+	static const wchar_t mixed[] = { 'a', 0x00E4, 0x20AC, 0xD83D, 0xDE00, 0 };
+	static const wchar_t loneHigh[] = { 0xD83D, 'x', 0 };
+	static const wchar_t loneLow[] = { 0xDE00, 0xD83D, 0 };
+	char buf[4];
+	test_utf16ToUtf8One(empty, "");
+	test_utf16ToUtf8One(mixed, "a\xC3\xA4\xE2\x82\xAC\xF0\x9F\x98\x80");
+	test_utf16ToUtf8One(loneHigh, "\xEF\xBF\xBDx");
+	test_utf16ToUtf8One(loneLow, "\xEF\xBF\xBD\xEF\xBF\xBD");
+	BMA_EXPECT(!bma_utf16ToUtf8(buf, 0u, empty));
+}
+
+void test_utf8ToUtf16One(const char* pIn, const wchar_t* pExp) {
+	wchar_t buf[32];
+	size_t len = bma_utf8ToUtf16Len(pIn);
+	BMA_EXPECT(len == wcslen(pExp));
+	BMA_EXPECT(bma_utf8ToUtf16(buf, len + 1u, pIn));
+	BMA_EXPECT(wcscmp(buf, pExp) == 0);
+	buf[0] = 'z';
+	BMA_EXPECT(!bma_utf8ToUtf16(buf, len, pIn) || (len == 0u));
+	BMA_EXPECT((len == 0u) || (buf[0] == 0));
+}
+
+void test_utf8ToUtf16(void) {
+	static const wchar_t empty[] = { 0 };
+	static const wchar_t mixed[] = { 'a', 0x00E4, 0x20AC, 0xD83D, 0xDE00, 0xDBFF, 0xDFFF, 0 };
+	static const wchar_t overlong[] = { 0xFFFD, 0xFFFD, 0 };
+	static const wchar_t surrogate[] = { 0xFFFD, 0xFFFD, 0xFFFD, 0 };
+	static const wchar_t truncated[] = { 0xFFFD, 0xFFFD, 'x', 0 };
+	static const wchar_t stray[] = { 'a', 0xFFFD, 'b', 0 };
+	test_utf8ToUtf16One("", empty);
+	test_utf8ToUtf16One("a\xC3\xA4\xE2\x82\xAC\xF0\x9F\x98\x80\xF4\x8F\xBF\xBF", mixed);
+	test_utf8ToUtf16One("\xC0\xAF", overlong);
+	test_utf8ToUtf16One("\xED\xA0\x80", surrogate);
+	test_utf8ToUtf16One("\xE2\x82x", truncated);
+	test_utf8ToUtf16One("a\x80" "b", stray);
+}
+
+#endif /* BMA_IS_WINDOWS */
+
 #ifdef __cplusplus
 	} /* extern "C" */
 #endif
@@ -3207,11 +3858,24 @@ int main(int argc, char *argv[]) {
 	BMA_TEST(test_stringBuilder_appendUnsigned);
 	BMA_TEST(test_stringBuilder_appendDouble);
 	BMA_TEST(test_stringBuilder_appendBool);
+#if BMA_IS_WINDOWS
+	BMA_TEST(test_stringBuilder_appendUtf16);
+	BMA_TEST(test_utf16StrBldr_ctorRlse);
+	BMA_TEST(test_utf16StrBldr_rsrvRsz);
+	BMA_TEST(test_utf16StrBldr_append);
+	BMA_TEST(test_utf16StrBldr_strtsEndsWth);
+#endif
 	BMA_TEST(test_stringBuilder_replace);
 	BMA_TEST(test_hashMap_constructDestruct);
 	BMA_TEST(test_hashMap_putGet);
 	BMA_TEST(test_hashMap_manyElements);
 	BMA_TEST(test_StrTree);
+#if BMA_IS_WINDOWS
+	BMA_TEST(test_utf16ToUtf8Len);
+	BMA_TEST(test_utf8ToUtf16Len);
+	BMA_TEST(test_utf16ToUtf8);
+	BMA_TEST(test_utf8ToUtf16);
+#endif
 
 	printf("All tests passed.\n");
 	fflush(stdout);

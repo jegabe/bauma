@@ -273,8 +273,8 @@ BMA_DEF void bma_proc_writeExecError(int errFd, int errorCode) {
 
 #if BMA_IS_WINDOWS
 
-static const wchar_t bma_kNullStr[2] = { L'\0', L'\0' };
-#define BMA_ENV_NULLSTR ((wchar_t*)&bma_kNullStr[0])
+static const wchar_t bma_kEnvNullStr[2] = { L'\0', L'\0' };
+#define BMA_ENV_NULLSTR ((wchar_t*)&bma_kEnvNullStr[0])
 #define BMA_ENV_EXTRA_CAP 256U
 
 BMA_DEF int bma_Env_compareNames(
